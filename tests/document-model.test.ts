@@ -120,4 +120,39 @@ describe("SourceDocument", () => {
     expect(model.treeForPage(1)[0]?.children[0]?.children[0]?.text).toBe("Second");
     expect(model.warnings.join(" ")).toContain("2 页静态演示稿");
   });
+
+  it("duplicates, deletes, and sorts presentation pages with fresh stable IDs", () => {
+    const source = `<!doctype html><html><body><deck-stage width="1280" height="720">
+      <section data-editor-id="page-one" data-label="One"><h1 data-editor-id="title-one">One</h1></section>
+      <section data-editor-id="page-two" data-label="Two"><h1 data-editor-id="title-two">Two</h1></section>
+    </deck-stage></body></html>`;
+    const model = SourceDocument.parse(source, "deck.html");
+
+    const copyId = model.duplicatePage(0);
+    expect(model.pages().map(({ label }) => label)).toEqual(["One", "One Copy", "Two"]);
+    expect(copyId).toBe("page-one-copy");
+    expect(model.find("title-one-copy")?.textContent).toBe("One");
+
+    const movedIndex = model.movePage(1, 2);
+    expect(movedIndex).toBe(2);
+    expect(model.pages().map(({ id }) => id)).toEqual(["page-one", "page-two", "page-one-copy"]);
+
+    model.deletePage(1);
+    expect(model.pages().map(({ id }) => id)).toEqual(["page-one", "page-one-copy"]);
+    model.deletePage(1);
+    expect(model.pages().map(({ id }) => id)).toEqual(["page-one"]);
+    expect(() => model.deletePage(0)).toThrow(/at least one page/i);
+  });
+
+  it("keeps a one-page explicit deck editable and updates its declared size", () => {
+    const model = SourceDocument.parse(
+      `<!doctype html><html><body><deck-stage width="1280" height="720"><section data-editor-id="only-page"><h1>Only</h1></section></deck-stage></body></html>`,
+      "one-page-deck.html",
+    );
+
+    expect(model.pages()).toHaveLength(1);
+    model.setCanvas({ width: 1024, height: 768 });
+    expect(model.document.querySelector("deck-stage")?.getAttribute("width")).toBe("1024");
+    expect(model.document.querySelector("deck-stage")?.getAttribute("height")).toBe("768");
+  });
 });

@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { copyFile, readFile } from "node:fs/promises";
 import process from "node:process";
 import { chromium } from "playwright-core";
 
@@ -197,12 +197,13 @@ async function run() {
     const exportedPolygon = exportedSvg.match(/<polygon[^>]*data-editor-id="arrow-mark"[^>]*>/)?.[0] ?? "missing";
     assert(exportedSvg.includes("data-editor-scale-x"), `Polygon scaling did not synchronize to exported source code: ${JSON.stringify({ polygonAfterScale, exportedPolygon, errors })}`);
 
-    progress("importing and switching the real 23-page deck");
-    await page.locator("#file-input").setInputFiles("reference/artifacts/KernelScale_HotCarbon_Oral_Deck_fixed.html");
-    await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("page 1/23"), undefined, { timeout: 45_000 });
-    assert((await page.locator("#page-select option").count()) === 23, "The imported deck did not expose 23 editable pages.");
-    assert((await page.locator("#canvas-width").inputValue()) === "1920", "Deck width was not detected from deck-stage.");
-    assert((await page.locator("#canvas-height").inputValue()) === "1080", "Deck height was not detected from deck-stage.");
+    progress("checking Phase 4 presentation workflow");
+    await page.locator("#example-select").selectOption("deck");
+    await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("page 1/3"));
+    assert((await page.locator("#page-select option").count()) === 3, "The bundled deck did not expose three editable pages.");
+    assert((await page.locator(".page-thumbnail").count()) === 3, "The page filmstrip did not render three thumbnails.");
+    assert((await page.locator("#canvas-width").inputValue()) === "1280", "Deck width was not detected from deck-stage.");
+    assert((await page.locator("#canvas-height").inputValue()) === "720", "Deck height was not detected from deck-stage.");
     const firstPage = await page.evaluate(() => {
       const host = document.querySelector("#canvas-host");
       const active = host?.shadowRoot?.querySelector('[data-editor-preview-page-root="active"]');
@@ -214,13 +215,72 @@ async function run() {
         text: active?.textContent ?? "",
       };
     });
-    assert(firstPage.label === "Title + Opening Puzzle", `Unexpected first page label: ${firstPage.label}`);
+    assert(firstPage.label === "Opening", `Unexpected first page label: ${firstPage.label}`);
     assert(firstPage.visible === "visible" && firstPage.deckVisible === "visible", "The sanitized static deck is still hidden.");
-    assert(firstPage.text.includes("Solve the Sudoku"), "The first imported slide has no visible slide content.");
+    assert(firstPage.text.includes("source-first presentation workflow"), "The first imported slide has no visible slide content.");
+
+    const thumbnailText = await page.locator('[data-thumbnail-host="1"]').evaluate((host) => host.shadowRoot?.textContent ?? "");
+    assert(thumbnailText.includes("Refine the message"), "The second thumbnail is not a real DOM preview of page two.");
     await page.locator("#page-select").selectOption("1");
-    await page.waitForFunction(() => document.querySelector("#page-count")?.textContent === "2 / 23");
+    await page.waitForFunction(() => document.querySelector("#page-count")?.textContent === "2 / 3");
     const secondPageLabel = await page.evaluate(() => document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-preview-page-root="active"]')?.getAttribute("data-label"));
-    assert(secondPageLabel === "Why Maps Matter", `Page switching selected the wrong slide: ${secondPageLabel}`);
+    assert(secondPageLabel === "Visual editing", `Page switching selected the wrong slide: ${secondPageLabel}`);
+
+    await page.locator("#duplicate-page").click();
+    await page.waitForFunction(() => document.querySelectorAll(".page-thumbnail").length === 4);
+    assert((await page.locator("#page-select option").allTextContents()).some((label) => label.includes("Visual editing Copy")), "Duplicating a page did not add a labeled copy.");
+    assert(await page.locator('[data-page-id="demo-page-2-copy"]').count() === 1, "The duplicated page did not receive a fresh stable ID.");
+
+    await page.locator("#undo").click();
+    await page.waitForFunction(() => document.querySelectorAll(".page-thumbnail").length === 3);
+    assert((await page.locator("#page-select").inputValue()) === "1", "Undo did not restore the original active page context.");
+    await page.locator("#redo").click();
+    await page.waitForFunction(() => document.querySelectorAll(".page-thumbnail").length === 4);
+    assert(await page.locator(".page-thumbnail.is-active").getAttribute("data-page-id") === "demo-page-2-copy", "Redo did not restore the duplicated active page.");
+
+    await page.locator("#move-page-earlier").click();
+    await page.waitForFunction(() => document.querySelector(".page-thumbnail.is-active")?.getAttribute("data-page-index") === "1");
+    const sortedIds = await page.locator(".page-thumbnail").evaluateAll((items) => items.map((item) => item.getAttribute("data-page-id")));
+    assert(JSON.stringify(sortedIds) === JSON.stringify(["demo-page-1", "demo-page-2-copy", "demo-page-2", "demo-page-3"]), `Page sorting produced the wrong order: ${JSON.stringify(sortedIds)}`);
+
+    await page.locator("#delete-page").click();
+    await page.waitForFunction(() => document.querySelectorAll(".page-thumbnail").length === 3);
+    assert(await page.locator('[data-page-id="demo-page-2-copy"]').count() === 0, "Deleting a page left the copied page in the source model.");
+    await page.locator("#undo").click();
+    await page.waitForFunction(() => document.querySelectorAll(".page-thumbnail").length === 4);
+
+    await page.locator("#canvas-preset").selectOption("1024x768");
+    await page.waitForFunction(() => document.querySelector("#canvas-width")?.value === "1024" && document.querySelector("#canvas-height")?.value === "768");
+    assert((await page.locator(".cm-content").innerText()).includes('width="1024"'), "The 4:3 preset did not update deck metadata in source code.");
+
+    await page.locator("#preview-presentation").click();
+    await page.locator("#presentation-dialog").waitFor({ state: "visible" });
+    const previewFrame = page.frameLocator("#presentation-frame");
+    await previewFrame.locator("#lms-status").waitFor();
+    assert((await previewFrame.locator("#lms-status").textContent())?.startsWith("1 / 4"), "Presentation preview did not initialize all four pages.");
+    await previewFrame.locator("#lms-next").click();
+    await previewFrame.locator("#lms-status").filter({ hasText: "2 / 4" }).waitFor();
+    await page.locator("#close-presentation").click();
+
+    const slidesDownloadPromise = page.waitForEvent("download");
+    await page.locator("#export-slides").click();
+    const slidesDownload = await slidesDownloadPromise;
+    const slidesDownloadPath = await slidesDownload.path();
+    assert(slidesDownloadPath, "Standalone Slides export did not produce a local download path.");
+    const exportedSlides = await readFile(slidesDownloadPath, "utf8");
+    assert(exportedSlides.includes('content="Last Mile Studio 0.2.0"'), "Standalone Slides export has no Phase 4 generator metadata.");
+    assert(exportedSlides.includes('sandbox="allow-same-origin"'), "Standalone Slides export does not keep imported content scriptless.");
+    assert(exportedSlides.includes("demo-page-2-copy"), "Standalone Slides export lost the duplicated page order.");
+
+    const exportedHtmlPath = "/tmp/last-mile-studio-smoke-export.html";
+    await copyFile(slidesDownloadPath, exportedHtmlPath);
+    const exportedPage = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    exportedPage.on("pageerror", (error) => errors.push(`standalone export: ${error.stack ?? error.message}`));
+    await exportedPage.goto(`file://${exportedHtmlPath}`);
+    await exportedPage.locator("#lms-status").filter({ hasText: "1 / 4" }).waitFor();
+    await exportedPage.locator("#lms-next").click();
+    await exportedPage.locator("#lms-status").filter({ hasText: "2 / 4" }).waitFor();
+    await exportedPage.close();
 
     assert(errors.length === 0, `Browser runtime errors:\n${errors.join("\n")}`);
     process.stdout.write(`${JSON.stringify({
@@ -234,7 +294,12 @@ async function run() {
       svgSelection: true,
       inlineTextEditing: true,
       polygonScaling: true,
-      staticDeckPages: 23,
+      staticDeckPages: 4,
+      pageThumbnails: true,
+      pageDuplicateDeleteSort: true,
+      presentationPreview: true,
+      standaloneSlidesExport: true,
+      canvasPresets: true,
       codeCollapseReclaimsCanvas: true,
     }, null, 2)}\n`);
   } finally {

@@ -10,7 +10,7 @@ Last Mile Studio 的核心不是“做一个更大的网页生成器”，而是
 4. 标准源文件、浏览器画布和 Codex 命令之间没有隐藏的唯一真相；
 5. 导入的不可信静态内容不能执行脚本或本地命令。
 
-本阶段不建立账号、云存储、多人协作、像素编辑或多页演示模型。
+本阶段支持静态 HTML 演示稿的页面级管理，但不建立脱离源 DOM 的私有 Slide 模型，也不建立账号、云存储、多人协作或像素编辑能力。
 
 ## 数据流
 
@@ -29,6 +29,8 @@ flowchart LR
   JSON[JSON command file] --> CLI[Local CLI]
   CLI --> Commands
   Serialize --> Export[HTML / SVG / project / ZIP]
+  Model --> Presentation[Page thumbnails + preview]
+  Presentation --> Slides[Standalone HTML Slides]
 ```
 
 ## 真相来源
@@ -56,6 +58,7 @@ flowchart LR
 | `TransformController` | Moveable 事件到共享变换函数 | 文档序列化 |
 | `History` | 快照 Undo / Redo、连续操作合并 | 判断业务命令合法性 |
 | `ProjectAssets` | 内存资源、Blob URL、项目 JSON、ZIP | 云存储 |
+| `presentation.ts` | 内嵌本地资源、生成隔离预览与独立 HTML Slides | 成为新的文档真相、执行导入脚本 |
 | `SourceCodeEditor` | 代码草稿、搜索、元素定位 | 自动接受无效源码 |
 | CLI | 文件读取、命令批处理、安全写出 | 浏览器精确布局 |
 
@@ -97,6 +100,14 @@ flowchart LR
 - 手势只在结束时提交，不产生像素级历史洪水。
 
 代价是大文档的内存开销；后续可把内部实现替换为 source-location patch，而不改变 UI 命令接口。
+
+页面切换本身不创建历史项，但会更新当前历史快照的 `activePageId` 上下文。因此在某页执行复制、删除或排序后，Undo / Redo 会恢复对应页面，而不会跳到同一索引上的另一页。
+
+## 演示文稿模型
+
+多页内容仍然是规范 HTML 中的真实兄弟节点。`SourceDocument` 负责识别页面并执行复制、删除和重排；复制页面时整棵子树重新分配稳定 ID。胶片栏缩略图使用只包含活动页祖先链的安全 DOM 克隆，避免 N 页演示稿产生 N×N 个预览页面节点。
+
+演示预览和独立导出共享同一个生成路径：先从规范文档创建净化副本并内嵌已导入的本地资源，再生成一个编辑器拥有的播放外壳。实际页面位于 `sandbox="allow-same-origin"` 且不允许脚本的内层 iframe；外层只运行固定的翻页、缩放和全屏逻辑。该 HTML 是交付产物，不回写为编辑器状态。
 
 ## 代码同步与错误恢复
 

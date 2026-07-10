@@ -9,6 +9,11 @@ export interface RendererCallbacks {
   onWarning?: (message: string) => void;
 }
 
+export interface RenderOptions {
+  interactive?: boolean;
+  pruneInactivePages?: boolean;
+}
+
 const editorCss = `
   :host {
     display: block;
@@ -97,6 +102,16 @@ const staticPagesCss = `
   }
 `;
 
+const nonInteractiveCss = `
+  [data-editor-id] {
+    pointer-events: none !important;
+    cursor: default !important;
+  }
+  [data-editor-id]:hover {
+    outline: none !important;
+  }
+`;
+
 function styleElement(text: string): HTMLStyleElement {
   const style = document.createElement("style");
   style.textContent = text;
@@ -116,6 +131,20 @@ function isTextEditable(element: Element): boolean {
   if (element.children.length === 0) return true;
   const inlineTags = new Set(["a", "b", "br", "cite", "code", "em", "i", "mark", "small", "span", "strong", "sub", "sup", "tspan", "u"]);
   return Array.from(element.querySelectorAll("*")).every((child) => inlineTags.has(child.localName));
+}
+
+function cloneBodyWithPageBranch(sourceBody: HTMLElement, sourcePage: Element): HTMLElement {
+  const body = sourceBody.cloneNode(false) as HTMLElement;
+  let branch = sourcePage.cloneNode(true) as Element;
+  let ancestor = sourcePage.parentElement;
+  while (ancestor && ancestor !== sourceBody) {
+    const ancestorClone = ancestor.cloneNode(false) as Element;
+    ancestorClone.append(branch);
+    branch = ancestorClone;
+    ancestor = ancestor.parentElement;
+  }
+  body.append(branch);
+  return body;
 }
 
 export class CanvasRenderer {
@@ -138,19 +167,20 @@ export class CanvasRenderer {
     this.callbacks = callbacks;
   }
 
-  render(model: SourceDocument, assets: ProjectAssets, sourcePath: string, activePageId?: string): void {
+  render(model: SourceDocument, assets: ProjectAssets, sourcePath: string, activePageId?: string, options: RenderOptions = {}): void {
     this.inlineFinish?.(false);
     this.model = model;
     this.assets = assets;
     this.sourcePath = sourcePath;
     this.shadow.replaceChildren();
     this.shadow.append(styleElement(editorCss));
+    if (options.interactive === false) this.shadow.append(styleElement(nonInteractiveCss));
 
-    if (model.kind === "html") this.renderHtml(model, activePageId);
+    if (model.kind === "html") this.renderHtml(model, activePageId, options.pruneInactivePages ?? false);
     else this.renderSvg(model);
   }
 
-  private renderHtml(model: SourceDocument, activePageId?: string): void {
+  private renderHtml(model: SourceDocument, activePageId?: string, pruneInactivePages = false): void {
     for (const sourceStyle of Array.from(model.document.querySelectorAll("head style"))) {
       const css = rewriteHtmlSelectors(this.assets?.rewriteCssUrls(sourceStyle.textContent ?? "", this.sourcePath) ?? (sourceStyle.textContent ?? ""));
       this.shadow.append(styleElement(css));
@@ -168,16 +198,20 @@ export class CanvasRenderer {
     }
 
     const pages = model.pages();
-    if (pages.length > 1) this.shadow.append(styleElement(staticPagesCss));
+    if (pages.length > 0) this.shadow.append(styleElement(staticPagesCss));
 
     const shell = document.createElement("div");
     shell.className = "editor-preview-shell";
-    const body = model.document.body.cloneNode(true) as HTMLBodyElement;
-    if (pages.length > 1) {
-      const resolvedActiveId = pages.some((page) => page.id === activePageId) ? activePageId : pages[0]!.id;
+    const resolvedActiveId = pages.some((page) => page.id === activePageId) ? activePageId : pages[0]?.id;
+    const sourcePage = resolvedActiveId ? model.find(resolvedActiveId) : null;
+    const body = pruneInactivePages && sourcePage
+      ? cloneBodyWithPageBranch(model.document.body, sourcePage)
+      : model.document.body.cloneNode(true) as HTMLElement;
+    if (pages.length > 0) {
       for (const page of pages) {
         const pageRoot = getElementByEditorId(body, page.id);
-        pageRoot?.setAttribute("data-editor-preview-page-root", page.id === resolvedActiveId ? "active" : "inactive");
+        if (pruneInactivePages && page.id !== resolvedActiveId) pageRoot?.remove();
+        else pageRoot?.setAttribute("data-editor-preview-page-root", page.id === resolvedActiveId ? "active" : "inactive");
       }
       const activeRoot = resolvedActiveId ? getElementByEditorId(body, resolvedActiveId) : null;
       let ancestor = activeRoot?.parentElement ?? null;

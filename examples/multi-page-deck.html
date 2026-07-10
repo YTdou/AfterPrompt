@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Last Mile Studio Phase 4 Demo</title>
+    <style>
+      :root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #17213a; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+      deck-stage:not(:defined) { visibility: hidden; }
+      deck-stage { position: relative; display: block; width: 1280px; height: 720px; overflow: hidden; background: #f5f7fc; }
+      deck-stage > section { position: absolute; inset: 0; overflow: hidden; background: #f5f7fc; }
+      .kicker { position: absolute; left: 80px; top: 64px; margin: 0; color: #5470ae; font-size: 16px; font-weight: 750; letter-spacing: .15em; text-transform: uppercase; }
+      h1 { position: absolute; left: 76px; top: 122px; width: 780px; margin: 0; font-size: 64px; line-height: 1.02; letter-spacing: -.045em; }
+      .copy { position: absolute; left: 82px; top: 330px; width: 600px; margin: 0; color: #66738e; font-size: 24px; line-height: 1.5; }
+      .number { position: absolute; right: 56px; bottom: 44px; color: rgba(38, 54, 88, .35); font-size: 18px; font-weight: 700; }
+      .orb { position: absolute; border-radius: 999px; opacity: .8; }
+      .orb.one { width: 480px; height: 480px; right: -120px; top: -90px; background: linear-gradient(145deg, #bdd0ff, #d9c8ff); }
+      .hero { position: absolute; right: 86px; top: 128px; width: 470px; height: 326px; object-fit: cover; border-radius: 30px; box-shadow: 0 28px 70px rgba(38, 58, 106, .2); }
+      .metric { position: absolute; left: 82px; top: 470px; padding: 24px 30px; border-radius: 22px; background: #172653; color: white; }
+      .metric strong { display: block; color: #82e2bf; font-size: 48px; letter-spacing: -.04em; }
+      .metric span { color: #dfe7f8; font-size: 16px; }
+      .closing { color: white; background: #172653; }
+      .closing h1 { color: white; }
+      .closing .copy { color: #c9d5ee; }
+      .closing .orb { width: 600px; height: 600px; right: -180px; bottom: -320px; background: radial-gradient(circle at 35% 30%, #5e88ff, #694bc0); opacity: .72; }
+    </style>
+    <script>customElements.define("deck-stage", class extends HTMLElement {});</script>
+  </head>
+  <body data-editor-id="demo-document">
+    <deck-stage data-editor-id="demo-deck" width="1280" height="720">
+      <section data-editor-id="demo-page-1" data-label="Opening">
+        <div data-editor-id="demo-orb-1" class="orb one"></div>
+        <p data-editor-id="demo-kicker-1" class="kicker">Last Mile Studio</p>
+        <h1 data-editor-id="demo-title-1">A source-first presentation workflow</h1>
+        <p data-editor-id="demo-copy-1" class="copy">Edit real HTML and SVG nodes, then present the result without rebuilding the deck.</p>
+        <span data-editor-id="demo-number-1" class="number">01</span>
+      </section>
+      <section data-editor-id="demo-page-2" data-label="Visual editing">
+        <p data-editor-id="demo-kicker-2" class="kicker">Visual editing</p>
+        <h1 data-editor-id="demo-title-2">Refine the message, not the whole artifact</h1>
+        <img data-editor-id="demo-image-2" class="hero" src="assets/energy-illustration.svg" alt="GPU energy illustration" />
+        <div data-editor-id="demo-metric-2" class="metric"><strong>1 file</strong><span>for editing, preview, and delivery</span></div>
+        <span data-editor-id="demo-number-2" class="number">02</span>
+      </section>
+      <section data-editor-id="demo-page-3" data-label="Closing" class="closing">
+        <div data-editor-id="demo-orb-3" class="orb"></div>
+        <p data-editor-id="demo-kicker-3" class="kicker">Ready to present</p>
+        <h1 data-editor-id="demo-title-3">From AI draft to human-controlled final</h1>
+        <p data-editor-id="demo-copy-3" class="copy">The exported deck remains a standard, independently playable HTML document.</p>
+        <span data-editor-id="demo-number-3" class="number">03</span>
+      </section>
+    </deck-stage>
+  </body>
+</html>

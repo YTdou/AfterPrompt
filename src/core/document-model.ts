@@ -1,5 +1,5 @@
 import { applyEditorCommand, buildStructureSummary, summarizeElement } from "./commands";
-import { allEditableElements, ensureStableIds, getElementByEditorId, isEditableElement } from "./ids";
+import { assignFreshIds, allEditableElements, ensureStableIds, getElementByEditorId, isEditableElement } from "./ids";
 import { sanitizeDocument } from "./sanitizer";
 import type {
   Bounds,
@@ -55,7 +55,7 @@ function uniqueElements(elements: Element[]): Element[] {
   return elements.filter((element, index) => elements.indexOf(element) === index);
 }
 
-function detectPageElements(document: Document, kind: DocumentKind): Element[] {
+export function detectPageElements(document: Document, kind: DocumentKind): Element[] {
   if (kind !== "html" || !document.body) return [];
   const selectors = [
     "deck-stage > section",
@@ -65,7 +65,7 @@ function detectPageElements(document: Document, kind: DocumentKind): Element[] {
   ];
   for (const selector of selectors) {
     const candidates = uniqueElements(Array.from(document.body.querySelectorAll(selector)));
-    if (candidates.length > 1) return candidates;
+    if (candidates.length > 0) return candidates;
   }
 
   const directCandidates = Array.from(document.body.children).filter((element) =>
@@ -160,6 +160,11 @@ export class SourceDocument {
     } else if (this.document.body) {
       this.document.body.setAttribute("data-editor-canvas-width", String(this.canvas.width));
       this.document.body.setAttribute("data-editor-canvas-height", String(this.canvas.height));
+      const deck = this.document.body.querySelector("deck-stage, [data-editor-deck]");
+      if (deck) {
+        deck.setAttribute("width", String(this.canvas.width));
+        deck.setAttribute("height", String(this.canvas.height));
+      }
     }
   }
 
@@ -210,6 +215,46 @@ export class SourceDocument {
     return detectPageElements(this.document, this.kind)[index] ?? null;
   }
 
+  duplicatePage(index: number): string {
+    if (this.kind !== "html") throw new Error("Only HTML presentations support page duplication.");
+    const page = this.pageElement(index);
+    if (!page?.parentElement) throw new Error("The selected presentation page cannot be duplicated.");
+    const clone = page.cloneNode(true) as Element;
+    assignFreshIds(clone, this.document, this.kind);
+    const label = pageLabel(page, index);
+    clone.setAttribute("data-label", `${label} Copy`);
+    page.after(clone);
+    const id = clone.getAttribute("data-editor-id");
+    if (!id) throw new Error("Failed to assign a stable ID to the duplicated page.");
+    return id;
+  }
+
+  deletePage(index: number): string {
+    if (this.kind !== "html") throw new Error("Only HTML presentations support page deletion.");
+    const pages = detectPageElements(this.document, this.kind);
+    if (pages.length <= 1) throw new Error("A presentation must keep at least one page.");
+    const page = pages[index];
+    if (!page) throw new Error("The selected presentation page no longer exists.");
+    const id = page.getAttribute("data-editor-id") ?? "";
+    page.remove();
+    return id;
+  }
+
+  movePage(fromIndex: number, toIndex: number): number {
+    if (this.kind !== "html") throw new Error("Only HTML presentations support page sorting.");
+    const pages = detectPageElements(this.document, this.kind);
+    if (pages.length < 2) return 0;
+    const from = Math.min(Math.max(0, Math.trunc(fromIndex)), pages.length - 1);
+    const to = Math.min(Math.max(0, Math.trunc(toIndex)), pages.length - 1);
+    if (from === to) return from;
+    const page = pages[from]!;
+    const target = pages[to]!;
+    if (page.parentElement !== target.parentElement) throw new Error("Presentation pages must share one container before they can be sorted.");
+    if (from < to) target.after(page);
+    else target.before(page);
+    return detectPageElements(this.document, this.kind).indexOf(page);
+  }
+
   treeForPage(index: number): ElementTreeNode[] {
     const root = this.pageElement(index);
     return root ? [toTree(root, this.kind)] : this.tree();
@@ -229,13 +274,14 @@ export class SourceDocument {
     return allEditableElements(this.document, this.kind);
   }
 
-  snapshot(selectedIds: string[] = []): DocumentSnapshot {
+  snapshot(selectedIds: string[] = [], activePageId?: string): DocumentSnapshot {
     return {
       source: this.serialize(),
       kind: this.kind,
       canvas: { ...this.canvas },
       sourceName: this.sourceName,
       selectedIds: [...selectedIds],
+      activePageId,
     };
   }
 }

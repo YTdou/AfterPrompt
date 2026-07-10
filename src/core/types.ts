@@ -121,6 +121,7 @@ export interface DocumentSnapshot {
   canvas: CanvasSize;
   sourceName: string;
   selectedIds: string[];
+  activePageId?: string;
 }
 
 export interface ProjectAsset {
