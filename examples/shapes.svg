@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" data-editor-id="svg-root" data-editor-name="SVG canvas" width="960" height="640" viewBox="0 0 960 640">
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f2f6ff" />
+      <stop offset="1" stop-color="#e9e4ff" />
+    </linearGradient>
+  </defs>
+  <rect data-editor-id="background-rect" data-editor-name="Background" x="0" y="0" width="960" height="640" fill="url(#background)" />
+  <g data-editor-id="chart-group" data-editor-name="Chart group" transform="translate(90 90)">
+    <rect data-editor-id="card-rect" x="0" y="0" width="780" height="460" rx="34" fill="#ffffff" stroke="#cad6f2" stroke-width="2" />
+    <text data-editor-id="svg-title" data-editor-name="Title" x="55" y="86" fill="#17233f" font-family="system-ui, sans-serif" font-size="42" font-weight="700">Editable SVG energy curve</text>
+    <text data-editor-id="svg-subtitle" x="57" y="126" fill="#687695" font-family="system-ui, sans-serif" font-size="17">Every mark remains a native SVG node.</text>
+    <line data-editor-id="axis-line" x1="70" y1="370" x2="710" y2="370" stroke="#b9c7e6" stroke-width="3" />
+    <path data-editor-id="curve-path" data-editor-name="Performance curve" d="M80 342 C180 330 215 282 300 288 S440 225 505 204 S620 112 700 94" fill="none" stroke="#5b83ed" stroke-width="12" stroke-linecap="round" />
+    <circle data-editor-id="curve-point" cx="505" cy="204" r="17" fill="#70ddb4" stroke="#ffffff" stroke-width="6" />
+    <polygon data-editor-id="arrow-mark" points="690,73 735,92 698,121" fill="#8067e8" />
+  </g>
+</svg>

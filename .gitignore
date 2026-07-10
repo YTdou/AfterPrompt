@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+.vite/
+exports/
+/reference/
+/.agents/
+/.codex/
+*.log
+.DS_Store

@@ -1,0 +1,156 @@
+# JSON command API
+
+命令可以在浏览器内部共享，也可以保存为 JSON 后由 CLI 批量执行。所有目标元素通过 `data-editor-id` 定位。
+
+## CLI
+
+```bash
+npm run cli -- list <input>
+npm run cli -- get <input> <element-id>
+npm run cli -- summary <input> [--output structure.json]
+npm run cli -- validate <input>
+npm run cli -- prepare <input> --output <prepared-output>
+npm run cli -- apply <input> --commands <commands.json> (--output <output> | --in-place)
+```
+
+`input` 可以是 HTML、SVG 或 `.visual-project.json`。CLI 默认拒绝隐式覆盖源文件。
+
+## 通用更新
+
+```json
+{
+  "action": "updateElement",
+  "elementId": "title-001",
+  "changes": {
+    "x": 40,
+    "y": 20,
+    "width": 640,
+    "height": 120,
+    "rotation": 3,
+    "fontSize": 48,
+    "color": "#172033",
+    "backgroundColor": "#f4f7ff",
+    "opacity": 0.95,
+    "name": "Main title",
+    "locked": false,
+    "visible": true
+  }
+}
+```
+
+支持的 `changes`：
+
+- 几何：`x`、`y`、`width`、`height`、`rotation`、`scaleX`、`scaleY`；
+- 文本：`text`、`fontFamily`、`fontSize`、`fontWeight`、`lineHeight`、`letterSpacing`、`textAlign`、`color`；
+- 外观：`backgroundColor`、`fill`、`stroke`、`strokeWidth`、`opacity`、`borderRadius`、`boxShadow`、`filter`；
+- 结构与资源：`className`、`style`、`src`、`objectFit`、`name`、`visible`、`locked`。
+
+`x` / `y` 是编辑器组合变换的绝对平移值。若要在现有位置基础上移动，优先用 `moveElementBy`。
+
+## 文本
+
+```json
+{
+  "action": "replaceText",
+  "elementId": "title-001",
+  "text": "New Slide Title"
+}
+```
+
+该命令设置 `textContent`。对包含富文本子标签的容器，它会替换内部结构；应定位到叶子文本节点对应的元素。
+
+## 移动、缩放和旋转
+
+```json
+{ "action": "moveElement", "elementId": "image-003", "x": 100, "y": 40 }
+```
+
+```json
+{ "action": "moveElementBy", "elementId": "image-003", "dx": 100, "dy": 0 }
+```
+
+```json
+{ "action": "resizeElement", "elementId": "image-003", "width": 640, "height": 360 }
+```
+
+```json
+{ "action": "rotateElement", "elementId": "image-003", "angle": 12 }
+```
+
+SVG `rect`、`image`、`circle` 和 `ellipse` 使用原生几何属性；其他 SVG 节点的通用尺寸可能保存为编辑器尺寸元数据，并由可视交互使用缩放变换。
+
+## 样式
+
+```json
+{
+  "action": "updateStyle",
+  "elementId": "accent-block-001",
+  "style": {
+    "backgroundColor": "#244a86",
+    "border-radius": "30px",
+    "box-shadow": "0 18px 50px rgba(20, 40, 90, .25)"
+  }
+}
+```
+
+键可以使用 camelCase 或 CSS kebab-case。值为 `null` 或空字符串时删除该 inline property。
+
+## 添加与删除
+
+```json
+{
+  "action": "addElement",
+  "parentId": "slide-001",
+  "element": {
+    "id": "annotation-001",
+    "type": "text",
+    "text": "New annotation",
+    "x": 120,
+    "y": 650,
+    "width": 300,
+    "height": 60,
+    "fontSize": 28,
+    "color": "#172033"
+  }
+}
+```
+
+`type` 支持 `text`、`image`、`rect`、`circle`、`group`、`container`。可选 `tag` 可以指定实际 HTML / SVG 标签。
+
+```json
+{ "action": "deleteElement", "elementId": "icon-004" }
+```
+
+文档根节点不能删除。
+
+## 显隐、锁定与图层顺序
+
+```json
+{ "action": "setVisibility", "elementId": "note-001", "visible": false }
+```
+
+```json
+{ "action": "setLocked", "elementId": "background-001", "locked": true }
+```
+
+```json
+{ "action": "reorderElement", "elementId": "icon-001", "direction": "front" }
+```
+
+`direction` 支持 `up`、`down`、`front`、`back`，只改变同一父节点内的兄弟顺序。
+
+锁定元素拒绝除 `setLocked` 之外的命令，以避免 Codex 和用户界面绕过同一保护语义。
+
+## 批处理与失败语义
+
+命令文件可以是数组：
+
+```json
+[
+  { "action": "replaceText", "elementId": "title-001", "text": "Revised title" },
+  { "action": "moveElementBy", "elementId": "hero-image-001", "dx": 100, "dy": 0 },
+  { "action": "deleteElement", "elementId": "icon-001" }
+]
+```
+
+当前 CLI 在内存中按顺序执行；任一命令失败时不会写出输出文件。若未来需要部分成功语义，应增加显式事务选项，而不是静默跳过错误。

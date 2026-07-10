@@ -1,0 +1,25 @@
+[
+  {
+    "action": "replaceText",
+    "elementId": "title-001",
+    "text": "Energy-Aware LLM Serving"
+  },
+  {
+    "action": "moveElementBy",
+    "elementId": "hero-image-001",
+    "dx": 100,
+    "dy": 0
+  },
+  {
+    "action": "updateElement",
+    "elementId": "accent-block-001",
+    "changes": {
+      "backgroundColor": "#244a86",
+      "borderRadius": 30
+    }
+  },
+  {
+    "action": "deleteElement",
+    "elementId": "icon-001"
+  }
+]
