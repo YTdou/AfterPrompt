@@ -102,4 +102,22 @@ describe("SourceDocument", () => {
     expect(() => SourceDocument.parse("<svg><g></svg>", "broken.svg")).toThrow(/could not be parsed/i);
     expect(valid.find("svg-title")).not.toBeNull();
   });
+
+  it("recognizes a script-driven deck as static editable pages", () => {
+    const source = `<!doctype html><html><head>
+      <style>deck-stage:not(:defined){visibility:hidden}.slide{position:absolute;inset:0}</style>
+      <script>customElements.define("deck-stage", class extends HTMLElement {})</script>
+      </head><body><deck-stage width="1920" height="1080">
+        <section data-label="Opening"><div class="slide"><h1>First</h1></div></section>
+        <section data-label="Results"><div class="slide"><h1>Second</h1></div></section>
+      </deck-stage></body></html>`;
+    const model = SourceDocument.parse(source, "deck.html");
+
+    expect(model.canvas).toEqual({ width: 1920, height: 1080 });
+    expect(model.pages().map(({ label }) => label)).toEqual(["Opening", "Results"]);
+    expect(model.document.querySelector("script")).toBeNull();
+    expect(model.treeForPage(1)[0]?.name).toBe("Results");
+    expect(model.treeForPage(1)[0]?.children[0]?.children[0]?.text).toBe("Second");
+    expect(model.warnings.join(" ")).toContain("2 页静态演示稿");
+  });
 });

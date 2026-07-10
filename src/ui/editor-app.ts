@@ -24,7 +24,7 @@ import {
   ProjectAssets,
 } from "../core/project";
 import { sanitizeCss } from "../core/sanitizer";
-import type { Bounds, DocumentSnapshot, ElementTreeNode, OperationLogEntry } from "../core/types";
+import type { Bounds, DocumentPage, DocumentSnapshot, ElementTreeNode, OperationLogEntry } from "../core/types";
 import { SourceCodeEditor } from "./code-editor";
 
 function escapeHtml(value: string): string {
@@ -134,6 +134,12 @@ const appTemplate = `
             <button data-align="distribute-x" title="Distribute horizontally">横分布</button>
             <button data-align="distribute-y" title="Distribute vertically">纵分布</button>
           </div>
+          <div id="page-control" class="toolbar page-control" hidden>
+            <button id="previous-page" title="上一页 (Page Up)" aria-label="上一页">‹</button>
+            <select id="page-select" aria-label="选择要编辑的页面"></select>
+            <span id="page-count">1 / 1</span>
+            <button id="next-page" title="下一页 (Page Down)" aria-label="下一页">›</button>
+          </div>
           <div class="toolbar canvas-size-control">
             <label>W <input id="canvas-width" type="number" min="1" step="1" /></label>
             <span>×</span>
@@ -211,6 +217,7 @@ export class EditorApp {
   private zoom = 1;
   private pan = { x: 0, y: 0 };
   private codeDirty = false;
+  private activePageIndex = 0;
   private operationLog: OperationLogEntry[] = [];
   private spacePressed = false;
   private toastTimer = 0;
@@ -282,6 +289,9 @@ export class EditorApp {
     this.get("#fit-canvas").addEventListener("click", () => this.fitCanvas());
     this.get("#canvas-width").addEventListener("change", () => this.changeCanvasSize());
     this.get("#canvas-height").addEventListener("change", () => this.changeCanvasSize());
+    this.get("#previous-page").addEventListener("click", () => this.changePage(this.activePageIndex - 1));
+    this.get("#next-page").addEventListener("click", () => this.changePage(this.activePageIndex + 1));
+    this.get("#page-select").addEventListener("change", (event) => this.changePage(Number((event.target as HTMLSelectElement).value)));
 
     this.get("#layers-tree").addEventListener("click", (event) => {
       const button = (event.target as Element).closest<HTMLButtonElement>("[data-layer-id]");
@@ -327,12 +337,14 @@ export class EditorApp {
   }
 
   private renderDocument(syncCode: boolean): void {
-    this.selectedIds = this.selectedIds.filter((id) => Boolean(this.model.find(id)));
+    const pages = this.model.pages();
+    this.activePageIndex = pages.length ? Math.min(Math.max(0, this.activePageIndex), pages.length - 1) : 0;
+    this.selectedIds = this.selectedIds.filter((id) => Boolean(this.model.find(id)) && this.model.elementBelongsToPage(id, this.activePageIndex));
     this.transform.setSelection([]);
     const canvasHost = this.get("#canvas-host");
     canvasHost.style.width = `${this.model.canvas.width}px`;
     canvasHost.style.height = `${this.model.canvas.height}px`;
-    this.renderer.render(this.model, this.assets, this.sourcePath);
+    this.renderer.render(this.model, this.assets, this.sourcePath, pages[this.activePageIndex]?.id);
     this.transform.setDocumentKind(this.model.kind);
     this.updateCanvasTransform();
     this.transform.setSelection(this.selectedIds);
@@ -345,13 +357,41 @@ export class EditorApp {
     this.get<HTMLInputElement>("#canvas-width").value = String(this.model.canvas.width);
     this.get<HTMLInputElement>("#canvas-height").value = String(this.model.canvas.height);
     this.get("#code-file-name").textContent = this.model.sourceName;
-    this.get("#document-status").textContent = `${this.model.kind.toUpperCase()} · ${this.model.canvas.width} × ${this.model.canvas.height} · ${this.model.editableElements().length} elements`;
+    const pageStatus = pages.length > 1 ? ` · page ${this.activePageIndex + 1}/${pages.length}` : "";
+    this.get("#document-status").textContent = `${this.model.kind.toUpperCase()} · ${this.model.canvas.width} × ${this.model.canvas.height}${pageStatus} · ${this.model.editableElements().length} elements`;
     this.get("#undo").toggleAttribute("disabled", !this.history.canUndo);
     this.get("#redo").toggleAttribute("disabled", !this.history.canRedo);
+    this.renderPageControl(pages);
     this.renderLayers();
     this.renderInspector();
     this.renderWarnings();
     this.updateLiveSelectionStatus();
+  }
+
+  private renderPageControl(pages: DocumentPage[]): void {
+    const control = this.get("#page-control");
+    const hasPages = pages.length > 1;
+    control.hidden = !hasPages;
+    if (!hasPages) return;
+    const select = this.get<HTMLSelectElement>("#page-select");
+    select.innerHTML = pages.map((page) =>
+      `<option value="${page.index}">${page.index + 1}. ${escapeHtml(page.label)}</option>`,
+    ).join("");
+    select.value = String(this.activePageIndex);
+    this.get("#page-count").textContent = `${this.activePageIndex + 1} / ${pages.length}`;
+    this.get<HTMLButtonElement>("#previous-page").disabled = this.activePageIndex === 0;
+    this.get<HTMLButtonElement>("#next-page").disabled = this.activePageIndex === pages.length - 1;
+  }
+
+  private changePage(index: number): void {
+    const pages = this.model.pages();
+    if (pages.length < 2) return;
+    const next = Math.min(Math.max(0, Math.trunc(index)), pages.length - 1);
+    if (next === this.activePageIndex) return;
+    this.activePageIndex = next;
+    this.selectedIds = [];
+    this.renderDocument(false);
+    this.toast(`正在编辑第 ${next + 1} 页：${pages[next]!.label}`);
   }
 
   private renderWarnings(): void {
@@ -372,7 +412,7 @@ export class EditorApp {
   }
 
   private renderLayers(): void {
-    const tree = this.model.tree();
+    const tree = this.model.treeForPage(this.activePageIndex);
     const renderNode = (node: ElementTreeNode, depth: number): string => {
       const selected = this.selectedIds.includes(node.id) ? " is-selected" : "";
       const icon = node.visible ? (node.locked ? "🔒" : "◇") : "◌";
@@ -475,7 +515,7 @@ export class EditorApp {
   }
 
   private selectElement(id: string, additive: boolean): void {
-    if (!this.model.find(id)) return;
+    if (!this.model.find(id) || !this.model.elementBelongsToPage(id, this.activePageIndex)) return;
     if (additive) {
       this.selectedIds = this.selectedIds.includes(id) ? this.selectedIds.filter((selected) => selected !== id) : [...this.selectedIds, id];
     } else {
@@ -547,6 +587,7 @@ export class EditorApp {
       this.sourcePath = sourcePath;
       this.operationLog = operations.map((entry) => ({ ...entry, elementIds: [...entry.elementIds] }));
       this.selectedIds = [];
+      this.activePageIndex = 0;
       this.history.reset(model.snapshot(), "Loaded document");
       this.renderDocument(true);
       requestAnimationFrame(() => this.fitCanvas());
@@ -637,7 +678,7 @@ export class EditorApp {
   private addNewElement(type: "text" | "shape"): void {
     let parent = this.selectedIds[0] ? this.model.find(this.selectedIds[0]!) : null;
     if (parent && !["body", "div", "section", "main", "article", "svg", "g"].includes(parent.localName)) parent = parent.parentElement;
-    parent ??= this.model.kind === "html" ? this.model.document.body : this.model.document.documentElement;
+    parent ??= this.model.editingRoot(this.activePageIndex);
     const parentId = parent?.getAttribute("data-editor-id");
     if (!parentId) return;
     let createdId = "";
@@ -821,6 +862,14 @@ export class EditorApp {
       event.preventDefault();
       return;
     }
+    if (event.key === "PageUp" || event.key === "PageDown") {
+      const pages = this.model.pages();
+      if (pages.length > 1) {
+        event.preventDefault();
+        this.changePage(this.activePageIndex + (event.key === "PageUp" ? -1 : 1));
+        return;
+      }
+    }
     const modifier = event.ctrlKey || event.metaKey;
     if (modifier && event.key.toLowerCase() === "z") {
       event.preventDefault();
@@ -851,8 +900,12 @@ export class EditorApp {
 
   private applyCode(): void {
     try {
+      const activePageId = this.model.pages()[this.activePageIndex]?.id;
       const next = SourceDocument.parse(this.codeEditor.value, this.model.sourceName);
       this.model = next;
+      const nextPages = next.pages();
+      const matchingPage = activePageId ? nextPages.findIndex((page) => page.id === activePageId) : -1;
+      this.activePageIndex = matchingPage >= 0 ? matchingPage : Math.min(this.activePageIndex, Math.max(0, nextPages.length - 1));
       this.selectedIds = this.selectedIds.filter((id) => Boolean(next.find(id)));
       if (this.history.commit(next.snapshot(this.selectedIds), "Apply source code")) this.recordOperation("Apply source code", "code");
       this.get("#code-error").textContent = "";
@@ -889,8 +942,13 @@ export class EditorApp {
   private toggleCodeDrawer(): void {
     const drawer = this.get("#code-drawer");
     const collapsed = drawer.classList.toggle("is-collapsed");
+    this.get(".studio-shell").classList.toggle("is-code-collapsed", collapsed);
     this.get("#toggle-code").textContent = collapsed ? "展开代码" : "收起代码";
-    window.setTimeout(() => this.transform.update(), 220);
+    const updateCanvas = (): void => {
+      this.fitCanvas();
+      this.transform.update();
+    };
+    requestAnimationFrame(updateCanvas);
   }
 
   private exportSource(): void {

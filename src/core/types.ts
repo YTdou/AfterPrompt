@@ -22,6 +22,12 @@ export interface ElementTreeNode {
   children: ElementTreeNode[];
 }
 
+export interface DocumentPage {
+  id: string;
+  label: string;
+  index: number;
+}
+
 export interface ElementSummary {
   id: string;
   type: string;

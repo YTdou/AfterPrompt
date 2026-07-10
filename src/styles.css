@@ -57,6 +57,10 @@ textarea:focus-visible {
   background: var(--surface-0);
 }
 
+.studio-shell.is-code-collapsed {
+  grid-template-rows: 56px auto minmax(0, 1fr) 42px;
+}
+
 .topbar {
   display: flex;
   align-items: center;
@@ -366,6 +370,36 @@ button:disabled {
   padding: 5px 10px;
   border-bottom: 1px solid var(--line);
   background: #131720;
+}
+
+.page-control {
+  min-width: 250px;
+  justify-content: center;
+}
+
+.page-control[hidden] {
+  display: none;
+}
+
+.page-control select {
+  width: min(260px, 18vw);
+  height: 26px;
+  min-width: 120px;
+  padding: 2px 24px 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #0d1016;
+  color: #dce3ef;
+  font-size: 10px;
+}
+
+#page-count {
+  min-width: 42px;
+  color: var(--muted);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9px;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .canvas-toolbar button {
@@ -680,12 +714,10 @@ button:disabled {
   min-height: 0;
   border-top: 1px solid var(--line);
   background: #0d1016;
-  transition: height 180ms ease;
 }
 
 .code-drawer.is-collapsed {
-  height: 42px;
-  align-self: end;
+  grid-template-rows: 42px 0;
 }
 
 .code-drawer.is-collapsed .code-editor {
@@ -834,5 +866,13 @@ button:disabled {
 
   .toolbar-export .button:not(.primary) {
     display: none;
+  }
+
+  .page-control {
+    min-width: 160px;
+  }
+
+  .page-control select {
+    width: 130px;
   }
 }

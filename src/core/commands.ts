@@ -19,6 +19,8 @@ const transformData = {
   rotation: "data-editor-rotation",
   scaleX: "data-editor-scale-x",
   scaleY: "data-editor-scale-y",
+  scaleOriginX: "data-editor-scale-origin-x",
+  scaleOriginY: "data-editor-scale-origin-y",
   base: "data-editor-base-transform",
 } as const;
 
@@ -65,10 +67,15 @@ export function renderEditorTransform(element: Element, kind: DocumentKind, valu
   const base = element.getAttribute(transformData.base)?.trim() ?? "";
 
   if (kind === "svg") {
+    const originX = numberAttribute(element, transformData.scaleOriginX, Number.NaN);
+    const originY = numberAttribute(element, transformData.scaleOriginY, Number.NaN);
+    const scale = Number.isFinite(originX) && Number.isFinite(originY)
+      ? `translate(${originX} ${originY}) scale(${values.scaleX} ${values.scaleY}) translate(${-originX} ${-originY})`
+      : `scale(${values.scaleX} ${values.scaleY})`;
     const transform = [
       `translate(${values.x} ${values.y})`,
       `rotate(${values.rotation})`,
-      `scale(${values.scaleX} ${values.scaleY})`,
+      scale,
       base,
     ].filter(Boolean).join(" ");
     element.setAttribute("transform", transform);
@@ -99,6 +106,11 @@ export function setElementRotation(element: Element, kind: DocumentKind, rotatio
 
 export function setElementScale(element: Element, kind: DocumentKind, scaleX: number, scaleY: number): void {
   renderEditorTransform(element, kind, { ...getTransformValues(element), scaleX, scaleY });
+}
+
+export function setElementScaleOrigin(element: Element, x: number, y: number): void {
+  element.setAttribute(transformData.scaleOriginX, String(x));
+  element.setAttribute(transformData.scaleOriginY, String(y));
 }
 
 export function setElementSize(element: Element, kind: DocumentKind, width: number, height: number): void {
