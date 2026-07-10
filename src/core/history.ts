@@ -20,6 +20,10 @@ export class History<T> {
     this.current = { value, label, timestamp: Date.now() };
   }
 
+  replaceCurrent(value: T): void {
+    this.current = { ...this.current, value };
+  }
+
   commit(value: T, label: string, coalesceKey?: string): boolean {
     if (this.equals(this.current.value, value)) return false;
     const now = Date.now();

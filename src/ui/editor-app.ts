@@ -1,4 +1,5 @@
 import defaultHtml from "../../examples/ai-slide.html?raw";
+import defaultDeck from "../../examples/multi-page-deck.html?raw";
 import defaultSvg from "../../examples/shapes.svg?raw";
 import energyIllustration from "../../examples/assets/energy-illustration.svg?raw";
 import { CanvasRenderer } from "../canvas/renderer";
@@ -14,6 +15,7 @@ import {
 } from "../core/commands";
 import { snapshotsEqual, SourceDocument } from "../core/document-model";
 import { History } from "../core/history";
+import { buildStandaloneSlides } from "../core/presentation";
 import {
   createSavedProject,
   downloadBlob,
@@ -79,6 +81,7 @@ const appTemplate = `
         <label class="tool-select">示例
           <select id="example-select" aria-label="Load example">
             <option value="html">HTML Slide</option>
+            <option value="deck">Multi-page deck</option>
             <option value="svg">SVG shapes</option>
           </select>
         </label>
@@ -90,6 +93,8 @@ const appTemplate = `
         <button id="redo" class="icon-button" title="Redo (Ctrl/Cmd+Shift+Z)">↷</button>
       </div>
       <div class="toolbar toolbar-export">
+        <button id="preview-presentation" class="button">演示预览</button>
+        <button id="export-slides" class="button">导出 Slides</button>
         <button id="export-source" class="button primary">导出源文件</button>
         <button id="export-project" class="button">保存项目</button>
         <button id="export-zip" class="button">导出 ZIP</button>
@@ -141,6 +146,11 @@ const appTemplate = `
             <button id="next-page" title="下一页 (Page Down)" aria-label="下一页">›</button>
           </div>
           <div class="toolbar canvas-size-control">
+            <select id="canvas-preset" aria-label="画布尺寸预设">
+              <option value="custom">自定义</option>
+              <option value="1920x1080">16:9 · 1920×1080</option>
+              <option value="1024x768">4:3 · 1024×768</option>
+            </select>
             <label>W <input id="canvas-width" type="number" min="1" step="1" /></label>
             <span>×</span>
             <label>H <input id="canvas-height" type="number" min="1" step="1" /></label>
@@ -151,6 +161,16 @@ const appTemplate = `
             <button id="zoom-in" title="Zoom in">＋</button>
             <button id="fit-canvas">适应窗口</button>
           </div>
+        </div>
+        <div id="page-filmstrip" class="page-filmstrip" hidden>
+          <div class="page-filmstrip-actions">
+            <span class="eyebrow">PAGES</span>
+            <button id="duplicate-page" title="复制当前页">复制页</button>
+            <button id="move-page-earlier" title="向前移动当前页">← 前移</button>
+            <button id="move-page-later" title="向后移动当前页">后移 →</button>
+            <button id="delete-page" class="danger" title="删除当前页">删除页</button>
+          </div>
+          <div id="page-thumbnails" class="page-thumbnails" aria-label="页面缩略图"></div>
         </div>
         <div id="canvas-viewport" class="canvas-viewport" tabindex="0">
           <div class="canvas-grid"></div>
@@ -201,6 +221,13 @@ const appTemplate = `
         <div class="dialog-actions"><button value="cancel">取消</button><button id="apply-paste" value="default" class="button primary">载入画布</button></div>
       </form>
     </dialog>
+    <dialog id="presentation-dialog" class="presentation-dialog">
+      <div class="presentation-dialog-heading">
+        <div><span class="eyebrow">PRESENTATION</span><strong>演示预览</strong></div>
+        <button id="close-presentation" type="button" aria-label="关闭演示预览">×</button>
+      </div>
+      <iframe id="presentation-frame" title="演示预览" sandbox="allow-scripts allow-same-origin" allowfullscreen></iframe>
+    </dialog>
     <div id="toast" class="toast" hidden></div>
   </div>
 `;
@@ -225,7 +252,7 @@ export class EditorApp {
   constructor(private readonly host: HTMLElement) {
     host.innerHTML = appTemplate;
     this.model = SourceDocument.parse(defaultHtml, "ai-slide.html");
-    this.history = new History(this.model.snapshot(), snapshotsEqual);
+    this.history = new History(this.createSnapshot(), snapshotsEqual);
 
     this.renderer = new CanvasRenderer(this.get("#canvas-host"), {
       onSelect: (id, options) => this.selectElement(id, options.additive),
@@ -239,7 +266,7 @@ export class EditorApp {
       onStart: () => undefined,
       onChange: () => this.updateLiveSelectionStatus(),
       onEnd: (label) => {
-        if (this.history.commit(this.model.snapshot(this.selectedIds), label)) this.recordOperation(label, "ui");
+        if (this.history.commit(this.createSnapshot(), label)) this.recordOperation(label, "ui");
         this.renderDocument(true);
       },
     });
@@ -278,6 +305,8 @@ export class EditorApp {
 
     this.get("#undo").addEventListener("click", () => this.undo());
     this.get("#redo").addEventListener("click", () => this.redo());
+    this.get("#preview-presentation").addEventListener("click", () => this.previewPresentation());
+    this.get("#export-slides").addEventListener("click", () => this.exportSlides());
     this.get("#export-source").addEventListener("click", () => this.exportSource());
     this.get("#export-project").addEventListener("click", () => this.exportProject());
     this.get("#export-zip").addEventListener("click", () => void this.exportZip());
@@ -287,11 +316,45 @@ export class EditorApp {
     this.get("#zoom-in").addEventListener("click", () => this.setZoom(this.zoom * 1.2));
     this.get("#zoom-display").addEventListener("click", () => this.setZoom(1));
     this.get("#fit-canvas").addEventListener("click", () => this.fitCanvas());
+    this.get("#canvas-preset").addEventListener("change", (event) => this.applyCanvasPreset((event.target as HTMLSelectElement).value));
     this.get("#canvas-width").addEventListener("change", () => this.changeCanvasSize());
     this.get("#canvas-height").addEventListener("change", () => this.changeCanvasSize());
     this.get("#previous-page").addEventListener("click", () => this.changePage(this.activePageIndex - 1));
     this.get("#next-page").addEventListener("click", () => this.changePage(this.activePageIndex + 1));
     this.get("#page-select").addEventListener("change", (event) => this.changePage(Number((event.target as HTMLSelectElement).value)));
+    this.get("#duplicate-page").addEventListener("click", () => this.duplicateActivePage());
+    this.get("#delete-page").addEventListener("click", () => this.deleteActivePage());
+    this.get("#move-page-earlier").addEventListener("click", () => this.moveActivePage(-1));
+    this.get("#move-page-later").addEventListener("click", () => this.moveActivePage(1));
+
+    const thumbnails = this.get("#page-thumbnails");
+    thumbnails.addEventListener("click", (event) => {
+      const button = (event.target as Element).closest<HTMLButtonElement>("[data-page-index]");
+      if (button?.dataset.pageIndex) this.changePage(Number(button.dataset.pageIndex));
+    });
+    thumbnails.addEventListener("dragstart", (event) => {
+      const drag = event as DragEvent;
+      const button = (event.target as Element).closest<HTMLButtonElement>("[data-page-id]");
+      if (!button?.dataset.pageId || !drag.dataTransfer) return;
+      drag.dataTransfer.effectAllowed = "move";
+      drag.dataTransfer.setData("text/plain", button.dataset.pageId);
+      button.classList.add("is-dragging");
+    });
+    thumbnails.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      const drag = event as DragEvent;
+      if (drag.dataTransfer) drag.dataTransfer.dropEffect = "move";
+    });
+    thumbnails.addEventListener("drop", (event) => {
+      event.preventDefault();
+      const drop = event as DragEvent;
+      const target = (event.target as Element).closest<HTMLButtonElement>("[data-page-id]");
+      const sourceId = drop.dataTransfer?.getData("text/plain") ?? "";
+      if (sourceId && target?.dataset.pageId) this.movePageById(sourceId, target.dataset.pageId);
+    });
+    thumbnails.addEventListener("dragend", () => {
+      thumbnails.querySelectorAll(".is-dragging").forEach((element) => element.classList.remove("is-dragging"));
+    });
 
     this.get("#layers-tree").addEventListener("click", (event) => {
       const button = (event.target as Element).closest<HTMLButtonElement>("[data-layer-id]");
@@ -325,6 +388,10 @@ export class EditorApp {
       if (!id || !this.codeEditor.focusElement(id)) this.toast("未在代码中找到当前元素 ID");
     });
     this.get("#toggle-code").addEventListener("click", () => this.toggleCodeDrawer());
+    this.get("#close-presentation").addEventListener("click", () => this.get<HTMLDialogElement>("#presentation-dialog").close());
+    this.get("#presentation-dialog").addEventListener("close", () => {
+      this.get<HTMLIFrameElement>("#presentation-frame").srcdoc = "";
+    });
 
     const viewport = this.get("#canvas-viewport");
     viewport.addEventListener("wheel", (event) => this.handleWheel(event), { passive: false });
@@ -334,6 +401,11 @@ export class EditorApp {
       if (event.code === "Space") this.spacePressed = false;
     });
     window.addEventListener("resize", () => this.transform.update());
+  }
+
+  private createSnapshot(): DocumentSnapshot {
+    const activePageId = this.model.pages()[this.activePageIndex]?.id;
+    return this.model.snapshot(this.selectedIds, activePageId);
   }
 
   private renderDocument(syncCode: boolean): void {
@@ -356,9 +428,14 @@ export class EditorApp {
     }
     this.get<HTMLInputElement>("#canvas-width").value = String(this.model.canvas.width);
     this.get<HTMLInputElement>("#canvas-height").value = String(this.model.canvas.height);
+    const preset = `${this.model.canvas.width}x${this.model.canvas.height}`;
+    this.get<HTMLSelectElement>("#canvas-preset").value = ["1920x1080", "1024x768"].includes(preset) ? preset : "custom";
     this.get("#code-file-name").textContent = this.model.sourceName;
-    const pageStatus = pages.length > 1 ? ` · page ${this.activePageIndex + 1}/${pages.length}` : "";
+    const pageStatus = pages.length > 0 ? ` · page ${this.activePageIndex + 1}/${pages.length}` : "";
     this.get("#document-status").textContent = `${this.model.kind.toUpperCase()} · ${this.model.canvas.width} × ${this.model.canvas.height}${pageStatus} · ${this.model.editableElements().length} elements`;
+    const htmlPresentationAvailable = this.model.kind === "html";
+    this.get<HTMLButtonElement>("#preview-presentation").disabled = !htmlPresentationAvailable;
+    this.get<HTMLButtonElement>("#export-slides").disabled = !htmlPresentationAvailable;
     this.get("#undo").toggleAttribute("disabled", !this.history.canUndo);
     this.get("#redo").toggleAttribute("disabled", !this.history.canRedo);
     this.renderPageControl(pages);
@@ -370,9 +447,15 @@ export class EditorApp {
 
   private renderPageControl(pages: DocumentPage[]): void {
     const control = this.get("#page-control");
-    const hasPages = pages.length > 1;
+    const filmstrip = this.get("#page-filmstrip");
+    const thumbnails = this.get("#page-thumbnails");
+    const hasPages = pages.length > 0;
     control.hidden = !hasPages;
-    if (!hasPages) return;
+    filmstrip.hidden = !hasPages;
+    if (!hasPages) {
+      thumbnails.replaceChildren();
+      return;
+    }
     const select = this.get<HTMLSelectElement>("#page-select");
     select.innerHTML = pages.map((page) =>
       `<option value="${page.index}">${page.index + 1}. ${escapeHtml(page.label)}</option>`,
@@ -381,6 +464,35 @@ export class EditorApp {
     this.get("#page-count").textContent = `${this.activePageIndex + 1} / ${pages.length}`;
     this.get<HTMLButtonElement>("#previous-page").disabled = this.activePageIndex === 0;
     this.get<HTMLButtonElement>("#next-page").disabled = this.activePageIndex === pages.length - 1;
+    this.get<HTMLButtonElement>("#move-page-earlier").disabled = this.activePageIndex === 0;
+    this.get<HTMLButtonElement>("#move-page-later").disabled = this.activePageIndex === pages.length - 1;
+    this.get<HTMLButtonElement>("#delete-page").disabled = pages.length <= 1;
+
+    const scale = Math.min(142 / this.model.canvas.width, 82 / this.model.canvas.height);
+    const previewWidth = Math.max(1, this.model.canvas.width * scale);
+    const previewHeight = Math.max(1, this.model.canvas.height * scale);
+    thumbnails.innerHTML = pages.map((page) => `
+      <button class="page-thumbnail${page.index === this.activePageIndex ? " is-active" : ""}" data-page-index="${page.index}" data-page-id="${escapeHtml(page.id)}" draggable="true" title="${escapeHtml(page.label)}">
+        <span class="page-thumbnail-number">${page.index + 1}</span>
+        <span class="page-thumbnail-preview" style="width:${previewWidth.toFixed(2)}px;height:${previewHeight.toFixed(2)}px">
+          <span class="page-thumbnail-canvas" data-thumbnail-host="${page.index}" style="width:${this.model.canvas.width}px;height:${this.model.canvas.height}px;transform:scale(${scale})"></span>
+        </span>
+        <span class="page-thumbnail-label">${escapeHtml(page.label)}</span>
+      </button>
+    `).join("");
+
+    pages.forEach((page) => {
+      const host = thumbnails.querySelector<HTMLElement>(`[data-thumbnail-host="${page.index}"]`);
+      if (!host) return;
+      const renderer = new CanvasRenderer(host, {
+        onSelect: () => undefined,
+        onInlineTextCommit: () => undefined,
+      });
+      renderer.render(this.model, this.assets, this.sourcePath, page.id, { interactive: false, pruneInactivePages: true });
+    });
+    requestAnimationFrame(() => {
+      thumbnails.querySelector(".page-thumbnail.is-active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
   }
 
   private changePage(index: number): void {
@@ -390,8 +502,51 @@ export class EditorApp {
     if (next === this.activePageIndex) return;
     this.activePageIndex = next;
     this.selectedIds = [];
+    this.history.replaceCurrent(this.createSnapshot());
     this.renderDocument(false);
     this.toast(`正在编辑第 ${next + 1} 页：${pages[next]!.label}`);
+  }
+
+  private duplicateActivePage(): void {
+    let createdId = "";
+    this.commitMutation("Duplicate page", () => {
+      createdId = this.model.duplicatePage(this.activePageIndex);
+      this.activePageIndex = this.model.pages().findIndex((page) => page.id === createdId);
+      this.selectedIds = [];
+    });
+  }
+
+  private deleteActivePage(): void {
+    const pages = this.model.pages();
+    const nextPageId = pages[this.activePageIndex + 1]?.id ?? pages[this.activePageIndex - 1]?.id;
+    this.commitMutation("Delete page", () => {
+      this.model.deletePage(this.activePageIndex);
+      const remaining = this.model.pages();
+      const nextIndex = nextPageId ? remaining.findIndex((page) => page.id === nextPageId) : -1;
+      this.activePageIndex = nextIndex >= 0 ? nextIndex : Math.min(this.activePageIndex, remaining.length - 1);
+      this.selectedIds = [];
+    });
+  }
+
+  private moveActivePage(offset: -1 | 1): void {
+    const pages = this.model.pages();
+    const target = Math.min(Math.max(0, this.activePageIndex + offset), pages.length - 1);
+    if (target === this.activePageIndex) return;
+    this.commitMutation("Sort page", () => {
+      this.activePageIndex = this.model.movePage(this.activePageIndex, target);
+      this.selectedIds = [];
+    });
+  }
+
+  private movePageById(sourceId: string, targetId: string): void {
+    const pages = this.model.pages();
+    const from = pages.findIndex((page) => page.id === sourceId);
+    const to = pages.findIndex((page) => page.id === targetId);
+    if (from < 0 || to < 0 || from === to) return;
+    this.commitMutation("Sort page", () => {
+      this.activePageIndex = this.model.movePage(from, to);
+      this.selectedIds = [];
+    });
   }
 
   private renderWarnings(): void {
@@ -544,7 +699,7 @@ export class EditorApp {
     try {
       mutate();
       if (nextSelection) this.selectedIds = nextSelection;
-      if (this.history.commit(this.model.snapshot(this.selectedIds), label)) this.recordOperation(label, "ui");
+      if (this.history.commit(this.createSnapshot(), label)) this.recordOperation(label, "ui");
       this.renderDocument(true);
     } catch (error) {
       this.toast(error instanceof Error ? error.message : String(error), true);
@@ -553,6 +708,9 @@ export class EditorApp {
 
   private restore(snapshot: DocumentSnapshot): void {
     this.model = SourceDocument.parse(snapshot.source, snapshot.sourceName, snapshot.kind, snapshot.canvas);
+    const pages = this.model.pages();
+    const restoredPageIndex = snapshot.activePageId ? pages.findIndex((page) => page.id === snapshot.activePageId) : -1;
+    this.activePageIndex = restoredPageIndex >= 0 ? restoredPageIndex : Math.min(this.activePageIndex, Math.max(0, pages.length - 1));
     this.selectedIds = snapshot.selectedIds.filter((id) => Boolean(this.model.find(id)));
     this.renderDocument(true);
   }
@@ -575,6 +733,7 @@ export class EditorApp {
 
   private loadExample(kind: string): void {
     if (kind === "svg") this.loadSource(defaultSvg, "shapes.svg", "examples/shapes.svg", new ProjectAssets());
+    else if (kind === "deck") this.loadSource(defaultDeck, "multi-page-deck.html", "examples/multi-page-deck.html", exampleAssets());
     else this.loadSource(defaultHtml, "ai-slide.html", "examples/ai-slide.html", exampleAssets());
   }
 
@@ -588,7 +747,7 @@ export class EditorApp {
       this.operationLog = operations.map((entry) => ({ ...entry, elementIds: [...entry.elementIds] }));
       this.selectedIds = [];
       this.activePageIndex = 0;
-      this.history.reset(model.snapshot(), "Loaded document");
+      this.history.reset(this.createSnapshot(), "Loaded document");
       this.renderDocument(true);
       requestAnimationFrame(() => this.fitCanvas());
       this.toast(`已载入 ${sourceName}`);
@@ -795,6 +954,16 @@ export class EditorApp {
     requestAnimationFrame(() => this.fitCanvas());
   }
 
+  private applyCanvasPreset(value: string): void {
+    if (value === "custom") return;
+    const match = value.match(/^(\d+)x(\d+)$/);
+    if (!match) return;
+    const width = Number(match[1]);
+    const height = Number(match[2]);
+    this.commitMutation(`Apply ${width}:${height} canvas preset`, () => this.model.setCanvas({ width, height }));
+    requestAnimationFrame(() => this.fitCanvas());
+  }
+
   private setZoom(value: number, anchor?: { x: number; y: number }): void {
     const next = Math.min(4, Math.max(0.08, value));
     if (anchor) {
@@ -907,7 +1076,7 @@ export class EditorApp {
       const matchingPage = activePageId ? nextPages.findIndex((page) => page.id === activePageId) : -1;
       this.activePageIndex = matchingPage >= 0 ? matchingPage : Math.min(this.activePageIndex, Math.max(0, nextPages.length - 1));
       this.selectedIds = this.selectedIds.filter((id) => Boolean(next.find(id)));
-      if (this.history.commit(next.snapshot(this.selectedIds), "Apply source code")) this.recordOperation("Apply source code", "code");
+      if (this.history.commit(this.createSnapshot(), "Apply source code")) this.recordOperation("Apply source code", "code");
       this.get("#code-error").textContent = "";
       this.renderDocument(true);
       this.toast("代码已应用到画布");
@@ -949,6 +1118,30 @@ export class EditorApp {
       this.transform.update();
     };
     requestAnimationFrame(updateCanvas);
+  }
+
+  private previewPresentation(): void {
+    try {
+      const presentation = buildStandaloneSlides(this.model, this.assets, this.sourcePath);
+      if (presentation.warnings.length) this.showNotice(presentation.warnings.join(" "));
+      const frame = this.get<HTMLIFrameElement>("#presentation-frame");
+      frame.srcdoc = presentation.html;
+      this.get<HTMLDialogElement>("#presentation-dialog").showModal();
+    } catch (error) {
+      this.toast(error instanceof Error ? error.message : String(error), true);
+    }
+  }
+
+  private exportSlides(): void {
+    try {
+      const presentation = buildStandaloneSlides(this.model, this.assets, this.sourcePath);
+      const name = `${fileStem(this.model.sourceName)}-slides.html`;
+      downloadText(presentation.html, name, "text/html");
+      if (presentation.warnings.length) this.showNotice(presentation.warnings.join(" "));
+      this.toast(`已导出 ${name}`);
+    } catch (error) {
+      this.toast(error instanceof Error ? error.message : String(error), true);
+    }
   }
 
   private exportSource(): void {

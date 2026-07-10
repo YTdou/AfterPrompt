@@ -28,6 +28,15 @@ describe("History", () => {
     expect(history.redo()).toBeNull();
     expect(history.value).toBe("c");
   });
+
+  it("updates navigation context without creating an undo entry", () => {
+    const history = new History({ source: "a", page: "one" }, (left, right) => left.source === right.source);
+    history.replaceCurrent({ source: "a", page: "two" });
+    history.commit({ source: "b", page: "two" }, "Edit page two");
+
+    expect(history.undo()).toEqual({ source: "a", page: "two" });
+    expect(history.canUndo).toBe(false);
+  });
 });
 
 describe("project resource paths", () => {

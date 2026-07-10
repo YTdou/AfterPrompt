@@ -2,7 +2,7 @@
 
 Last Mile Studio 是一个面向 AI 生成 HTML、HTML Slide 和 SVG 的“最后一公里”可视化编辑器。它直接编辑真实 DOM / SVG 节点，并持续生成可读、可导出的标准源代码；没有把页面栅格化，也没有把 Canvas 状态当作唯一数据源。
 
-当前版本是可运行的 MVP（`0.1.0`），已经打通 Phase 1–3 的主链路：
+当前版本是可运行的 MVP（`0.2.0`），已经完成 Phase 1–4 的主链路：
 
 ```text
 HTML / SVG 源码 → 安全解析与稳定 ID → 真实节点画布
@@ -47,9 +47,20 @@ CHROME_PATH=/path/to/chrome npm run test:browser
 - 使用目录选择器载入简单本地项目，优先选择 `index.html`，并解析本地 CSS、SVG 和图片；
 - 在隔离的 Shadow DOM 中渲染静态 HTML，在原生 SVG DOM 中渲染 SVG；
 - 自动识别 `deck-stage > section` 等静态多页演示稿，读取演示稿尺寸，并通过上一页 / 页面选择器 / 下一页逐页编辑；
-- 缩放、以鼠标位置为中心缩放、Space/中键平移、适应窗口和自定义画布尺寸；
+- 多页胶片栏使用裁剪后的真实 DOM 渲染页面缩略图，并支持点击切页；
+- 页面复制会为整棵子树分配新稳定 ID；页面删除、按钮排序和拖拽排序均进入 Undo / Redo；
+- 提供 16:9（1920×1080）、4:3（1024×768）和自定义画布尺寸；尺寸切换不会暗中缩放页面元素；
+- 缩放、以鼠标位置为中心缩放、Space/中键平移和适应窗口；
 - 画布修改后更新底层源码；代码修改通过“应用代码”重新解析并更新画布；
 - 代码解析失败时保留上一个有效画布，不覆盖有效版本。
+
+### 演示预览与独立 Slides
+
+- 在隔离 iframe 中预览当前 HTML 演示稿，支持前后翻页、方向键、Page Up / Page Down、Home / End 和全屏；
+- 导出单个可独立播放的 `*-slides.html`；
+- 导出时内嵌已导入的本地 CSS、图片、SVG 和字体资源，无法解析的本地资源会明确提示；
+- 导入文档原有脚本始终被移除；独立 Slides 只运行编辑器生成的导航脚本，实际页面位于禁止脚本的内层 sandbox iframe；
+- 演示预览和独立导出是规范 HTML DOM 的派生视图，不会成为第二套文档真相。
 
 ### 选择、变换与属性
 
@@ -94,7 +105,15 @@ CHROME_PATH=/path/to/chrome npm run test:browser
 2. 在画布中点击标题、图片、色块或内嵌 SVG；
 3. 拖动控制框，或在右侧属性面板输入精确值；
 4. 在下方代码视图确认 `data-editor-id`、属性和样式变化；
-5. 点击“导出源文件”得到独立 HTML，或“导出 ZIP”保留本地资源。
+5. 点击“导出源文件”保留标准源码；多页演示稿可使用“演示预览”检查播放效果，再用“导出 Slides”生成单文件演示稿。
+
+### 管理多页演示稿
+
+1. 从示例菜单选择 `Multi-page deck`，或导入包含 `deck-stage > section`、`.slides > section` 等结构的 HTML；
+2. 点击胶片栏缩略图切换页面；
+3. 使用“复制页”“删除页”“前移”“后移”，或直接拖动缩略图调整顺序；
+4. 在画布尺寸菜单选择 16:9、4:3 或手动输入尺寸；
+5. 点击“演示预览”检查键盘翻页，再点击“导出 Slides”。
 
 ### 编辑 SVG
 
@@ -142,11 +161,13 @@ npm run cli -- apply prepared.html --commands changes.json --in-place
 ## 示例与验收材料
 
 - [examples/ai-slide.html](examples/ai-slide.html)：标题、两段正文、本地图片、色块和内嵌 SVG 图标；
+- [examples/multi-page-deck.html](examples/multi-page-deck.html)：Phase 4 页面缩略图、页面管理、预览和独立导出的三页演示稿；
 - [examples/simple-page.html](examples/simple-page.html)：目录导入示例，依赖本地 CSS 和图片；
 - [examples/shapes.svg](examples/shapes.svg)：`text`、`rect`、`circle`、`line`、`path`、`polygon` 和 `g`；
 - [examples/codex-commands.json](examples/codex-commands.json)：修改标题、移动图片、修改色块、删除图标；
 - [tests/document-model.test.ts](tests/document-model.test.ts)：解析、净化、稳定 ID、HTML/SVG 命令与错误恢复；
-- [scripts/browser-smoke.mjs](scripts/browser-smoke.mjs)：真实浏览器中的选择、属性修改、代码同步、格式化、Undo 和 SVG 切换。
+- [tests/presentation.test.ts](tests/presentation.test.ts)：页面操作、资源内嵌和独立 Slides 安全边界；
+- [scripts/browser-smoke.mjs](scripts/browser-smoke.mjs)：真实浏览器中的基础编辑以及 Phase 4 缩略图、页面管理、预览和导出后重开验收。
 
 ## 项目结构
 
@@ -162,6 +183,7 @@ src/
 │   ├── document-model.ts        # 源文档生命周期、解析与序列化
 │   ├── history.ts               # Undo / Redo 与操作合并
 │   ├── ids.ts                   # 稳定 ID
+│   ├── presentation.ts          # 独立 HTML Slides 与资源内嵌
 │   ├── project.ts               # 本地资源、项目 JSON 与 ZIP
 │   ├── sanitizer.ts             # 静态内容安全边界
 │   └── types.ts                 # 公共数据与命令类型
@@ -200,17 +222,19 @@ src/
 - 浏览器导出的结构 JSON 使用真实布局边界；CLI 没有浏览器布局引擎，只能报告声明式 CSS / SVG 几何，自动高度可能为 `0`；
 - DOMParser 会修复不规范 HTML，序列化会统一标签和属性格式。未编辑的语义结构、class、id、注释和资源引用会保留，但无法保证逐字符 diff；
 - 高级 SVG 滤镜、mask、clipPath、textPath、动画和外部脚本不在可靠编辑范围；
-- 多页 Slide 当前提供静态识别和逐页编辑，尚未提供缩略图、页面复制 / 排序、演示播放、云协作、账号、位图语义分层和像素级编辑。
+- 页面管理只支持可静态识别、且页面节点共享同一容器的 HTML 演示稿；不会执行 Reveal.js、SlideV 或自定义框架的原始运行时；
+- 独立 Slides 会内嵌已导入的本地资源，但保留外部 HTTP(S) 引用；离线播放前应确认没有外部依赖；
+- 画布比例切换只修改画布和已识别 deck 的尺寸元数据，不会自动重排或缩放页面内元素；
+- 尚未提供云协作、账号、位图语义分层和像素级编辑。
 
 ## 后续阶段建议
 
 1. 加入基于 source location 的局部文本补丁，进一步减少序列化 diff；
 2. 增加显式“脱离流式布局”操作和 Flex / Grid 专用属性面板；
-3. 在现有静态多页识别上增加缩略图、页面复制和页面排序；
-4. 增加选择穿透 / 同一点循环选择、参考线和更完整的组合变换；
-5. 在本地 HTTP API 或 MCP 服务上复用现有命令层；
-6. 增加 Playwright 覆盖导入目录、图片替换、拖拽坐标和下载内容；
-7. 对超大文档增加增量树刷新与代码编辑器懒加载。
+3. 增加选择穿透 / 同一点循环选择、参考线和更完整的组合变换；
+4. 在本地 HTTP API 或 MCP 服务上复用现有命令层，并按需增加页面级命令；
+5. 增加 Playwright 覆盖导入目录、图片替换和更复杂的 CSS/SVG 资源组合；
+6. 对超大文档增加缩略图虚拟化、增量树刷新与代码编辑器懒加载。
 
 ## License
 

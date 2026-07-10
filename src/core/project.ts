@@ -188,7 +188,7 @@ export function createSavedProject(
     })),
     metadata: {
       savedAt: new Date().toISOString(),
-      generator: "Last Mile Studio 0.1.0",
+      generator: "Last Mile Studio 0.2.0",
     },
   };
 }
