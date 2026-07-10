@@ -46,6 +46,7 @@ CHROME_PATH=/path/to/chrome npm run test:browser
 - 直接粘贴 HTML / SVG；
 - 使用目录选择器载入简单本地项目，优先选择 `index.html`，并解析本地 CSS、SVG 和图片；
 - 在隔离的 Shadow DOM 中渲染静态 HTML，在原生 SVG DOM 中渲染 SVG；
+- 自动识别 `deck-stage > section` 等静态多页演示稿，读取演示稿尺寸，并通过上一页 / 页面选择器 / 下一页逐页编辑；
 - 缩放、以鼠标位置为中心缩放、Space/中键平移、适应窗口和自定义画布尺寸；
 - 画布修改后更新底层源码；代码修改通过“应用代码”重新解析并更新画布；
 - 代码解析失败时保留上一个有效画布，不覆盖有效版本。
@@ -54,6 +55,7 @@ CHROME_PATH=/path/to/chrome npm run test:browser
 
 - 点击画布或图层树选择节点；Ctrl / Shift 点击多选；Alt 点击选择父级；
 - Moveable 驱动的拖动、缩放、旋转、吸附控制框；
+- SVG `path`、`polygon`、`polyline`、`line`、`text` 与分组等无原生宽高节点使用固定点变换缩放；
 - X、Y、W、H、旋转角度的精确输入；
 - 方向键 1 px 微调，Shift + 方向键 10 px 微调；
 - 单元素对齐画布，多元素对齐与水平/垂直分布；
@@ -70,6 +72,7 @@ CHROME_PATH=/path/to/chrome npm run test:browser
 - 添加文本和基础矩形；
 - Undo / Redo；连续 Moveable 手势只在结束时写入一次历史；
 - CodeMirror 语法高亮、行号、搜索、选中元素定位；
+- 收起代码区会同步压缩外层布局，只保留工具栏并把空间完整返还给画布；
 - Prettier 按需加载并格式化 HTML / SVG；
 - 所有视觉编辑完成后，代码视图同步到当前有效源代码。
 
@@ -197,13 +200,13 @@ src/
 - 浏览器导出的结构 JSON 使用真实布局边界；CLI 没有浏览器布局引擎，只能报告声明式 CSS / SVG 几何，自动高度可能为 `0`；
 - DOMParser 会修复不规范 HTML，序列化会统一标签和属性格式。未编辑的语义结构、class、id、注释和资源引用会保留，但无法保证逐字符 diff；
 - 高级 SVG 滤镜、mask、clipPath、textPath、动画和外部脚本不在可靠编辑范围；
-- 尚未实现多页 Slide、缩略图、演示播放、云协作、账号、位图语义分层和像素级编辑。
+- 多页 Slide 当前提供静态识别和逐页编辑，尚未提供缩略图、页面复制 / 排序、演示播放、云协作、账号、位图语义分层和像素级编辑。
 
 ## 后续阶段建议
 
 1. 加入基于 source location 的局部文本补丁，进一步减少序列化 diff；
 2. 增加显式“脱离流式布局”操作和 Flex / Grid 专用属性面板；
-3. 增加多页 Slide 模型、缩略图和页面排序；
+3. 在现有静态多页识别上增加缩略图、页面复制和页面排序；
 4. 增加选择穿透 / 同一点循环选择、参考线和更完整的组合变换；
 5. 在本地 HTTP API 或 MCP 服务上复用现有命令层；
 6. 增加 Playwright 覆盖导入目录、图片替换、拖拽坐标和下载内容；

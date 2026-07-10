@@ -85,6 +85,7 @@ flowchart LR
 - HTML 移动默认写入组合 transform，避免暗中破坏 Flex / Grid；
 - SVG `rect` / `image` / `circle` / `ellipse` 优先更新几何属性；
 - 通用 SVG 节点移动、旋转与缩放使用保留原 transform 的组合变换；
+- 不执行导入演示稿脚本；对于 `deck-stage > section` 等多页结构，由编辑器静态接管可见页和页面切换，避免自定义元素失效后整稿隐藏；
 - 不把 SVG path 转换成 Canvas path，也不扁平化 `g`。
 
 ## 历史模型

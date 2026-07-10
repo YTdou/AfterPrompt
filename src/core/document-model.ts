@@ -6,6 +6,7 @@ import type {
   CanvasSize,
   CommandResult,
   DocumentKind,
+  DocumentPage,
   DocumentSnapshot,
   EditorCommand,
   ElementSummary,
@@ -41,10 +42,46 @@ export function detectCanvas(document: Document, kind: DocumentKind): CanvasSize
   const body = document.body;
   if (!body) return { ...DEFAULT_CANVAS };
   const style = (body as HTMLElement).style;
+  const deck = body.querySelector("deck-stage[width][height], [data-editor-deck][width][height]");
+  const deckWidth = deck?.getAttribute("width") ?? null;
+  const deckHeight = deck?.getAttribute("height") ?? null;
   return {
-    width: positiveNumber(body.getAttribute("data-editor-canvas-width"), positiveNumber(style.width, DEFAULT_CANVAS.width)),
-    height: positiveNumber(body.getAttribute("data-editor-canvas-height"), positiveNumber(style.height, DEFAULT_CANVAS.height)),
+    width: positiveNumber(body.getAttribute("data-editor-canvas-width"), positiveNumber(deckWidth, positiveNumber(style.width, DEFAULT_CANVAS.width))),
+    height: positiveNumber(body.getAttribute("data-editor-canvas-height"), positiveNumber(deckHeight, positiveNumber(style.height, DEFAULT_CANVAS.height))),
   };
+}
+
+function uniqueElements(elements: Element[]): Element[] {
+  return elements.filter((element, index) => elements.indexOf(element) === index);
+}
+
+function detectPageElements(document: Document, kind: DocumentKind): Element[] {
+  if (kind !== "html" || !document.body) return [];
+  const selectors = [
+    "deck-stage > section",
+    "[data-editor-deck] > section",
+    ".slides > section",
+    "[data-slides] > section",
+  ];
+  for (const selector of selectors) {
+    const candidates = uniqueElements(Array.from(document.body.querySelectorAll(selector)));
+    if (candidates.length > 1) return candidates;
+  }
+
+  const directCandidates = Array.from(document.body.children).filter((element) =>
+    element.matches("section[data-slide], section[data-label], section.slide, [data-slide].slide"),
+  );
+  return directCandidates.length > 1 ? directCandidates : [];
+}
+
+function pageLabel(element: Element, index: number): string {
+  const explicit = element.getAttribute("data-label") ?? element.getAttribute("aria-label") ?? element.getAttribute("data-editor-name");
+  if (explicit?.trim()) return explicit.trim();
+  const numbered = element.matches("[data-slide]") ? element : element.querySelector("[data-slide]");
+  const number = numbered?.getAttribute("data-slide")?.trim();
+  const heading = element.querySelector("h1, h2, h3, [role='heading']")?.textContent?.replace(/\s+/g, " ").trim();
+  if (heading) return heading.slice(0, 72);
+  return number ? `Slide ${number}` : `Slide ${index + 1}`;
 }
 
 export function serializeDocument(document: Document, kind: DocumentKind): string {
@@ -56,7 +93,7 @@ export function serializeDocument(document: Document, kind: DocumentKind): strin
 }
 
 function treeLabel(element: Element): string {
-  const explicit = element.getAttribute("data-editor-name") ?? element.getAttribute("aria-label");
+  const explicit = element.getAttribute("data-editor-name") ?? element.getAttribute("aria-label") ?? element.getAttribute("data-label");
   if (explicit) return explicit;
   const text = element.children.length === 0 ? element.textContent?.replace(/\s+/g, " ").trim() : "";
   return text ? text.slice(0, 36) : element.localName;
@@ -109,6 +146,8 @@ export class SourceDocument {
     const warnings = sanitizeDocument(document, kind);
     const assigned = ensureStableIds(document, kind);
     if (assigned > 0) warnings.push(`已为 ${assigned} 个可编辑节点添加稳定 data-editor-id。`);
+    const pageCount = detectPageElements(document, kind).length;
+    if (pageCount > 1) warnings.push(`已识别 ${pageCount} 页静态演示稿；可使用画布上方的页面选择器逐页编辑。`);
     return new SourceDocument(document, kind, sourceName, warnings, canvas);
   }
 
@@ -157,6 +196,33 @@ export class SourceDocument {
     const root = this.kind === "html" ? this.document.body : this.document.documentElement;
     if (!root) return [];
     return [toTree(root, this.kind)];
+  }
+
+  pages(): DocumentPage[] {
+    return detectPageElements(this.document, this.kind).map((element, index) => ({
+      id: element.getAttribute("data-editor-id") ?? "",
+      label: pageLabel(element, index),
+      index,
+    })).filter((page) => Boolean(page.id));
+  }
+
+  pageElement(index: number): Element | null {
+    return detectPageElements(this.document, this.kind)[index] ?? null;
+  }
+
+  treeForPage(index: number): ElementTreeNode[] {
+    const root = this.pageElement(index);
+    return root ? [toTree(root, this.kind)] : this.tree();
+  }
+
+  editingRoot(index: number): Element | null {
+    return this.pageElement(index) ?? (this.kind === "html" ? this.document.body : this.document.documentElement);
+  }
+
+  elementBelongsToPage(elementId: string, index: number): boolean {
+    const page = this.pageElement(index);
+    const element = this.find(elementId);
+    return !page || Boolean(element && (element === page || page.contains(element)));
   }
 
   editableElements(): Element[] {
