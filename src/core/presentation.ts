@@ -18,6 +18,10 @@ export interface StandaloneSlidesResult {
   warnings: string[];
 }
 
+export interface StandaloneSlidesOptions {
+  initialPageIndex?: number;
+}
+
 function bytesToBase64(bytes: Uint8Array): string {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
   let result = "";
@@ -136,13 +140,14 @@ export function preparePresentationSource(model: SourceDocument, assets: Project
   };
 }
 
-export function buildStandaloneSlides(model: SourceDocument, assets: ProjectAssets, sourcePath: string): StandaloneSlidesResult {
+export function buildStandaloneSlides(model: SourceDocument, assets: ProjectAssets, sourcePath: string, options: StandaloneSlidesOptions = {}): StandaloneSlidesResult {
   const prepared = preparePresentationSource(model, assets, sourcePath);
   const sourceBase64 = bytesToBase64(new TextEncoder().encode(prepared.source));
   const pageCount = Math.max(1, prepared.pageIds.length);
   const title = model.document.title?.trim() || model.sourceName.replace(/\.html?$/i, "") || "Presentation";
   const labels = prepared.pageLabels.length ? prepared.pageLabels : [title];
   const { width, height } = model.canvas;
+  const initialPageIndex = Math.min(Math.max(0, Math.trunc(options.initialPageIndex ?? 0)), pageCount - 1);
 
   const innerRuntimeCss = `
     :root, html, body { width: 100% !important; height: 100% !important; min-width: 0 !important; min-height: 0 !important; margin: 0 !important; overflow: hidden !important; }
@@ -159,6 +164,7 @@ export function buildStandaloneSlides(model: SourceDocument, assets: ProjectAsse
       const pageBuildSteps = ${scriptJson(prepared.buildSteps)};
       const presentationTitle = ${scriptJson(title)};
       const canvas = ${scriptJson({ width, height })};
+      const initialPageIndex = ${initialPageIndex};
       const innerRuntimeCss = ${scriptJson(innerRuntimeCss)};
       const frame = document.getElementById("lms-slides");
       const stage = document.getElementById("lms-stage");
@@ -248,7 +254,7 @@ export function buildStandaloneSlides(model: SourceDocument, assets: ProjectAsse
             ancestor = ancestor.parentElement;
           }
         });
-        show(0);
+        show(initialPageIndex);
       }, { once: true });
 
       previous.addEventListener("click", backward);

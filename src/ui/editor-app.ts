@@ -78,7 +78,7 @@ function exampleAssets(): ProjectAssets {
 }
 
 const appTemplate = `
-  <div class="studio-shell">
+  <div class="studio-shell is-code-collapsed">
     <header class="topbar">
       <div class="brand" title="Source-first visual editing">
         <span class="brand-mark">LM</span>
@@ -225,7 +225,7 @@ const appTemplate = `
       </aside>
     </main>
 
-    <section id="code-drawer" class="code-drawer">
+    <section id="code-drawer" class="code-drawer is-collapsed">
       <div class="code-toolbar">
         <div>
           <span class="eyebrow">SOURCE</span>
@@ -237,7 +237,7 @@ const appTemplate = `
           <button id="search-code">搜索</button>
           <button id="format-code">格式化</button>
           <button id="apply-code" class="button primary">应用代码</button>
-          <button id="toggle-code">收起代码</button>
+          <button id="toggle-code">展开源码</button>
         </div>
       </div>
       <div id="code-editor" class="code-editor"></div>
@@ -260,6 +260,17 @@ const appTemplate = `
         <button id="close-presentation" type="button" aria-label="关闭演示预览">×</button>
       </div>
       <iframe id="presentation-frame" title="演示预览" sandbox="allow-scripts allow-same-origin" allowfullscreen></iframe>
+    </dialog>
+    <dialog id="preview-choice-dialog" class="preview-choice-dialog">
+      <form method="dialog">
+        <div class="dialog-heading"><h2>选择预览起点</h2><button value="cancel" aria-label="关闭预览选择">×</button></div>
+        <p>从第一页播放整套演示稿，或直接从正在编辑的页面开始。</p>
+        <div class="preview-choice-actions">
+          <button value="cancel">取消</button>
+          <button id="preview-from-start" value="default" class="button">从头预览</button>
+          <button id="preview-from-current" value="default" class="button primary">当前页面预览</button>
+        </div>
+      </form>
     </dialog>
     <div id="toast" class="toast" hidden></div>
   </div>
@@ -285,6 +296,10 @@ export class EditorApp {
   private operationLog: OperationLogEntry[] = [];
   private spacePressed = false;
   private toastTimer = 0;
+  private noticeTimer = 0;
+  private buildWarningTimer = 0;
+  private modelWarningSignature = "";
+  private buildWarningSignature = "";
   private fragmentCursor = { x: 640, y: 360 };
 
   constructor(private readonly host: HTMLElement) {
@@ -360,7 +375,9 @@ export class EditorApp {
 
     this.get("#undo").addEventListener("click", () => this.undo());
     this.get("#redo").addEventListener("click", () => this.redo());
-    this.get("#preview-presentation").addEventListener("click", () => this.previewPresentation());
+    this.get("#preview-presentation").addEventListener("click", () => this.get<HTMLDialogElement>("#preview-choice-dialog").showModal());
+    this.get("#preview-from-start").addEventListener("click", () => this.previewPresentation(0));
+    this.get("#preview-from-current").addEventListener("click", () => this.previewPresentation(this.activePageIndex));
     this.get("#export-slides").addEventListener("click", () => this.exportSlides());
     this.get("#export-source").addEventListener("click", () => this.exportSource());
     this.get("#export-project").addEventListener("click", () => this.exportProject());
@@ -732,8 +749,21 @@ export class EditorApp {
     `;
 
     const warnings = this.get("#build-warnings");
-    warnings.hidden = sequence.warnings.length === 0;
-    warnings.innerHTML = sequence.warnings.map((warning) => `<p><strong>${escapeHtml(warning.code)}</strong> ${escapeHtml(warning.message)}</p>`).join("");
+    const signature = sequence.warnings.map((warning) => `${warning.code}:${warning.message}`).join("\n");
+    if (!signature) {
+      window.clearTimeout(this.buildWarningTimer);
+      this.buildWarningSignature = "";
+      warnings.hidden = true;
+      warnings.innerHTML = "";
+    } else if (signature !== this.buildWarningSignature) {
+      window.clearTimeout(this.buildWarningTimer);
+      this.buildWarningSignature = signature;
+      warnings.hidden = false;
+      warnings.innerHTML = sequence.warnings.map((warning) => `<p><strong>${escapeHtml(warning.code)}</strong> ${escapeHtml(warning.message)}</p>`).join("");
+      this.buildWarningTimer = window.setTimeout(() => {
+        if (this.buildWarningSignature === signature) warnings.hidden = true;
+      }, 6000);
+    }
   }
 
   private changeBuild(offset: -1 | 1): void {
@@ -898,20 +928,25 @@ export class EditorApp {
   }
 
   private renderWarnings(): void {
-    const notice = this.get("#notice-bar");
-    if (this.model.warnings.length === 0) {
-      notice.hidden = true;
-      notice.textContent = "";
+    const signature = this.model.warnings.join("\n");
+    if (!signature) {
+      this.modelWarningSignature = "";
       return;
     }
-    notice.hidden = false;
-    notice.textContent = this.model.warnings.join(" ");
+    if (signature === this.modelWarningSignature) return;
+    this.modelWarningSignature = signature;
+    this.showNotice(this.model.warnings.join(" "));
   }
 
   private showNotice(message: string): void {
     const notice = this.get("#notice-bar");
+    window.clearTimeout(this.noticeTimer);
     notice.hidden = false;
     notice.textContent = message;
+    this.noticeTimer = window.setTimeout(() => {
+      notice.hidden = true;
+      notice.textContent = "";
+    }, 4000);
   }
 
   private renderLayers(): void {
@@ -1493,7 +1528,7 @@ export class EditorApp {
     const drawer = this.get("#code-drawer");
     const collapsed = drawer.classList.toggle("is-collapsed");
     this.get(".studio-shell").classList.toggle("is-code-collapsed", collapsed);
-    this.get("#toggle-code").textContent = collapsed ? "展开代码" : "收起代码";
+    this.get("#toggle-code").textContent = collapsed ? "展开源码" : "收起源码";
     const updateCanvas = (): void => {
       this.fitCanvas();
       this.transform.update();
@@ -1501,9 +1536,9 @@ export class EditorApp {
     requestAnimationFrame(updateCanvas);
   }
 
-  private previewPresentation(): void {
+  private previewPresentation(initialPageIndex: number): void {
     try {
-      const presentation = buildStandaloneSlides(this.model, this.assets, this.sourcePath);
+      const presentation = buildStandaloneSlides(this.model, this.assets, this.sourcePath, { initialPageIndex });
       if (presentation.warnings.length) this.showNotice(presentation.warnings.join(" "));
       const frame = this.get<HTMLIFrameElement>("#presentation-frame");
       frame.srcdoc = presentation.html;
