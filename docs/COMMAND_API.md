@@ -148,6 +148,45 @@ SVG `rect`、`image`、`circle` 和 `ellipse` 使用原生几何属性；其他 
 
 锁定元素拒绝除 `setLocked` 之外的命令，以避免 Codex 和用户界面绕过同一保护语义。
 
+## HTML Slides Build
+
+Build 命令修改规范 DOM 中的人类可读 `data-build`，与编辑器 Build 编排面板共用同一个 `SourceDocument.apply()` 路径。无 `data-build` 表示 Always Visible，正整数表示累计显示组，相同整数同时出现。
+
+设置元素所属 Build，或移除 Build：
+
+```json
+{ "action": "setElementBuild", "elementIds": ["request-card", "request-arrow"], "step": 1 }
+```
+
+```json
+{ "action": "setElementBuild", "elementIds": ["persistent-title"], "step": null }
+```
+
+移动整个组到另一个组的位置；操作后当前页所有有效 Build 会原子归一化为连续的 `1…N`：
+
+```json
+{ "action": "moveBuildGroup", "pageId": "slide-s2", "fromStep": 3, "toStep": 1 }
+```
+
+合并两个组：
+
+```json
+{ "action": "mergeBuildGroups", "pageId": "slide-s2", "sourceStep": 3, "targetStep": 2 }
+```
+
+将元素拆成一个新组。`targetPosition` 是零基组插入位置，`0` 表示最前，当前组数表示末尾：
+
+```json
+{
+  "action": "splitBuildGroup",
+  "pageId": "slide-s2",
+  "elementIds": ["decision-card"],
+  "targetPosition": 2
+}
+```
+
+这些命令只改变 Build 定义，不写入 `revealed`、`aria-hidden` 或编辑器 overlay。页面 ID 和元素 ID 都必须是稳定 `data-editor-id`；锁定元素仍拒绝 Build 归属修改。
+
 ## 组件属性
 
 组件属性以定义暴露的属性名为契约，不要求 Codex 直接理解内部 DOM：

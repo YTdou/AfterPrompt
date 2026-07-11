@@ -8,6 +8,7 @@ export interface PreparedPresentationSource {
   source: string;
   pageIds: string[];
   pageLabels: string[];
+  buildSteps: number[][];
   warnings: string[];
 }
 
@@ -123,10 +124,14 @@ export function preparePresentationSource(model: SourceDocument, assets: Project
   const pages = model.pages();
   const pageIds = pages.map(({ id }) => id).filter((id) => Boolean(getElementByEditorId(document, id)));
   const pageLabels = pages.filter(({ id }) => pageIds.includes(id)).map(({ label }) => label);
+  const buildSteps = pages.length > 0
+    ? pages.filter(({ id }) => pageIds.includes(id)).map(({ index }) => model.buildSequence(index).steps)
+    : [model.buildSequence(0).steps];
   return {
     source: serializeDocument(document, "html"),
     pageIds,
     pageLabels,
+    buildSteps,
     warnings: Array.from(warnings),
   };
 }
@@ -144,12 +149,14 @@ export function buildStandaloneSlides(model: SourceDocument, assets: ProjectAsse
     [data-lms-deck] { display: block !important; position: relative !important; width: 100% !important; height: 100% !important; min-width: 0 !important; min-height: 0 !important; visibility: visible !important; opacity: 1 !important; overflow: hidden !important; }
     [data-lms-slide="inactive"] { display: none !important; visibility: hidden !important; pointer-events: none !important; }
     [data-lms-slide="active"] { display: block !important; position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important; }
+    [data-lms-build-visible="false"] { opacity: 0 !important; visibility: hidden !important; pointer-events: none !important; }
   `;
   const runtime = `
     (() => {
       const sourceBase64 = ${scriptJson(sourceBase64)};
       const pageIds = ${scriptJson(prepared.pageIds)};
       const pageLabels = ${scriptJson(labels)};
+      const pageBuildSteps = ${scriptJson(prepared.buildSteps)};
       const presentationTitle = ${scriptJson(title)};
       const canvas = ${scriptJson({ width, height })};
       const innerRuntimeCss = ${scriptJson(innerRuntimeCss)};
@@ -161,6 +168,7 @@ export function buildStandaloneSlides(model: SourceDocument, assets: ProjectAsse
       const fullscreen = document.getElementById("lms-fullscreen");
       let slides = [];
       let index = 0;
+      let buildPosition = 0;
 
       const decodeSource = () => {
         const binary = atob(sourceBase64);
@@ -175,19 +183,53 @@ export function buildStandaloneSlides(model: SourceDocument, assets: ProjectAsse
         stage.style.transform = "scale(" + scale + ")";
       };
 
-      const show = (requested) => {
+      const applyBuildState = () => {
+        const slide = slides[index];
+        if (!slide) return;
+        const steps = pageBuildSteps[index] || [];
+        buildPosition = Math.min(Math.max(0, buildPosition), steps.length);
+        const activeStep = buildPosition === 0 ? 0 : steps[buildPosition - 1];
+        slide.querySelectorAll("[data-build]").forEach((element) => {
+          const step = Number(element.getAttribute("data-build"));
+          if (!Number.isInteger(step) || step <= 0) {
+            element.removeAttribute("data-lms-build-visible");
+            return;
+          }
+          const visible = step <= activeStep;
+          element.setAttribute("data-lms-build-visible", visible ? "true" : "false");
+          element.classList.toggle("revealed", visible);
+          element.setAttribute("aria-hidden", visible ? "false" : "true");
+        });
+      };
+
+      const show = (requested, requestedBuild = 0) => {
         if (!slides.length) return;
         index = Math.min(Math.max(0, requested), slides.length - 1);
+        buildPosition = Math.min(Math.max(0, requestedBuild), (pageBuildSteps[index] || []).length);
         slides.forEach((slide, slideIndex) => {
           const active = slideIndex === index;
           slide.setAttribute("data-lms-slide", active ? "active" : "inactive");
           slide.setAttribute("aria-hidden", active ? "false" : "true");
         });
-        previous.disabled = index === 0;
-        next.disabled = index === slides.length - 1;
+        applyBuildState();
+        const buildCount = (pageBuildSteps[index] || []).length;
+        previous.disabled = index === 0 && buildPosition === 0;
+        next.disabled = index === slides.length - 1 && buildPosition === buildCount;
         const label = pageLabels[index] || "Slide " + (index + 1);
-        status.textContent = (index + 1) + " / " + slides.length + " · " + label;
+        const buildLabel = buildCount ? (buildPosition === 0 ? "Initial / " + buildCount : "Build " + buildPosition + " / " + buildCount) : "No builds";
+        status.textContent = (index + 1) + " / " + slides.length + " · " + buildLabel + " · " + label;
         document.title = label + " — " + presentationTitle;
+      };
+
+      const forward = () => {
+        const buildCount = (pageBuildSteps[index] || []).length;
+        if (buildPosition < buildCount) show(index, buildPosition + 1);
+        else if (index < slides.length - 1) show(index + 1, 0);
+      };
+
+      const backward = () => {
+        if (buildPosition > 0) show(index, buildPosition - 1);
+        else if (index > 0) show(index - 1, (pageBuildSteps[index - 1] || []).length);
       };
 
       frame.addEventListener("load", () => {
@@ -209,14 +251,14 @@ export function buildStandaloneSlides(model: SourceDocument, assets: ProjectAsse
         show(0);
       }, { once: true });
 
-      previous.addEventListener("click", () => show(index - 1));
-      next.addEventListener("click", () => show(index + 1));
+      previous.addEventListener("click", backward);
+      next.addEventListener("click", forward);
       fullscreen.addEventListener("click", () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen());
       document.addEventListener("keydown", (event) => {
-        if (["ArrowRight", "PageDown", " "].includes(event.key)) { event.preventDefault(); show(index + 1); }
-        else if (["ArrowLeft", "PageUp"].includes(event.key)) { event.preventDefault(); show(index - 1); }
-        else if (event.key === "Home") { event.preventDefault(); show(0); }
-        else if (event.key === "End") { event.preventDefault(); show(slides.length - 1); }
+        if (["ArrowRight", "PageDown", " "].includes(event.key)) { event.preventDefault(); forward(); }
+        else if (["ArrowLeft", "PageUp"].includes(event.key)) { event.preventDefault(); backward(); }
+        else if (event.key === "Home") { event.preventDefault(); show(0, 0); }
+        else if (event.key === "End") { event.preventDefault(); show(slides.length - 1, (pageBuildSteps[slides.length - 1] || []).length); }
       });
       window.addEventListener("resize", resize);
       resize();

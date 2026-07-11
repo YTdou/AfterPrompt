@@ -1,0 +1,10 @@
+[Unit]
+Description=Renew the Last Mile Studio IP certificate
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/certbot/bin/certbot renew --quiet
+PrivateTmp=true
+NoNewPrivileges=true

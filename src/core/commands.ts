@@ -312,7 +312,14 @@ export function reorderElement(element: Element, direction: "up" | "down" | "fro
   else if (direction === "down" && element.previousElementSibling) element.previousElementSibling.before(element);
 }
 
-export function applyEditorCommand(document: Document, kind: DocumentKind, command: EditorCommand): CommandResult {
+type ElementEditorCommand = Exclude<EditorCommand,
+  | { action: "setElementBuild" }
+  | { action: "moveBuildGroup" }
+  | { action: "mergeBuildGroups" }
+  | { action: "splitBuildGroup" }
+>;
+
+export function applyEditorCommand(document: Document, kind: DocumentKind, command: ElementEditorCommand): CommandResult {
   if (command.action === "addElement") {
     const createdId = addElement(document, kind, command.parentId, command.element);
     return { action: command.action, elementId: command.parentId, createdId };

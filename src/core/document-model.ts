@@ -2,8 +2,18 @@ import { applyEditorCommand, buildStructureSummary, summarizeElement } from "./c
 import { assignFreshIds, allEditableElements, ensureStableIds, getElementByEditorId, isEditableElement } from "./ids";
 import { sanitizeDocument } from "./sanitizer";
 import { refreshClonedFragmentInstances } from "./fragments/component";
+import {
+  deriveBuildSequence,
+  mergeBuildGroups,
+  moveBuildGroup,
+  normalizeBuildSteps,
+  readBuildStep,
+  setElementBuild,
+  splitBuildGroup,
+} from "./builds";
 import type {
   Bounds,
+  BuildViewMode,
   CanvasSize,
   CommandResult,
   DocumentKind,
@@ -12,6 +22,7 @@ import type {
   EditorCommand,
   ElementSummary,
   ElementTreeNode,
+  PageBuildSequence,
   StructureSummary,
 } from "./types";
 
@@ -186,6 +197,22 @@ export class SourceDocument {
   }
 
   apply(command: EditorCommand): CommandResult {
+    if (command.action === "setElementBuild") {
+      setElementBuild(this.document, command.elementIds, command.step);
+      return { action: command.action, elementId: command.elementIds[0] ?? "" };
+    }
+    if (command.action === "moveBuildGroup" || command.action === "mergeBuildGroups" || command.action === "splitBuildGroup") {
+      const page = this.find(command.pageId);
+      const pages = this.pages();
+      const fallbackRootId = pages.length === 0 ? this.editingRoot(0)?.getAttribute("data-editor-id") : null;
+      if (!page || !(pages.some(({ id }) => id === command.pageId) || fallbackRootId === command.pageId)) {
+        throw new Error(`Presentation page not found: ${command.pageId}`);
+      }
+      if (command.action === "moveBuildGroup") moveBuildGroup(this.document, page, command.fromStep, command.toStep);
+      else if (command.action === "mergeBuildGroups") mergeBuildGroups(this.document, page, command.sourceStep, command.targetStep);
+      else splitBuildGroup(this.document, page, command.elementIds, command.targetPosition);
+      return { action: command.action, elementId: command.pageId };
+    }
     return applyEditorCommand(this.document, this.kind, command);
   }
 
@@ -214,6 +241,26 @@ export class SourceDocument {
 
   pageElement(index: number): Element | null {
     return detectPageElements(this.document, this.kind)[index] ?? null;
+  }
+
+  buildSequence(index: number): PageBuildSequence {
+    const page = this.pageElement(index) ?? this.editingRoot(index);
+    if (!page) return { pageId: "", steps: [], groups: [], maxStep: 0, elementCount: 0, warnings: [] };
+    return deriveBuildSequence(page);
+  }
+
+  buildStepForElement(elementId: string): number | null {
+    const element = this.find(elementId);
+    return element ? readBuildStep(element) : null;
+  }
+
+  setElementBuild(elementIds: string[], step: number | null): void {
+    setElementBuild(this.document, elementIds, step);
+  }
+
+  normalizeBuildSteps(index: number): void {
+    const page = this.pageElement(index) ?? this.editingRoot(index);
+    if (page) normalizeBuildSteps(this.document, page);
   }
 
   duplicatePage(index: number): string {
@@ -276,7 +323,12 @@ export class SourceDocument {
     return allEditableElements(this.document, this.kind);
   }
 
-  snapshot(selectedIds: string[] = [], activePageId?: string): DocumentSnapshot {
+  snapshot(
+    selectedIds: string[] = [],
+    activePageId?: string,
+    buildStepsByPage?: Record<string, number>,
+    buildViewMode?: BuildViewMode,
+  ): DocumentSnapshot {
     return {
       source: this.serialize(),
       kind: this.kind,
@@ -284,6 +336,8 @@ export class SourceDocument {
       sourceName: this.sourceName,
       selectedIds: [...selectedIds],
       activePageId,
+      buildStepsByPage: buildStepsByPage ? { ...buildStepsByPage } : undefined,
+      buildViewMode,
     };
   }
 }

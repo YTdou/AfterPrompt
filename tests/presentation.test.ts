@@ -29,6 +29,7 @@ describe("standalone HTML Slides", () => {
     const prepared = preparePresentationSource(model, assets, "examples/multi-page-deck.html");
 
     expect(prepared.pageIds).toEqual(["demo-page-1", "demo-page-2", "demo-page-3"]);
+    expect(prepared.buildSteps).toEqual([[1, 2], [1, 2], [1]]);
     expect(prepared.source).toContain("data:image/svg+xml;base64,");
     expect(prepared.source).not.toContain("customElements.define");
     expect(model.serialize()).toBe(canonicalBefore);
@@ -45,6 +46,8 @@ describe("standalone HTML Slides", () => {
     expect(output.querySelector("#lms-controls")).not.toBeNull();
     expect(output.querySelector("script")?.textContent).toContain("demo-page-3");
     expect(output.querySelector("script")?.textContent).toContain("frame.srcdoc = decodeSource()");
+    expect(output.querySelector("script")?.textContent).toContain("const forward = () =>");
+    expect(output.querySelector("script")?.textContent).toContain("data-lms-build-visible");
   });
 
   it("inlines a local stylesheet and resolves its assets relative to the CSS file", () => {
@@ -70,5 +73,14 @@ describe("standalone HTML Slides", () => {
     expect(prepared.source).toContain('data-lms-embedded-from="examples/styles/deck.css"');
     expect(prepared.source).toContain("data:image/svg+xml;base64,");
     expect(prepared.warnings.some((warning) => warning.includes("未能内嵌"))).toBe(false);
+  });
+
+  it("keeps Build-first playback metadata for a one-page HTML document", () => {
+    const model = SourceDocument.parse(`<!doctype html><html><body><h1>Title</h1><p data-build="4">Later</p></body></html>`, "single.html");
+    const prepared = preparePresentationSource(model, new ProjectAssets(), "single.html");
+    const result = buildStandaloneSlides(model, new ProjectAssets(), "single.html");
+    expect(prepared.pageIds).toEqual([]);
+    expect(prepared.buildSteps).toEqual([[4]]);
+    expect(result.html).toContain("[[4]]");
   });
 });

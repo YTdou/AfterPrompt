@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { JSDOM } from "jsdom";
+import { readFileSync } from "node:fs";
 import slideSource from "../examples/ai-slide.html?raw";
 import svgSource from "../examples/shapes.svg?raw";
 import { SourceDocument } from "../src/core/document-model";
@@ -154,5 +155,64 @@ describe("SourceDocument", () => {
     model.setCanvas({ width: 1024, height: 768 });
     expect(model.document.querySelector("deck-stage")?.getAttribute("width")).toBe("1024");
     expect(model.document.querySelector("deck-stage")?.getAttribute("height")).toBe("768");
+  });
+
+  it("derives non-contiguous Build groups and reports invalid and nested steps", () => {
+    const model = SourceDocument.parse(`<!doctype html><html><body><deck-stage>
+      <section data-editor-id="page-one">
+        <div data-editor-id="late-a" data-build="10"></div>
+        <div data-editor-id="late-b" data-build="10"></div>
+        <div data-editor-id="last" data-build="20"></div>
+        <div data-editor-id="parent" data-build="3"><span data-editor-id="child" data-build="1">nested</span></div>
+        <div data-editor-id="invalid" data-build="soon"></div>
+      </section>
+    </deck-stage></body></html>`, "builds.html");
+
+    const sequence = model.buildSequence(0);
+    expect(sequence.steps).toEqual([1, 3, 10, 20]);
+    expect(sequence.groups.find(({ step }) => step === 10)?.elementIds).toEqual(["late-a", "late-b"]);
+    expect(sequence.elementCount).toBe(5);
+    expect(sequence.warnings.map(({ code }) => code)).toEqual(expect.arrayContaining(["invalid-step", "nested-conflict"]));
+    expect(model.buildStepForElement("invalid")).toBeNull();
+  });
+
+  it("edits, sorts, splits, and merges Build groups without runtime source pollution", () => {
+    const model = SourceDocument.parse(`<!doctype html><html><body><deck-stage><section data-editor-id="page-one">
+      <p data-editor-id="a" data-build="1">A</p><p data-editor-id="b" data-build="1">B</p>
+      <p data-editor-id="c" data-build="2">C</p><p data-editor-id="d" data-build="3">D</p>
+    </section></deck-stage></body></html>`, "builds.html");
+
+    model.apply({ action: "moveBuildGroup", pageId: "page-one", fromStep: 3, toStep: 1 });
+    expect(model.buildSequence(0).groups.map(({ elementIds }) => elementIds)).toEqual([["d"], ["a", "b"], ["c"]]);
+    model.apply({ action: "splitBuildGroup", pageId: "page-one", elementIds: ["b"], targetPosition: 2 });
+    expect(model.buildSequence(0).groups.map(({ elementIds }) => elementIds)).toEqual([["d"], ["a"], ["b"], ["c"]]);
+    model.apply({ action: "mergeBuildGroups", pageId: "page-one", sourceStep: 3, targetStep: 2 });
+    expect(model.buildSequence(0).groups.map(({ elementIds }) => elementIds)).toEqual([["d"], ["a", "b"], ["c"]]);
+    model.apply({ action: "setElementBuild", elementIds: ["c"], step: null });
+    model.normalizeBuildSteps(0);
+    expect(model.buildStepForElement("c")).toBeNull();
+    expect(model.serialize()).not.toContain("revealed");
+    expect(model.serialize()).not.toContain("data-editor-build-");
+  });
+
+  it("recognizes the real HotCarbon Build regression baseline", () => {
+    const source = readFileSync(new URL("../reference/artifacts/HotCarbon_Oral_Slides_SelfContained.html", import.meta.url), "utf8");
+    const model = SourceDocument.parse(source, "HotCarbon_Oral_Slides_SelfContained.html");
+    const sequences = model.pages().map(({ index }) => model.buildSequence(index));
+
+    expect(model.pages()).toHaveLength(23);
+    expect(sequences.filter(({ elementCount }) => elementCount > 0)).toHaveLength(14);
+    expect(sequences.reduce((sum, sequence) => sum + sequence.elementCount, 0)).toBe(94);
+    expect(sequences[0]?.maxStep).toBe(2);
+  });
+
+  it("supports Build orchestration on a single HTML page without a deck container", () => {
+    const model = SourceDocument.parse(`<!doctype html><html><body data-editor-id="single-page">
+      <h1 data-editor-id="single-title">Title</h1><p data-editor-id="single-build" data-build="5">Later</p>
+    </body></html>`, "single.html");
+    expect(model.pages()).toHaveLength(0);
+    expect(model.buildSequence(0).steps).toEqual([5]);
+    model.apply({ action: "splitBuildGroup", pageId: "single-page", elementIds: ["single-title"], targetPosition: 0 });
+    expect(model.buildSequence(0).groups.map(({ elementIds }) => elementIds)).toEqual([["single-title"], ["single-build"]]);
   });
 });

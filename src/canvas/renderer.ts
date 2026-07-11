@@ -1,6 +1,6 @@
 import { getElementByEditorId } from "../core/ids";
 import { resolveProjectPath, type ProjectAssets } from "../core/project";
-import type { Bounds } from "../core/types";
+import type { Bounds, BuildViewMode } from "../core/types";
 import type { SourceDocument } from "../core/document-model";
 
 export interface RendererCallbacks {
@@ -12,6 +12,9 @@ export interface RendererCallbacks {
 export interface RenderOptions {
   interactive?: boolean;
   pruneInactivePages?: boolean;
+  activeBuildStep?: number;
+  buildViewMode?: BuildViewMode;
+  focusedBuildStep?: number;
 }
 
 const editorCss = `
@@ -161,6 +164,28 @@ const nonInteractiveCss = `
   }
 `;
 
+const buildPreviewCss = `
+  [data-editor-build-visibility="hidden"] {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+  }
+  [data-editor-build-view="all"] [data-build],
+  [data-editor-build-view="group"] [data-build] {
+    visibility: visible !important;
+    pointer-events: auto !important;
+    filter: none !important;
+    outline: 2px dashed rgba(91, 140, 255, .72);
+    outline-offset: 2px;
+  }
+  [data-editor-build-view="all"] [data-editor-build-relation="past"] { opacity: .68 !important; }
+  [data-editor-build-view="all"] [data-editor-build-relation="current"] { opacity: 1 !important; outline-style: solid; }
+  [data-editor-build-view="all"] [data-editor-build-relation="future"] { opacity: .32 !important; }
+  [data-editor-build-view="group"] [data-editor-build-relation="past"] { opacity: .5 !important; }
+  [data-editor-build-view="group"] [data-editor-build-relation="current"] { opacity: 1 !important; outline: 3px solid #5b8cff; }
+  [data-editor-build-view="group"] [data-editor-build-relation="future"] { opacity: .18 !important; }
+`;
+
 function styleElement(text: string): HTMLStyleElement {
   const style = document.createElement("style");
   style.textContent = text;
@@ -225,14 +250,15 @@ export class CanvasRenderer {
     this.interactive = options.interactive !== false;
     this.shadow.replaceChildren();
     this.shadow.append(styleElement(editorCss));
+    this.shadow.append(styleElement(buildPreviewCss));
 
-    if (model.kind === "html") this.renderHtml(model, activePageId, options.pruneInactivePages ?? false);
+    if (model.kind === "html") this.renderHtml(model, activePageId, options);
     else this.renderSvg(model);
     // Append this last so imported/static-page styles cannot re-enable pointer handling.
     if (!this.interactive) this.shadow.append(styleElement(nonInteractiveCss));
   }
 
-  private renderHtml(model: SourceDocument, activePageId?: string, pruneInactivePages = false): void {
+  private renderHtml(model: SourceDocument, activePageId: string | undefined, options: RenderOptions): void {
     for (const sourceStyle of Array.from(model.document.querySelectorAll("head style"))) {
       const css = rewriteHtmlSelectors(this.assets?.rewriteCssUrls(sourceStyle.textContent ?? "", this.sourcePath) ?? (sourceStyle.textContent ?? ""));
       this.shadow.append(styleElement(css));
@@ -256,6 +282,7 @@ export class CanvasRenderer {
     shell.className = "editor-preview-shell";
     const resolvedActiveId = pages.some((page) => page.id === activePageId) ? activePageId : pages[0]?.id;
     const sourcePage = resolvedActiveId ? model.find(resolvedActiveId) : null;
+    const pruneInactivePages = options.pruneInactivePages ?? false;
     const body = pruneInactivePages && sourcePage
       ? cloneBodyWithPageBranch(model.document.body, sourcePage)
       : model.document.body.cloneNode(true) as HTMLElement;
@@ -272,10 +299,37 @@ export class CanvasRenderer {
         ancestor = ancestor.parentElement;
       }
     }
+    const activeClone = (resolvedActiveId ? getElementByEditorId(body, resolvedActiveId) : null) ?? body;
+    this.applyBuildState(
+      activeClone,
+      options.activeBuildStep ?? 0,
+      options.buildViewMode ?? "playback",
+      options.focusedBuildStep,
+    );
     this.rewriteResourceReferences(body);
     shell.append(body);
     this.shadow.append(shell);
     this.previewRoot = body;
+  }
+
+  private applyBuildState(root: Element, activeStep: number, viewMode: BuildViewMode, focusedStep?: number): void {
+    root.setAttribute("data-editor-build-view", viewMode);
+    const focus = focusedStep ?? activeStep;
+    for (const element of Array.from(root.querySelectorAll("[data-build]"))) {
+      const raw = element.getAttribute("data-build") ?? "";
+      const step = Number(raw.trim());
+      const valid = Number.isInteger(step) && step > 0;
+      if (!valid) {
+        element.setAttribute("data-editor-build-warning", "invalid-step");
+        continue;
+      }
+      const visible = viewMode === "playback" ? step <= activeStep : true;
+      element.setAttribute("data-editor-build-visibility", visible ? "shown" : "hidden");
+      element.setAttribute("data-editor-build-relation", step < focus ? "past" : step === focus ? "current" : "future");
+      element.setAttribute("data-editor-build-label", `B${step}`);
+      element.classList.toggle("revealed", visible);
+      element.setAttribute("aria-hidden", visible ? "false" : "true");
+    }
   }
 
   private renderSvg(model: SourceDocument): void {

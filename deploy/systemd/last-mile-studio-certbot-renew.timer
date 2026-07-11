@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Last Mile Studio certificate renewal every six hours
+
+[Timer]
+OnCalendar=*-*-* 00/6:00:00
+RandomizedDelaySec=30m
+Persistent=true
+Unit=last-mile-studio-certbot-renew.service
+
+[Install]
+WantedBy=timers.target
