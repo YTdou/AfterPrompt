@@ -5,6 +5,7 @@ import process from "node:process";
 import { chromium } from "playwright-core";
 
 const baseUrl = process.env.STUDIO_BASE_URL ?? "http://127.0.0.1:4173";
+const parsedBaseUrl = new URL(baseUrl);
 const executablePath = process.env.CHROME_PATH ?? [
   "/usr/bin/google-chrome",
   "/usr/bin/google-chrome-stable",
@@ -29,7 +30,11 @@ async function reachable() {
 
 async function ensureServer() {
   if (await reachable()) return;
-  server = spawn("npm", ["run", "dev", "--", "--host", "127.0.0.1", "--force"], {
+  if (parsedBaseUrl.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(parsedBaseUrl.hostname)) {
+    throw new Error(`The external smoke target is unreachable: ${baseUrl}`);
+  }
+  const port = parsedBaseUrl.port || "80";
+  server = spawn("npm", ["run", "dev", "--", "--host", parsedBaseUrl.hostname, "--port", port, "--strictPort"], {
     cwd: process.cwd(),
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -227,11 +232,12 @@ async function run() {
     await slotRow.locator('[data-schema-field="allowed"]').fill("span");
     await slotRow.locator('[data-schema-field="multiple"]').check();
     await page.locator("#fragment-save-submit").click();
-    await page.waitForTimeout(250);
-    if (await page.locator("#fragment-save-dialog").isVisible()) {
-      throw new Error(`Visual Fragment save failed: ${await page.locator("#toast").textContent()}`);
+    try {
+      await page.locator("#fragment-save-dialog").waitFor({ state: "hidden", timeout: 20_000 });
+    } catch {
+      const toast = await page.locator("#toast").textContent();
+      throw new Error(`Visual Fragment save failed: ${toast || "no toast message"}${errors.length ? `\n${errors.join("\n")}` : ""}`);
     }
-    await page.locator("#fragment-save-dialog").waitFor({ state: "hidden" });
 
     await page.locator("#open-fragment-library").click();
     await page.locator("#fragment-library-dialog").waitFor({ state: "visible" });
@@ -387,6 +393,75 @@ async function run() {
     assert(firstPage.visible === "visible" && firstPage.deckVisible === "visible", "The sanitized static deck is still hidden.");
     assert(firstPage.text.includes("source-first presentation workflow"), "The first imported slide has no visible slide content.");
 
+    progress("checking Phase A Build state editing and Phase B orchestration");
+    assert((await page.locator("#build-status").textContent()) === "Initial / 2", "The first demo page did not initialize at Build Initial / 2.");
+    assert((await page.locator(".build-group[data-build-group]").count()) === 2, "The Build panel did not group the first page into two Builds.");
+    assert((await page.locator(".page-thumbnail-builds").count()) === 3, "Build-aware thumbnail badges are missing.");
+    const initialBuildState = await page.evaluate(() => {
+      const root = document.querySelector("#canvas-host")?.shadowRoot;
+      const title = root?.querySelector('[data-editor-id="demo-title-1"]');
+      const copy = root?.querySelector('[data-editor-id="demo-copy-1"]');
+      return {
+        title: title?.getAttribute("data-editor-build-visibility"),
+        copy: copy?.getAttribute("data-editor-build-visibility"),
+      };
+    });
+    assert(initialBuildState.title === "hidden" && initialBuildState.copy === "hidden", "Initial state exposed future Build elements.");
+    await page.locator("#next-build").click();
+    await page.waitForFunction(() => document.querySelector("#build-status")?.textContent === "Build 1 / 2");
+    const buildOneState = await page.evaluate(() => {
+      const root = document.querySelector("#canvas-host")?.shadowRoot;
+      return ["demo-title-1", "demo-copy-1"].map((id) => root?.querySelector(`[data-editor-id="${id}"]`)?.getAttribute("data-editor-build-visibility"));
+    });
+    assert(JSON.stringify(buildOneState) === JSON.stringify(["shown", "hidden"]), `Build 1 visibility is wrong: ${JSON.stringify(buildOneState)}`);
+    await page.locator("#next-build").click();
+    await page.waitForFunction(() => document.querySelector("#build-status")?.textContent === "Build 2 / 2");
+
+    await page.locator('[data-build-element-id="demo-copy-1"]').click();
+    await page.locator("#selected-build-target").selectOption("1");
+    await page.locator('[data-build-action="apply-selected"]').click();
+    await page.waitForFunction(() => document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="demo-copy-1"]')?.getAttribute("data-build") === "1");
+    assert((await page.locator(".build-group[data-build-group]").count()) === 1, "Moving an element across groups did not collapse the empty Build group.");
+    await page.locator("#undo").click();
+    await page.waitForFunction(() => document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="demo-copy-1"]')?.getAttribute("data-build") === "2");
+    const buildElementTransfer = await page.evaluateHandle(() => new DataTransfer());
+    await page.locator('[data-build-element-id="demo-copy-1"]').dispatchEvent("dragstart", { dataTransfer: buildElementTransfer });
+    await page.locator('.build-group[data-build-group="1"] > header').dispatchEvent("drop", { dataTransfer: buildElementTransfer });
+    await page.waitForFunction(() => document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="demo-copy-1"]')?.getAttribute("data-build") === "1");
+    await page.locator("#undo").click();
+    await page.waitForFunction(() => document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="demo-copy-1"]')?.getAttribute("data-build") === "2");
+    await page.locator('[data-layer-id="demo-kicker-1"]').click();
+    await page.locator('[data-build-action="split-selected"]').click();
+    await page.waitForFunction(() => document.querySelectorAll(".build-group[data-build-group]").length === 3);
+    await page.locator("#undo").click();
+    await page.waitForFunction(() => document.querySelectorAll(".build-group[data-build-group]").length === 2);
+
+    const buildGroupTransfer = await page.evaluateHandle(() => new DataTransfer());
+    await page.locator('.build-group[data-build-group="1"] > header').dispatchEvent("dragstart", { dataTransfer: buildGroupTransfer });
+    await page.locator('.build-group[data-build-group="2"] > header').dispatchEvent("drop", { dataTransfer: buildGroupTransfer });
+    await page.waitForFunction(() => document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="demo-title-1"]')?.getAttribute("data-build") === "2");
+    await page.locator("#undo").click();
+    await page.waitForFunction(() => document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="demo-title-1"]')?.getAttribute("data-build") === "1");
+
+    await page.locator("#previous-build").click();
+    await page.locator("#previous-build").click();
+    await page.locator("#build-view-mode").selectOption("all");
+    await page.waitForFunction(() => document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="demo-copy-1"]')?.getAttribute("data-editor-build-visibility") === "shown");
+    await page.locator("#build-view-mode").selectOption("playback");
+    await page.locator("#next-build").click();
+    await page.locator("#next-build").click();
+    await page.locator('#canvas-host [data-editor-id="demo-copy-1"]').dblclick();
+    const buildInlineEditor = page.locator("#canvas-host .editor-inline-textarea");
+    await buildInlineEditor.fill("Build 2 edited copy");
+    await page.locator('#canvas-host .editor-inline-actions button[type="submit"]').click();
+    await page.locator("#previous-build").click();
+    await page.locator("#previous-build").click();
+    await page.locator("#undo").click();
+    await page.waitForFunction(() => document.querySelector("#build-status")?.textContent === "Build 2 / 2");
+    assert((await shadowText(page, "demo-copy-1"))?.includes("Edit real HTML"), "Undo did not restore Build content and observation context.");
+    await page.locator("#redo").click();
+    assert((await page.locator(".cm-content").innerText()).includes("Build 2 edited copy"), "Redo did not restore the Build-state text edit in source.");
+
     const thumbnailText = await page.locator('[data-thumbnail-host="1"]').evaluate((host) => host.shadowRoot?.textContent ?? "");
     assert(thumbnailText.includes("Refine the message"), "The second thumbnail is not a real DOM preview of page two.");
     const secondThumbnailPreview = await page.locator('[data-page-id="demo-page-2"] .page-thumbnail-preview').boundingBox();
@@ -433,7 +508,13 @@ async function run() {
     await previewFrame.locator("#lms-status").waitFor();
     assert((await previewFrame.locator("#lms-status").textContent())?.startsWith("1 / 4"), "Presentation preview did not initialize all four pages.");
     await previewFrame.locator("#lms-next").click();
+    await previewFrame.locator("#lms-status").filter({ hasText: "Build 1 / 2" }).waitFor();
+    await previewFrame.locator("#lms-next").click();
+    await previewFrame.locator("#lms-status").filter({ hasText: "Build 2 / 2" }).waitFor();
+    await previewFrame.locator("#lms-next").click();
     await previewFrame.locator("#lms-status").filter({ hasText: "2 / 4" }).waitFor();
+    await previewFrame.locator("#lms-previous").click();
+    await previewFrame.locator("#lms-status").filter({ hasText: "1 / 4 · Build 2 / 2" }).waitFor();
     await page.locator("#close-presentation").click();
 
     const slidesDownloadPromise = page.waitForEvent("download");
@@ -453,8 +534,58 @@ async function run() {
     await exportedPage.goto(`file://${exportedHtmlPath}`);
     await exportedPage.locator("#lms-status").filter({ hasText: "1 / 4" }).waitFor();
     await exportedPage.locator("#lms-next").click();
+    await exportedPage.locator("#lms-status").filter({ hasText: "Build 1 / 2" }).waitFor();
+    await exportedPage.locator("#lms-next").click();
+    await exportedPage.locator("#lms-next").click();
     await exportedPage.locator("#lms-status").filter({ hasText: "2 / 4" }).waitFor();
     await exportedPage.close();
+
+    progress("checking the real 23-page HotCarbon Build artifact");
+    await page.locator("#file-input").setInputFiles("reference/artifacts/HotCarbon_Oral_Slides_SelfContained.html");
+    await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("page 1/23"), null, { timeout: 40_000 });
+    assert((await page.locator(".page-thumbnail").count()) === 23, "HotCarbon import did not expose 23 pages.");
+    assert((await page.locator(".page-thumbnail-builds").count()) === 14, "HotCarbon import did not identify 14 Build pages.");
+    assert((await page.locator("#build-status").textContent()) === "Initial / 2", "HotCarbon first page did not initialize at Initial / 2.");
+    assert((await page.locator(".build-group[data-build-group]").count()) === 2, "HotCarbon first page Build groups were not detected.");
+    await page.locator("#next-build").click();
+    await page.waitForFunction(() => document.querySelector("#build-status")?.textContent === "Build 1 / 2");
+    await page.locator("#next-build").click();
+    await page.waitForFunction(() => document.querySelector("#build-status")?.textContent === "Build 2 / 2");
+
+    const hotSourceDownloadPromise = page.waitForEvent("download");
+    await page.locator("#export-source").click();
+    const hotSourceDownload = await hotSourceDownloadPromise;
+    const hotSourcePath = await hotSourceDownload.path();
+    assert(hotSourcePath, "HotCarbon sanitized source export did not produce a file.");
+    const hotSource = await readFile(hotSourcePath, "utf8");
+    assert((hotSource.match(/data-build="[123]"/g) ?? []).length === 94, "HotCarbon sanitized source did not preserve all 94 Build elements.");
+    assert(!hotSource.includes("<script"), "HotCarbon imported scripts survived sanitization.");
+    assert(!hotSource.includes("data-editor-build-visibility"), "Editor Build observation state polluted canonical source.");
+
+    await page.locator("#preview-presentation").click();
+    const hotPreview = page.frameLocator("#presentation-frame");
+    await hotPreview.locator("#lms-status").filter({ hasText: "1 / 23 · Initial / 2" }).waitFor({ timeout: 40_000 });
+    await hotPreview.locator("#lms-next").click();
+    await hotPreview.locator("#lms-status").filter({ hasText: "1 / 23 · Build 1 / 2" }).waitFor();
+    await hotPreview.locator("#lms-next").click();
+    await hotPreview.locator("#lms-next").click();
+    await hotPreview.locator("#lms-status").filter({ hasText: "2 / 23" }).waitFor();
+    await page.locator("#close-presentation").click();
+
+    const hotSlidesPromise = page.waitForEvent("download", { timeout: 40_000 });
+    await page.locator("#export-slides").click();
+    const hotSlidesDownload = await hotSlidesPromise;
+    const hotSlidesPath = await hotSlidesDownload.path();
+    assert(hotSlidesPath, "HotCarbon standalone Build Slides export did not produce a file.");
+    const hotExportPath = "/tmp/last-mile-studio-hotcarbon-build-export.html";
+    await copyFile(hotSlidesPath, hotExportPath);
+    const hotExportPage = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    hotExportPage.on("pageerror", (error) => errors.push(`HotCarbon standalone export: ${error.stack ?? error.message}`));
+    await hotExportPage.goto(`file://${hotExportPath}`, { timeout: 40_000 });
+    await hotExportPage.locator("#lms-status").filter({ hasText: "1 / 23 · Initial / 2" }).waitFor({ timeout: 40_000 });
+    await hotExportPage.locator("#lms-next").click();
+    await hotExportPage.locator("#lms-status").filter({ hasText: "Build 1 / 2" }).waitFor();
+    await hotExportPage.close();
 
     assert(errors.length === 0, `Browser runtime errors:\n${errors.join("\n")}`);
     process.stdout.write(`${JSON.stringify({
@@ -486,6 +617,13 @@ async function run() {
       visualFragmentPropertyOverride: true,
       visualFragmentSlotInsertion: true,
       visualFragmentDefinitionSync: true,
+      buildStateEditing: true,
+      buildAllAndGroupViews: true,
+      buildOrchestration: true,
+      buildUndoRedoContext: true,
+      buildFirstPreviewAndExport: true,
+      hotCarbonBuildPages: 14,
+      hotCarbonBuildElements: 94,
     }, null, 2)}\n`);
   } finally {
     await browser.close();

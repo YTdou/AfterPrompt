@@ -28,6 +28,33 @@ export interface DocumentPage {
   index: number;
 }
 
+export type BuildViewMode = "playback" | "group" | "all";
+
+export interface BuildElement {
+  elementId: string;
+  step: number;
+}
+
+export interface BuildGroup {
+  step: number;
+  elementIds: string[];
+}
+
+export interface BuildWarning {
+  code: "invalid-step" | "nested-conflict";
+  elementId: string;
+  message: string;
+}
+
+export interface PageBuildSequence {
+  pageId: string;
+  steps: number[];
+  groups: BuildGroup[];
+  maxStep: number;
+  elementCount: number;
+  warnings: BuildWarning[];
+}
+
 export interface ElementSummary {
   id: string;
   type: string;
@@ -123,7 +150,11 @@ export type EditorCommand =
   | { action: "unlinkComponentInstance"; elementId: string }
   | { action: "setVisibility"; elementId: string; visible: boolean }
   | { action: "setLocked"; elementId: string; locked: boolean }
-  | { action: "reorderElement"; elementId: string; direction: "up" | "down" | "front" | "back" };
+  | { action: "reorderElement"; elementId: string; direction: "up" | "down" | "front" | "back" }
+  | { action: "setElementBuild"; elementIds: string[]; step: number | null }
+  | { action: "moveBuildGroup"; pageId: string; fromStep: number; toStep: number }
+  | { action: "mergeBuildGroups"; pageId: string; sourceStep: number; targetStep: number }
+  | { action: "splitBuildGroup"; pageId: string; elementIds: string[]; targetPosition: number };
 
 export interface CommandResult {
   action: EditorCommand["action"];
@@ -138,6 +169,8 @@ export interface DocumentSnapshot {
   sourceName: string;
   selectedIds: string[];
   activePageId?: string;
+  buildStepsByPage?: Record<string, number>;
+  buildViewMode?: BuildViewMode;
   assets?: ProjectAsset[];
 }
 

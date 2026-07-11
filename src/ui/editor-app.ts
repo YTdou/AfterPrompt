@@ -27,7 +27,7 @@ import {
   ProjectAssets,
 } from "../core/project";
 import { sanitizeCss } from "../core/sanitizer";
-import type { Bounds, DocumentKind, DocumentPage, DocumentSnapshot, ElementTreeNode, OperationLogEntry } from "../core/types";
+import type { Bounds, BuildViewMode, DocumentKind, DocumentPage, DocumentSnapshot, ElementTreeNode, OperationLogEntry, PageBuildSequence } from "../core/types";
 import { SourceCodeEditor } from "./code-editor";
 import { FragmentWorkspace, type FragmentWorkspaceContext } from "./fragment-workspace";
 
@@ -151,6 +151,16 @@ const appTemplate = `
             <span id="page-count">1 / 1</span>
             <button id="next-page" title="下一页 (Page Down)" aria-label="下一页">›</button>
           </div>
+          <div id="build-control" class="toolbar build-control" hidden>
+            <button id="previous-build" title="Previous Build (Alt + [)" aria-label="Previous Build">‹</button>
+            <span id="build-status">Initial / 0</span>
+            <button id="next-build" title="Next Build (Alt + ])" aria-label="Next Build">›</button>
+            <select id="build-view-mode" aria-label="Build 视图">
+              <option value="playback">Playback State</option>
+              <option value="group">Current Group</option>
+              <option value="all">All Builds</option>
+            </select>
+          </div>
           <div class="toolbar canvas-size-control">
             <select id="canvas-preset" aria-label="画布尺寸预设">
               <option value="custom">自定义</option>
@@ -194,6 +204,12 @@ const appTemplate = `
 
       <aside class="panel inspector-panel">
         <div class="panel-heading"><div><span class="eyebrow">INSPECTOR</span><h2>属性</h2></div></div>
+        <section id="build-panel" class="build-panel" hidden>
+          <div class="build-panel-heading"><span class="eyebrow">BUILD SEQUENCE</span><strong>Build 编排</strong></div>
+          <div id="build-selection-controls" class="build-selection-controls"></div>
+          <div id="build-groups" class="build-groups"></div>
+          <div id="build-warnings" class="build-warnings" hidden></div>
+        </section>
         <div id="inspector-content" class="inspector-content"></div>
       </aside>
     </main>
@@ -252,6 +268,8 @@ export class EditorApp {
   private pan = { x: 0, y: 0 };
   private codeDirty = false;
   private activePageIndex = 0;
+  private buildStepsByPage = new Map<string, number>();
+  private buildViewMode: BuildViewMode = "playback";
   private operationLog: OperationLogEntry[] = [];
   private spacePressed = false;
   private toastTimer = 0;
@@ -340,6 +358,13 @@ export class EditorApp {
     this.get("#previous-page").addEventListener("click", () => this.changePage(this.activePageIndex - 1));
     this.get("#next-page").addEventListener("click", () => this.changePage(this.activePageIndex + 1));
     this.get("#page-select").addEventListener("change", (event) => this.changePage(Number((event.target as HTMLSelectElement).value)));
+    this.get("#previous-build").addEventListener("click", () => this.changeBuild(-1));
+    this.get("#next-build").addEventListener("click", () => this.changeBuild(1));
+    this.get("#build-view-mode").addEventListener("change", (event) => {
+      this.buildViewMode = (event.target as HTMLSelectElement).value as BuildViewMode;
+      this.history.replaceCurrent(this.createSnapshot());
+      this.renderDocument(false);
+    });
     this.get("#duplicate-page").addEventListener("click", () => this.duplicateActivePage());
     this.get("#delete-page").addEventListener("click", () => this.deleteActivePage());
     this.get("#move-page-earlier").addEventListener("click", () => this.moveActivePage(-1));
@@ -373,6 +398,15 @@ export class EditorApp {
     thumbnails.addEventListener("dragend", () => {
       thumbnails.querySelectorAll(".is-dragging").forEach((element) => element.classList.remove("is-dragging"));
     });
+
+    const buildPanel = this.get("#build-panel");
+    buildPanel.addEventListener("click", (event) => this.handleBuildPanelClick(event));
+    buildPanel.addEventListener("dragstart", (event) => this.handleBuildDragStart(event as DragEvent));
+    buildPanel.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      if ((event as DragEvent).dataTransfer) (event as DragEvent).dataTransfer!.dropEffect = "move";
+    });
+    buildPanel.addEventListener("drop", (event) => this.handleBuildDrop(event as DragEvent));
 
     this.get("#layers-tree").addEventListener("click", (event) => {
       const button = (event.target as Element).closest<HTMLButtonElement>("[data-layer-id]");
@@ -473,7 +507,25 @@ export class EditorApp {
 
   private createSnapshot(): DocumentSnapshot {
     const activePageId = this.model.pages()[this.activePageIndex]?.id;
-    return { ...this.model.snapshot(this.selectedIds, activePageId), assets: this.assets.list() };
+    return {
+      ...this.model.snapshot(
+        this.selectedIds,
+        activePageId,
+        Object.fromEntries(this.buildStepsByPage),
+        this.buildViewMode,
+      ),
+      assets: this.assets.list(),
+    };
+  }
+
+  private activePageKey(): string {
+    return this.model.pages()[this.activePageIndex]?.id ?? "__document__";
+  }
+
+  private activeBuildStep(sequence = this.model.buildSequence(this.activePageIndex)): number {
+    const requested = this.buildStepsByPage.get(this.activePageKey()) ?? 0;
+    if (requested === 0 || sequence.steps.length === 0) return 0;
+    return sequence.steps.includes(requested) ? requested : (sequence.steps.filter((step) => step <= requested).at(-1) ?? 0);
   }
 
   private renderDocument(syncCode: boolean): void {
@@ -484,7 +536,14 @@ export class EditorApp {
     const canvasHost = this.get("#canvas-host");
     canvasHost.style.width = `${this.model.canvas.width}px`;
     canvasHost.style.height = `${this.model.canvas.height}px`;
-    this.renderer.render(this.model, this.assets, this.sourcePath, pages[this.activePageIndex]?.id);
+    const buildSequence = this.model.buildSequence(this.activePageIndex);
+    const activeBuildStep = this.activeBuildStep(buildSequence);
+    this.buildStepsByPage.set(this.activePageKey(), activeBuildStep);
+    this.renderer.render(this.model, this.assets, this.sourcePath, pages[this.activePageIndex]?.id, {
+      activeBuildStep,
+      buildViewMode: this.buildViewMode,
+      focusedBuildStep: activeBuildStep || buildSequence.steps[0],
+    });
     this.transform.setDocumentKind(this.model.kind);
     this.updateCanvasTransform();
     this.transform.setSelection(this.selectedIds);
@@ -507,6 +566,8 @@ export class EditorApp {
     this.get("#undo").toggleAttribute("disabled", !this.history.canUndo);
     this.get("#redo").toggleAttribute("disabled", !this.history.canRedo);
     this.renderPageControl(pages);
+    this.renderBuildControl(buildSequence);
+    this.renderBuildPanel(buildSequence);
     this.renderLayers();
     this.renderInspector();
     this.fragments.refreshSelection();
@@ -540,15 +601,19 @@ export class EditorApp {
     const scale = Math.min(142 / this.model.canvas.width, 82 / this.model.canvas.height);
     const previewWidth = Math.max(1, this.model.canvas.width * scale);
     const previewHeight = Math.max(1, this.model.canvas.height * scale);
-    thumbnails.innerHTML = pages.map((page) => `
+    thumbnails.innerHTML = pages.map((page) => {
+      const sequence = this.model.buildSequence(page.index);
+      return `
       <button class="page-thumbnail${page.index === this.activePageIndex ? " is-active" : ""}" data-page-index="${page.index}" data-page-id="${escapeHtml(page.id)}" draggable="true" title="${escapeHtml(page.label)}">
         <span class="page-thumbnail-number">${page.index + 1}</span>
+        ${sequence.groups.length ? `<span class="page-thumbnail-builds">+${sequence.groups.length} builds</span>` : ""}
         <span class="page-thumbnail-preview" style="width:${previewWidth.toFixed(2)}px;height:${previewHeight.toFixed(2)}px">
           <span class="page-thumbnail-canvas" data-thumbnail-host="${page.index}" style="width:${this.model.canvas.width}px;height:${this.model.canvas.height}px;transform:scale(${scale})"></span>
         </span>
         <span class="page-thumbnail-label">${escapeHtml(page.label)}</span>
       </button>
-    `).join("");
+    `;
+    }).join("");
 
     pages.forEach((page) => {
       const host = thumbnails.querySelector<HTMLElement>(`[data-thumbnail-host="${page.index}"]`);
@@ -557,11 +622,205 @@ export class EditorApp {
         onSelect: () => undefined,
         onInlineTextCommit: () => undefined,
       });
-      renderer.render(this.model, this.assets, this.sourcePath, page.id, { interactive: false, pruneInactivePages: true });
+      const sequence = this.model.buildSequence(page.index);
+      renderer.render(this.model, this.assets, this.sourcePath, page.id, {
+        interactive: false,
+        pruneInactivePages: true,
+        activeBuildStep: sequence.maxStep,
+        buildViewMode: "playback",
+      });
     });
     requestAnimationFrame(() => {
       thumbnails.querySelector(".page-thumbnail.is-active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
     });
+  }
+
+  private renderBuildControl(sequence: PageBuildSequence): void {
+    const control = this.get("#build-control");
+    const hasPresentationPage = this.model.kind === "html" && (this.model.pages().length > 0 || sequence.elementCount > 0);
+    control.hidden = !hasPresentationPage;
+    if (!hasPresentationPage) return;
+    const activeStep = this.activeBuildStep(sequence);
+    const position = activeStep === 0 ? 0 : Math.max(0, sequence.steps.indexOf(activeStep) + 1);
+    this.get("#build-status").textContent = position === 0
+      ? `Initial / ${sequence.groups.length}`
+      : `Build ${position} / ${sequence.groups.length}`;
+    this.get<HTMLButtonElement>("#previous-build").disabled = position === 0;
+    this.get<HTMLButtonElement>("#next-build").disabled = position >= sequence.steps.length;
+    this.get<HTMLSelectElement>("#build-view-mode").value = this.buildViewMode;
+  }
+
+  private buildElementLabel(id: string): string {
+    const element = this.model.find(id);
+    if (!element) return id;
+    const explicit = element.getAttribute("data-editor-name") ?? element.getAttribute("aria-label");
+    const text = element.textContent?.replace(/\s+/g, " ").trim();
+    return explicit?.trim() || text?.slice(0, 42) || `${element.localName} · ${id}`;
+  }
+
+  private renderBuildPanel(sequence: PageBuildSequence): void {
+    const panel = this.get("#build-panel");
+    const hasPresentationPage = this.model.kind === "html" && (this.model.pages().length > 0 || sequence.elementCount > 0);
+    panel.hidden = !hasPresentationPage;
+    if (!hasPresentationPage) return;
+
+    const selectedOnPage = this.selectedIds.filter((id) => this.model.elementBelongsToPage(id, this.activePageIndex));
+    const currentSteps = Array.from(new Set(selectedOnPage.map((id) => this.model.buildStepForElement(id)).filter((step): step is number => step !== null)));
+    const selectionSummary = selectedOnPage.length
+      ? `${selectedOnPage.length} selected · ${currentSteps.length === 1 ? `Build ${currentSteps[0]}` : currentSteps.length ? "mixed Build groups" : "Always Visible"}`
+      : "Select elements to assign a Build";
+    this.get("#build-selection-controls").innerHTML = `
+      <div class="build-selection-summary">${escapeHtml(selectionSummary)}</div>
+      <div class="build-selection-row">
+        <select id="selected-build-target" aria-label="Selected elements Build target" ${selectedOnPage.length ? "" : "disabled"}>
+          <option value="always">Always Visible</option>
+          ${sequence.groups.map((group, index) => `<option value="${group.step}">Build ${index + 1}</option>`).join("")}
+          <option value="new">New Build at end</option>
+        </select>
+        <button data-build-action="apply-selected" ${selectedOnPage.length ? "" : "disabled"}>应用</button>
+        <button data-build-action="split-selected" ${selectedOnPage.length ? "" : "disabled"}>拆为新组</button>
+      </div>
+    `;
+
+    const editingRoot = this.model.editingRoot(this.activePageIndex);
+    const alwaysCount = editingRoot
+      ? [editingRoot, ...Array.from(editingRoot.querySelectorAll("[data-editor-id]"))]
+        .filter((element) => element.hasAttribute("data-editor-id") && !element.hasAttribute("data-build")).length
+      : 0;
+    const groups = this.get("#build-groups");
+    groups.innerHTML = `
+      <div class="build-drop-zone" data-build-insert-position="0">Drop here to create Build 1</div>
+      <section class="build-group always-visible-group">
+        <header><strong>Always Visible</strong><span>${alwaysCount} elements</span></header>
+      </section>
+      ${sequence.groups.map((group, index) => `
+        <section class="build-group${this.activeBuildStep(sequence) === group.step ? " is-active" : ""}" data-build-group="${group.step}">
+          <header data-build-focus="${group.step}" data-build-group-drag="${group.step}" draggable="true">
+            <strong>Build ${index + 1}</strong><span>${group.elementIds.length} elements · data-build=${group.step}</span>
+            <span class="build-group-actions">
+              <button data-build-action="move-up" data-build-step="${group.step}" ${index === 0 ? "disabled" : ""} title="Move group earlier">↑</button>
+              <button data-build-action="move-down" data-build-step="${group.step}" ${index === sequence.groups.length - 1 ? "disabled" : ""} title="Move group later">↓</button>
+              <button data-build-action="merge-previous" data-build-step="${group.step}" ${index === 0 ? "disabled" : ""} title="Merge into previous group">合并</button>
+            </span>
+          </header>
+          <div class="build-group-elements">
+            ${group.elementIds.map((id) => `<button class="build-element${this.selectedIds.includes(id) ? " is-selected" : ""}" data-build-element-id="${escapeHtml(id)}" draggable="true" title="${escapeHtml(id)}"><span>${escapeHtml(this.buildElementLabel(id))}</span><code>${escapeHtml(id)}</code></button>`).join("")}
+          </div>
+        </section>
+        <div class="build-drop-zone" data-build-insert-position="${index + 1}">Drop elements here for a new Build</div>
+      `).join("")}
+    `;
+
+    const warnings = this.get("#build-warnings");
+    warnings.hidden = sequence.warnings.length === 0;
+    warnings.innerHTML = sequence.warnings.map((warning) => `<p><strong>${escapeHtml(warning.code)}</strong> ${escapeHtml(warning.message)}</p>`).join("");
+  }
+
+  private changeBuild(offset: -1 | 1): void {
+    const sequence = this.model.buildSequence(this.activePageIndex);
+    const active = this.activeBuildStep(sequence);
+    const position = active === 0 ? 0 : sequence.steps.indexOf(active) + 1;
+    const nextPosition = Math.min(Math.max(0, position + offset), sequence.steps.length);
+    if (nextPosition === position) return;
+    this.buildStepsByPage.set(this.activePageKey(), nextPosition === 0 ? 0 : sequence.steps[nextPosition - 1]!);
+    this.history.replaceCurrent(this.createSnapshot());
+    this.selectedIds = this.selectedIds.filter((id) => {
+      const step = this.model.buildStepForElement(id);
+      return this.buildViewMode !== "playback" || step === null || step <= (this.buildStepsByPage.get(this.activePageKey()) ?? 0);
+    });
+    this.renderDocument(false);
+  }
+
+  private handleBuildPanelClick(event: Event): void {
+    const target = event.target as Element;
+    const elementButton = target.closest<HTMLElement>("[data-build-element-id]");
+    if (elementButton?.dataset.buildElementId) {
+      const mouse = event as MouseEvent;
+      this.selectElement(elementButton.dataset.buildElementId, mouse.ctrlKey || mouse.metaKey || mouse.shiftKey);
+      return;
+    }
+    const focus = target.closest<HTMLElement>("[data-build-focus]");
+    const action = target.closest<HTMLButtonElement>("[data-build-action]");
+    if (!action && focus?.dataset.buildFocus) {
+      this.buildStepsByPage.set(this.activePageKey(), Number(focus.dataset.buildFocus));
+      this.buildViewMode = "group";
+      this.history.replaceCurrent(this.createSnapshot());
+      this.renderDocument(false);
+      return;
+    }
+    if (!action?.dataset.buildAction) return;
+    const sequence = this.model.buildSequence(this.activePageIndex);
+    const pageId = sequence.pageId;
+    const step = Number(action.dataset.buildStep);
+    if (action.dataset.buildAction === "apply-selected") {
+      const value = this.get<HTMLSelectElement>("#selected-build-target").value;
+      this.commitMutation("Set element Build", () => {
+        if (value === "new") this.model.apply({ action: "splitBuildGroup", pageId, elementIds: this.selectedIds, targetPosition: sequence.groups.length });
+        else this.model.apply({ action: "setElementBuild", elementIds: this.selectedIds, step: value === "always" ? null : Number(value) });
+        this.model.normalizeBuildSteps(this.activePageIndex);
+      });
+    } else if (action.dataset.buildAction === "split-selected") {
+      const selectedSteps = this.selectedIds.map((id) => this.model.buildStepForElement(id)).filter((value): value is number => value !== null);
+      const sourceIndex = selectedSteps.length ? sequence.groups.findIndex((group) => group.step === selectedSteps[0]) : sequence.groups.length - 1;
+      this.commitMutation("Split Build group", () => this.model.apply({
+        action: "splitBuildGroup",
+        pageId,
+        elementIds: this.selectedIds,
+        targetPosition: Math.max(0, sourceIndex + 1),
+      }));
+    } else if (action.dataset.buildAction === "move-up" || action.dataset.buildAction === "move-down") {
+      const index = sequence.groups.findIndex((group) => group.step === step);
+      const target = sequence.groups[index + (action.dataset.buildAction === "move-up" ? -1 : 1)];
+      if (target) this.commitMutation("Move Build group", () => this.model.apply({ action: "moveBuildGroup", pageId, fromStep: step, toStep: target.step }));
+    } else if (action.dataset.buildAction === "merge-previous") {
+      const index = sequence.groups.findIndex((group) => group.step === step);
+      const previous = sequence.groups[index - 1];
+      if (previous) this.commitMutation("Merge Build groups", () => this.model.apply({ action: "mergeBuildGroups", pageId, sourceStep: step, targetStep: previous.step }));
+    }
+  }
+
+  private handleBuildDragStart(event: DragEvent): void {
+    if (!event.dataTransfer) return;
+    const target = event.target as Element;
+    const element = target.closest<HTMLElement>("[data-build-element-id]");
+    if (element?.dataset.buildElementId) {
+      const ids = this.selectedIds.includes(element.dataset.buildElementId) ? this.selectedIds : [element.dataset.buildElementId];
+      event.dataTransfer.setData("application/x-lms-build-elements", JSON.stringify(ids));
+      event.dataTransfer.setData("text/plain", ids.join(","));
+      return;
+    }
+    const group = target.closest<HTMLElement>("[data-build-group-drag]");
+    if (group?.dataset.buildGroupDrag) event.dataTransfer.setData("application/x-lms-build-group", group.dataset.buildGroupDrag);
+  }
+
+  private handleBuildDrop(event: DragEvent): void {
+    event.preventDefault();
+    const target = event.target as Element;
+    const sequence = this.model.buildSequence(this.activePageIndex);
+    const pageId = sequence.pageId;
+    const elementPayload = event.dataTransfer?.getData("application/x-lms-build-elements") ?? "";
+    const groupPayload = event.dataTransfer?.getData("application/x-lms-build-group") ?? "";
+    const targetGroup = target.closest<HTMLElement>("[data-build-group]")?.dataset.buildGroup;
+    const insertPosition = target.closest<HTMLElement>("[data-build-insert-position]")?.dataset.buildInsertPosition;
+    if (elementPayload) {
+      let ids: string[];
+      try { ids = JSON.parse(elementPayload) as string[]; } catch { return; }
+      if (insertPosition !== undefined) {
+        this.commitMutation("Create Build group", () => this.model.apply({ action: "splitBuildGroup", pageId, elementIds: ids, targetPosition: Number(insertPosition) }), ids);
+      } else if (targetGroup) {
+        this.commitMutation("Move elements to Build group", () => {
+          this.model.apply({ action: "setElementBuild", elementIds: ids, step: Number(targetGroup) });
+          this.model.normalizeBuildSteps(this.activePageIndex);
+        }, ids);
+      }
+    } else if (groupPayload && targetGroup && groupPayload !== targetGroup) {
+      this.commitMutation("Move Build group", () => this.model.apply({
+        action: "moveBuildGroup",
+        pageId,
+        fromStep: Number(groupPayload),
+        toStep: Number(targetGroup),
+      }));
+    }
   }
 
   private changePage(index: number): void {
@@ -751,9 +1010,11 @@ export class EditorApp {
     } else {
       this.selectedIds = [id];
     }
+    this.history.replaceCurrent(this.createSnapshot());
     this.transform.setSelection(this.selectedIds);
     this.renderLayers();
     this.renderInspector();
+    this.renderBuildPanel(this.model.buildSequence(this.activePageIndex));
     this.fragments.refreshSelection();
     this.updateLiveSelectionStatus();
   }
@@ -793,6 +1054,8 @@ export class EditorApp {
     const pages = this.model.pages();
     const restoredPageIndex = snapshot.activePageId ? pages.findIndex((page) => page.id === snapshot.activePageId) : -1;
     this.activePageIndex = restoredPageIndex >= 0 ? restoredPageIndex : Math.min(this.activePageIndex, Math.max(0, pages.length - 1));
+    this.buildStepsByPage = new Map(Object.entries(snapshot.buildStepsByPage ?? {}).map(([id, step]) => [id, Number(step)]));
+    this.buildViewMode = snapshot.buildViewMode ?? "playback";
     this.selectedIds = snapshot.selectedIds.filter((id) => Boolean(this.model.find(id)));
     this.renderDocument(true);
   }
@@ -829,6 +1092,8 @@ export class EditorApp {
       this.operationLog = operations.map((entry) => ({ ...entry, elementIds: [...entry.elementIds] }));
       this.selectedIds = [];
       this.activePageIndex = 0;
+      this.buildStepsByPage.clear();
+      this.buildViewMode = "playback";
       this.history.reset(this.createSnapshot(), "Loaded document");
       this.renderDocument(true);
       requestAnimationFrame(() => this.fitCanvas());
@@ -1117,6 +1382,11 @@ export class EditorApp {
       node instanceof Element && node.matches("input,textarea,select,[contenteditable],.cm-editor"),
     );
     if (editableTarget) return;
+    if (event.altKey && (event.key === "[" || event.key === "]")) {
+      event.preventDefault();
+      this.changeBuild(event.key === "[" ? -1 : 1);
+      return;
+    }
     if (event.code === "Space") {
       this.spacePressed = true;
       event.preventDefault();

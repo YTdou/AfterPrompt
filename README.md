@@ -30,6 +30,7 @@ npm run dev
 ```bash
 npm run dev          # 开发服务器
 npm run build        # 严格类型检查并生成 dist/
+npm run build:production # 为 /last-mile-studio/ 生成无 source map 的生产制品
 npm run test         # 核心自动化测试
 npm run test:browser # 可选：用本机 Chrome/Chromium 跑真实 UI 冒烟测试
 npm run check        # 核心测试 + 生产构建
@@ -41,6 +42,12 @@ npm run cli -- --help
 ```bash
 CHROME_PATH=/path/to/chrome npm run test:browser
 ```
+
+## 生产部署
+
+当前生产拓扑使用系统 Nginx 直接服务不可变静态制品，不运行 Vite preview 或常驻 Node 进程。发布采用版本目录、SHA-256 校验、原子 `current` 链接和显式回滚；IP HTTPS 使用自动续期的 Let's Encrypt 短期证书。
+
+完整的首次部署、日常升级、验收和回滚流程见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
 
 ## 已实现能力
 
@@ -60,7 +67,11 @@ CHROME_PATH=/path/to/chrome npm run test:browser
 
 ### 演示预览与独立 Slides
 
-- 在隔离 iframe 中预览当前 HTML 演示稿，支持前后翻页、方向键、Page Up / Page Down、Home / End 和全屏；
+- 原生识别正整数 `data-build`，同一步元素作为一组累计出现；页面与 Build 是互相独立的编辑维度；
+- 编辑器提供 Playback State、Current Group 和 All Builds 三种视图；后续 Build 中的真实元素仍可选择、移动、缩放和双击编辑；
+- Build 编排面板支持设置/移除 Build、拖动元素跨组、拖动组排序、新建、拆分和合并，所有文档变更进入 Undo / Redo 并同步标准源码；
+- 页面缩略图默认显示 Final Build，并标记每页 Build 数；非法 Build 值和父子 Build 可见性冲突会明确提示；
+- 在隔离 iframe 中预览当前 HTML 演示稿，前进时先推进当前页 Build，完成后再翻页；后退时先撤销 Build，Initial 再返回上一页 Final；同时支持方向键、Page Up / Page Down、Home / End 和全屏；
 - 导出单个可独立播放的 `*-slides.html`；
 - 导出时内嵌已导入的本地 CSS、图片、SVG 和字体资源，无法解析的本地资源会明确提示；
 - 导入文档原有脚本始终被移除；独立 Slides 只运行编辑器生成的导航脚本，实际页面位于禁止脚本的内层 sandbox iframe；
@@ -115,6 +126,7 @@ CHROME_PATH=/path/to/chrome npm run test:browser
 - 本地 CLI 支持查询、获取、准备稳定 ID、批量执行 JSON 命令、验证和导出；
 - CLI 还能创建、检查、验证、插入和查询 Visual Fragment；
 - 命令层支持修改、移动、缩放、旋转、文字、样式、添加、删除、显隐、锁定、重排、组件属性、插槽插入和解除实例关联。
+- Build 结构化命令与界面复用同一个文档模型入口，支持设置元素 Build、移动/合并 Build 组和拆出新组。
 
 ## 基本使用方法
 
@@ -133,6 +145,15 @@ CHROME_PATH=/path/to/chrome npm run test:browser
 3. 使用“复制页”“删除页”“前移”“后移”，或直接拖动缩略图调整顺序；
 4. 在画布尺寸菜单选择 16:9、4:3 或手动输入尺寸；
 5. 点击“演示预览”检查键盘翻页，再点击“导出 Slides”。
+
+### 编辑和编排 Build
+
+1. 导入包含正整数 `data-build` 的静态 HTML 演示稿；顶部 Build 控件会显示 `Initial / N`；
+2. 用 Previous / Next Build 在真实累计播放状态之间切换；编辑模式到达 Final 后不会自动翻页；
+3. 切换到 `Current Group` 聚焦当前组，或用 `All Builds` 查看并选择所有隐藏元素；
+4. 在右侧 Build 编排面板中选择元素并设置为已有组、New Build 或 Always Visible；也可拖动元素跨组、拖动组标题排序；
+5. 使用拆分和合并调整同一步分组，随后用 Undo / Redo 验证编排；源码中的 `data-build` 会同步更新，临时 `revealed` 状态不会写入源码；
+6. 用“演示预览”和“导出 Slides”验证 Build-first 播放语义。
 
 ### 编辑 SVG
 
@@ -211,15 +232,15 @@ npm run cli -- fragments /tmp/ai-slide-with-fragment.html
 ## 示例与验收材料
 
 - [examples/ai-slide.html](examples/ai-slide.html)：标题、两段正文、本地图片、色块和内嵌 SVG 图标；
-- [examples/multi-page-deck.html](examples/multi-page-deck.html)：Phase 4 页面缩略图、页面管理、预览和独立导出的三页演示稿；
+- [examples/multi-page-deck.html](examples/multi-page-deck.html)：页面管理、Build 状态/编排、预览和独立导出的三页演示稿；
 - [examples/simple-page.html](examples/simple-page.html)：目录导入示例，依赖本地 CSS 和图片；
 - [examples/shapes.svg](examples/shapes.svg)：`text`、`rect`、`circle`、`line`、`path`、`polygon` 和 `g`；
 - [examples/codex-commands.json](examples/codex-commands.json)：修改标题、移动图片、修改色块、删除图标；
 - [examples/title-component-schema.json](examples/title-component-schema.json)：CLI 创建组件时使用的结构化属性 Schema；
 - [tests/document-model.test.ts](tests/document-model.test.ts)：解析、净化、稳定 ID、HTML/SVG 命令与错误恢复；
-- [tests/presentation.test.ts](tests/presentation.test.ts)：页面操作、资源内嵌和独立 Slides 安全边界；
+- [tests/presentation.test.ts](tests/presentation.test.ts)：页面操作、资源内嵌、Build-first 状态机和独立 Slides 安全边界；
 - [tests/fragments.test.ts](tests/fragments.test.ts)：Schema、包往返、冲突修复、组件属性/插槽、实例同步和本地库；
-- [scripts/browser-smoke.mjs](scripts/browser-smoke.mjs)：真实浏览器中的基础编辑、Phase 4，以及完整 Visual Fragment 保存—插入—修改—升级链路。
+- [scripts/browser-smoke.mjs](scripts/browser-smoke.mjs)：真实浏览器中的基础编辑、页面管理、Build A/B、HotCarbon 真实样本，以及完整 Visual Fragment 保存—插入—修改—升级链路。
 
 ## 项目结构
 

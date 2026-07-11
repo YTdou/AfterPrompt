@@ -230,8 +230,12 @@ button:disabled {
 }
 
 .inspector-panel {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  z-index: 4;
+  min-width: 0;
+  overflow: hidden;
   border-left: 1px solid var(--line);
 }
 
@@ -403,6 +407,35 @@ button:disabled {
   white-space: nowrap;
 }
 
+.build-control {
+  min-width: 310px;
+  justify-content: center;
+}
+
+.build-control[hidden] {
+  display: none;
+}
+
+#build-status {
+  min-width: 82px;
+  color: #cbd5e8;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+#build-view-mode {
+  width: 112px;
+  height: 26px;
+  padding: 2px 20px 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #0d1016;
+  color: #dce3ef;
+  font-size: 9px;
+}
+
 .page-filmstrip {
   grid-row: 2;
   display: grid;
@@ -496,6 +529,20 @@ button:disabled {
   background: rgba(8, 11, 17, 0.82);
   color: #dce4f2;
   font: 9px "JetBrains Mono", monospace;
+  pointer-events: none;
+}
+
+.page-thumbnail-builds {
+  position: absolute;
+  z-index: 2;
+  top: 5px;
+  right: 6px;
+  padding: 2px 5px;
+  border: 1px solid rgba(91, 140, 255, .38);
+  border-radius: 999px;
+  background: rgba(19, 31, 58, .9);
+  color: #9fbaff;
+  font: 8px "JetBrains Mono", monospace;
   pointer-events: none;
 }
 
@@ -678,9 +725,169 @@ button:disabled {
 }
 
 .inspector-content {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
   padding-bottom: 24px;
 }
+
+.build-panel {
+  display: flex;
+  flex: 0 1 48%;
+  min-height: 190px;
+  flex-direction: column;
+  border-bottom: 1px solid var(--line);
+  background: #10141c;
+}
+
+.build-panel[hidden] {
+  display: none;
+}
+
+.build-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.build-panel-heading strong {
+  color: #dce4f2;
+  font-size: 11px;
+}
+
+.build-selection-controls {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.build-selection-summary {
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.build-selection-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 4px;
+}
+
+.build-selection-row select,
+.build-selection-row button {
+  min-width: 0;
+  min-height: 24px;
+  padding: 2px 5px;
+  font-size: 9px;
+}
+
+.build-groups {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 6px;
+  overflow: auto;
+}
+
+.build-group {
+  margin: 4px 0;
+  border: 1px solid #2b3342;
+  border-radius: 6px;
+  background: #151a23;
+  overflow: hidden;
+}
+
+.build-group.is-active {
+  border-color: #5b8cff;
+  box-shadow: 0 0 0 1px rgba(91, 140, 255, .18);
+}
+
+.build-group > header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px;
+  color: #d8e1ef;
+  cursor: pointer;
+}
+
+.build-group > header > strong { font-size: 10px; }
+.build-group > header > span { overflow: hidden; color: var(--muted-2); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.always-visible-group > header { cursor: default; }
+
+.build-group-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.build-group-actions button {
+  min-width: 22px;
+  min-height: 21px;
+  padding: 1px 4px;
+  font-size: 8px;
+}
+
+.build-group-elements {
+  display: grid;
+  gap: 2px;
+  padding: 0 4px 4px;
+}
+
+.build-element {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px;
+  min-width: 0;
+  min-height: 24px;
+  padding: 3px 5px;
+  border-color: transparent;
+  background: #11161e;
+  text-align: left;
+}
+
+.build-element.is-selected {
+  border-color: rgba(91, 140, 255, .55);
+  background: rgba(91, 140, 255, .16);
+}
+
+.build-element span,
+.build-element code {
+  overflow: hidden;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.build-element code { color: #68758c; }
+
+.build-drop-zone {
+  min-height: 14px;
+  padding: 2px;
+  border: 1px dashed transparent;
+  border-radius: 4px;
+  color: transparent;
+  font-size: 7px;
+  text-align: center;
+}
+
+.build-drop-zone:hover {
+  border-color: #5b8cff;
+  color: #8eabef;
+  background: rgba(91, 140, 255, .08);
+}
+
+.build-warnings {
+  max-height: 74px;
+  padding: 5px 8px;
+  overflow: auto;
+  border-top: 1px solid #5b4724;
+  background: #251f15;
+  color: #e7cb83;
+  font-size: 8px;
+}
+
+.build-warnings p { margin: 2px 0; }
 
 .inspector-section {
   padding: 12px 13px;
