@@ -30,6 +30,7 @@ import { sanitizeCss } from "../core/sanitizer";
 import type { Bounds, BuildViewMode, DocumentKind, DocumentPage, DocumentSnapshot, ElementTreeNode, OperationLogEntry, PageBuildSequence } from "../core/types";
 import { SourceCodeEditor } from "./code-editor";
 import { FragmentWorkspace, type FragmentWorkspaceContext } from "./fragment-workspace";
+import { EditorLayoutController } from "./layout-controller";
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>'"]/g, (character) => ({
@@ -111,7 +112,8 @@ const appTemplate = `
     <div id="notice-bar" class="notice-bar" hidden></div>
 
     <main class="workspace">
-      <aside class="panel layers-panel">
+      <aside id="layers-panel" class="panel layers-panel">
+        <button class="panel-collapse-toggle" data-layout-toggle="layers" aria-controls="layers-panel" aria-label="折叠或展开图层与结构面板"></button>
         <div class="panel-heading">
           <div><span class="eyebrow">DOCUMENT</span><h2>图层与结构</h2></div>
           <div class="compact-actions">
@@ -130,6 +132,7 @@ const appTemplate = `
         </div>
         <div id="layers-tree" class="layers-tree"></div>
         <div class="panel-footnote">Ctrl / Shift 点击可多选；Alt 点击画布元素选择父级。</div>
+        <div class="layout-resizer column-resizer" data-layout-resizer="layers" role="separator" aria-orientation="vertical" aria-label="调整图层与结构面板宽度" tabindex="0"></div>
       </aside>
 
       <section class="canvas-panel">
@@ -181,12 +184,14 @@ const appTemplate = `
         <div id="page-filmstrip" class="page-filmstrip" hidden>
           <div class="page-filmstrip-actions">
             <span class="eyebrow">PAGES</span>
+            <button class="page-collapse-toggle" data-layout-toggle="pages" aria-controls="page-filmstrip" aria-label="折叠或展开页面栏"></button>
             <button id="duplicate-page" title="复制当前页">复制页</button>
             <button id="move-page-earlier" title="向前移动当前页">← 前移</button>
             <button id="move-page-later" title="向后移动当前页">后移 →</button>
             <button id="delete-page" class="danger" title="删除当前页">删除页</button>
           </div>
           <div id="page-thumbnails" class="page-thumbnails" aria-label="页面缩略图"></div>
+          <div class="layout-resizer row-resizer page-resizer" data-layout-resizer="pages" role="separator" aria-orientation="horizontal" aria-label="调整页面栏高度" tabindex="0"></div>
         </div>
         <div id="canvas-viewport" class="canvas-viewport" tabindex="0">
           <div class="canvas-grid"></div>
@@ -202,15 +207,21 @@ const appTemplate = `
         </div>
       </section>
 
-      <aside class="panel inspector-panel">
-        <div class="panel-heading"><div><span class="eyebrow">INSPECTOR</span><h2>属性</h2></div></div>
+      <aside id="inspector-panel" class="panel inspector-panel">
+        <button class="panel-collapse-toggle" data-layout-toggle="inspector" aria-controls="inspector-panel" aria-label="折叠或展开编排与属性面板"></button>
+        <div class="panel-heading"><div><span class="eyebrow">INSPECTOR</span><h2>编排与属性</h2></div></div>
         <section id="build-panel" class="build-panel" hidden>
-          <div class="build-panel-heading"><span class="eyebrow">BUILD SEQUENCE</span><strong>Build 编排</strong></div>
+          <div class="build-panel-heading"><span class="eyebrow">BUILD SEQUENCE</span><strong>放映顺序编排</strong></div>
           <div id="build-selection-controls" class="build-selection-controls"></div>
           <div id="build-groups" class="build-groups"></div>
           <div id="build-warnings" class="build-warnings" hidden></div>
         </section>
-        <div id="inspector-content" class="inspector-content"></div>
+        <div class="layout-resizer row-resizer build-resizer" data-layout-resizer="build" role="separator" aria-orientation="horizontal" aria-label="调整 Build 编排与元素属性的高度" tabindex="0"></div>
+        <section class="element-properties-panel">
+          <div class="element-properties-heading"><span class="eyebrow">ELEMENT PROPERTIES</span><strong>元素属性</strong></div>
+          <div id="inspector-content" class="inspector-content"></div>
+        </section>
+        <div class="layout-resizer column-resizer" data-layout-resizer="inspector" role="separator" aria-orientation="vertical" aria-label="调整编排与属性面板宽度" tabindex="0"></div>
       </aside>
     </main>
 
@@ -264,6 +275,7 @@ export class EditorApp {
   private readonly transform: TransformController;
   private readonly codeEditor: SourceCodeEditor;
   private readonly fragments: FragmentWorkspace;
+  private readonly layout: EditorLayoutController;
   private zoom = 1;
   private pan = { x: 0, y: 0 };
   private codeDirty = false;
@@ -294,6 +306,13 @@ export class EditorApp {
       onEnd: (label) => {
         if (this.history.commit(this.createSnapshot(), label)) this.recordOperation(label, "ui");
         this.renderDocument(true);
+      },
+    });
+
+    this.layout = new EditorLayoutController(host, {
+      onLayoutChange: (canvasGeometryChanged) => {
+        if (canvasGeometryChanged) this.fitCanvas();
+        else this.transform.update();
       },
     });
 
@@ -580,6 +599,7 @@ export class EditorApp {
     const filmstrip = this.get("#page-filmstrip");
     const thumbnails = this.get("#page-thumbnails");
     const hasPages = pages.length > 0;
+    this.get(".canvas-panel").classList.toggle("has-page-filmstrip", hasPages);
     control.hidden = !hasPages;
     filmstrip.hidden = !hasPages;
     if (!hasPages) {

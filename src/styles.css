@@ -213,8 +213,11 @@ button:disabled {
 }
 
 .workspace {
+  --layers-panel-width: 250px;
+  --inspector-panel-width: 286px;
   display: grid;
-  grid-template-columns: 250px minmax(360px, 1fr) 286px;
+  grid-template-columns: var(--layers-panel-width) minmax(360px, 1fr) var(--inspector-panel-width);
+  position: relative;
   min-height: 0;
 }
 
@@ -225,11 +228,15 @@ button:disabled {
 
 .layers-panel {
   display: grid;
+  position: relative;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
+  min-width: 0;
+  overflow: hidden;
   border-right: 1px solid var(--line);
 }
 
 .inspector-panel {
+  --build-panel-height: 300px;
   display: flex;
   flex-direction: column;
   position: relative;
@@ -237,6 +244,122 @@ button:disabled {
   min-width: 0;
   overflow: hidden;
   border-left: 1px solid var(--line);
+}
+
+.panel-collapse-toggle {
+  position: absolute;
+  z-index: 14;
+  top: 9px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  border-radius: 5px;
+  color: #98a4b8;
+  background: #161b24;
+  font: 16px/1 "JetBrains Mono", monospace;
+}
+
+.inspector-panel > .panel-collapse-toggle {
+  right: auto;
+  left: 8px;
+}
+
+.layers-panel > .panel-heading {
+  padding-right: 42px;
+}
+
+.inspector-panel > .panel-heading {
+  padding-left: 42px;
+}
+
+.layout-resizer {
+  z-index: 13;
+  border: 0;
+  outline: none;
+  background: transparent;
+  touch-action: none;
+  user-select: none;
+}
+
+.layout-resizer::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  background: var(--accent);
+  opacity: 0.18;
+  transition: opacity 120ms ease;
+}
+
+.layout-resizer:hover::after,
+.layout-resizer:focus-visible::after,
+.is-resizing-columns .column-resizer::after,
+.is-resizing-rows .row-resizer::after {
+  opacity: 0.9;
+}
+
+.column-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 9px;
+  cursor: col-resize;
+}
+
+.column-resizer::after {
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 2px;
+}
+
+.layers-panel > .column-resizer {
+  right: 0;
+}
+
+.inspector-panel > .column-resizer {
+  left: 0;
+}
+
+.row-resizer {
+  position: relative;
+  width: 100%;
+  height: 7px;
+  min-height: 7px;
+  cursor: row-resize;
+}
+
+.row-resizer::after {
+  top: 3px;
+  left: 0;
+  right: 0;
+  height: 2px;
+}
+
+.is-resizing-columns,
+.is-resizing-columns * {
+  cursor: col-resize !important;
+}
+
+.is-resizing-rows,
+.is-resizing-rows * {
+  cursor: row-resize !important;
+}
+
+.workspace.is-layers-collapsed .layers-panel > :not(.panel-collapse-toggle):not(.column-resizer),
+.workspace.is-inspector-collapsed .inspector-panel > :not(.panel-collapse-toggle):not(.column-resizer) {
+  display: none;
+}
+
+.workspace.is-layers-collapsed .layers-panel > .panel-collapse-toggle,
+.workspace.is-inspector-collapsed .inspector-panel > .panel-collapse-toggle {
+  top: 7px;
+  right: 4px;
+  left: 4px;
+  width: 24px;
 }
 
 .panel-heading {
@@ -359,11 +482,18 @@ button:disabled {
 }
 
 .canvas-panel {
+  --pages-panel-height: 124px;
   display: grid;
-  grid-template-rows: 42px auto minmax(0, 1fr) 28px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 42px 0 minmax(0, 1fr) 28px;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
   background: #0d1016;
+}
+
+.canvas-panel.has-page-filmstrip {
+  grid-template-rows: 42px var(--pages-panel-height) minmax(0, 1fr) 28px;
 }
 
 .canvas-toolbar {
@@ -372,7 +502,10 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  min-width: 0;
   padding: 5px 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
   border-bottom: 1px solid var(--line);
   background: #131720;
 }
@@ -439,9 +572,10 @@ button:disabled {
 .page-filmstrip {
   grid-row: 2;
   display: grid;
+  position: relative;
   grid-template-columns: 104px minmax(0, 1fr);
-  min-height: 116px;
-  max-height: 132px;
+  min-height: 0;
+  overflow: hidden;
   border-bottom: 1px solid var(--line);
   background: #10141c;
 }
@@ -460,8 +594,17 @@ button:disabled {
 }
 
 .page-filmstrip-actions .eyebrow {
-  grid-column: 1 / -1;
+  grid-column: 1;
   margin-bottom: 2px;
+}
+
+.page-collapse-toggle {
+  justify-self: end;
+  width: 24px;
+  min-width: 24px;
+  min-height: 22px !important;
+  padding: 0 !important;
+  font: 14px/1 "JetBrains Mono", monospace !important;
 }
 
 .page-filmstrip-actions button {
@@ -484,6 +627,30 @@ button:disabled {
   padding: 8px 10px;
   overflow-x: auto;
   overflow-y: hidden;
+}
+
+.page-resizer {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+
+.canvas-panel.is-pages-collapsed .page-filmstrip {
+  grid-template-columns: 1fr;
+}
+
+.canvas-panel.is-pages-collapsed .page-filmstrip-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 9px 6px;
+  border-right: 0;
+}
+
+.canvas-panel.is-pages-collapsed .page-filmstrip-actions > button:not(.page-collapse-toggle),
+.canvas-panel.is-pages-collapsed .page-thumbnails {
+  display: none;
 }
 
 .page-thumbnail {
@@ -733,15 +900,49 @@ button:disabled {
 
 .build-panel {
   display: flex;
-  flex: 0 1 48%;
-  min-height: 190px;
+  flex: 0 0 var(--build-panel-height);
+  min-height: 0;
   flex-direction: column;
-  border-bottom: 1px solid var(--line);
   background: #10141c;
 }
 
 .build-panel[hidden] {
   display: none;
+}
+
+.build-panel[hidden] + .build-resizer {
+  display: none;
+}
+
+.build-resizer {
+  flex: 0 0 7px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: #0c1016;
+}
+
+.element-properties-panel {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 120px;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.element-properties-heading {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 34px;
+  padding: 7px 11px;
+  border-bottom: 1px solid var(--line-soft);
+  background: #11151d;
+}
+
+.element-properties-heading strong {
+  color: #dce4f2;
+  font-size: 11px;
 }
 
 .build-panel-heading {
@@ -1272,7 +1473,7 @@ button:disabled {
 
 @media (max-width: 1180px) {
   .workspace {
-    grid-template-columns: 210px minmax(320px, 1fr) 250px;
+    grid-template-columns: var(--layers-panel-width) minmax(320px, 1fr) var(--inspector-panel-width);
   }
 
   .toolbar-primary .button:nth-of-type(2),
