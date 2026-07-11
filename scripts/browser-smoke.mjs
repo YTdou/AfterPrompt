@@ -60,6 +60,16 @@ async function shadowText(page, id) {
   }, id);
 }
 
+async function dragBy(page, locator, deltaX, deltaY) {
+  const box = await locator.boundingBox();
+  assert(box, "Layout resizer has no browser bounds.");
+  const start = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(start.x + deltaX, start.y + deltaY, { steps: 6 });
+  await page.mouse.up();
+}
+
 async function run() {
   if (!executablePath) throw new Error("Chrome/Chromium was not found. Set CHROME_PATH to its executable.");
   await ensureServer();
@@ -393,6 +403,82 @@ async function run() {
     assert(firstPage.visible === "visible" && firstPage.deckVisible === "visible", "The sanitized static deck is still hidden.");
     assert(firstPage.text.includes("source-first presentation workflow"), "The first imported slide has no visible slide content.");
 
+    progress("checking adjustable workspace panels");
+    const canvasWidthBeforePanels = await page.locator(".canvas-panel").evaluate((element) => element.clientWidth);
+    const layersWidthBefore = await page.locator("#layers-panel").evaluate((element) => element.clientWidth);
+    await dragBy(page, page.locator('[data-layout-resizer="layers"]'), -48, 0);
+    const layersWidthAfter = await page.locator("#layers-panel").evaluate((element) => element.clientWidth);
+    const canvasWidthAfterLayers = await page.locator(".canvas-panel").evaluate((element) => element.clientWidth);
+    assert(layersWidthAfter <= layersWidthBefore - 35, `Layer panel did not shrink (${layersWidthBefore} -> ${layersWidthAfter}).`);
+    assert(canvasWidthAfterLayers >= canvasWidthBeforePanels + 35, `Shrinking layers did not release canvas width (${canvasWidthBeforePanels} -> ${canvasWidthAfterLayers}).`);
+
+    await dragBy(page, page.locator('[data-layout-resizer="layers"]'), 86, 0);
+    await page.waitForTimeout(50);
+    const layersWidthExpanded = await page.locator("#layers-panel").evaluate((element) => element.clientWidth);
+    const canvasWidthAfterLayerExpansion = await page.locator(".canvas-panel").evaluate((element) => element.clientWidth);
+    assert(layersWidthExpanded >= layersWidthAfter + 70, `Layer panel did not expand (${layersWidthAfter} -> ${layersWidthExpanded}).`);
+    assert(canvasWidthAfterLayerExpansion <= canvasWidthAfterLayers - 70, `Expanding layers did not shrink the canvas (${canvasWidthAfterLayers} -> ${canvasWidthAfterLayerExpansion}).`);
+    const fittedCanvas = await page.evaluate(() => {
+      const panel = document.querySelector(".canvas-panel")?.getBoundingClientRect();
+      const viewport = document.querySelector("#canvas-viewport")?.getBoundingClientRect();
+      const canvas = document.querySelector("#canvas-host")?.getBoundingClientRect();
+      return { panel, viewport, canvas };
+    });
+    assert(fittedCanvas.panel && fittedCanvas.viewport && Math.abs(fittedCanvas.panel.width - fittedCanvas.viewport.width) <= 2, "Canvas viewport width did not follow the resized workspace column.");
+    assert(fittedCanvas.canvas && fittedCanvas.viewport && fittedCanvas.canvas.left >= fittedCanvas.viewport.left && fittedCanvas.canvas.right <= fittedCanvas.viewport.right, "Expanded layers overlapped the fitted canvas content.");
+
+    const inspectorWidthBefore = await page.locator("#inspector-panel").evaluate((element) => element.clientWidth);
+    await dragBy(page, page.locator('[data-layout-resizer="inspector"]'), 52, 0);
+    const inspectorWidthAfter = await page.locator("#inspector-panel").evaluate((element) => element.clientWidth);
+    const canvasWidthAfterInspector = await page.locator(".canvas-panel").evaluate((element) => element.clientWidth);
+    assert(inspectorWidthAfter <= inspectorWidthBefore - 38, `Inspector panel did not shrink (${inspectorWidthBefore} -> ${inspectorWidthAfter}).`);
+    assert(canvasWidthAfterInspector >= canvasWidthAfterLayerExpansion + 38, `Shrinking inspector did not release canvas width (${canvasWidthAfterLayerExpansion} -> ${canvasWidthAfterInspector}).`);
+
+    const canvasHeightBeforePages = await page.locator("#canvas-viewport").evaluate((element) => element.clientHeight);
+    const pagesHeightBefore = await page.locator("#page-filmstrip").evaluate((element) => element.clientHeight);
+    await dragBy(page, page.locator('[data-layout-resizer="pages"]'), 0, -24);
+    const pagesHeightAfter = await page.locator("#page-filmstrip").evaluate((element) => element.clientHeight);
+    const canvasHeightAfterPages = await page.locator("#canvas-viewport").evaluate((element) => element.clientHeight);
+    assert(pagesHeightAfter <= pagesHeightBefore - 16, `PAGES bar did not shrink (${pagesHeightBefore} -> ${pagesHeightAfter}).`);
+    assert(canvasHeightAfterPages >= canvasHeightBeforePages + 16, `Shrinking PAGES did not release canvas height (${canvasHeightBeforePages} -> ${canvasHeightAfterPages}).`);
+
+    const buildHeightBefore = await page.locator("#build-panel").evaluate((element) => element.clientHeight);
+    const propertiesHeightBefore = await page.locator(".element-properties-panel").evaluate((element) => element.clientHeight);
+    await dragBy(page, page.locator('[data-layout-resizer="build"]'), 0, 42);
+    const buildHeightAfter = await page.locator("#build-panel").evaluate((element) => element.clientHeight);
+    const propertiesHeightAfter = await page.locator(".element-properties-panel").evaluate((element) => element.clientHeight);
+    assert(buildHeightAfter >= buildHeightBefore + 30, `Build panel did not grow (${buildHeightBefore} -> ${buildHeightAfter}).`);
+    assert(propertiesHeightAfter <= propertiesHeightBefore - 30, `Element properties did not yield height (${propertiesHeightBefore} -> ${propertiesHeightAfter}).`);
+
+    const widthBeforeLayerCollapse = await page.locator(".canvas-panel").evaluate((element) => element.clientWidth);
+    await page.locator('[data-layout-toggle="layers"]').click();
+    assert(await page.locator(".workspace").evaluate((element) => element.classList.contains("is-layers-collapsed")), "Layer panel did not enter collapsed state.");
+    assert(await page.locator(".canvas-panel").evaluate((element) => element.clientWidth) >= widthBeforeLayerCollapse + 130, "Collapsed layers did not return their width to the canvas.");
+    await page.locator('[data-layout-toggle="layers"]').click();
+
+    const widthBeforeInspectorCollapse = await page.locator(".canvas-panel").evaluate((element) => element.clientWidth);
+    await page.locator('[data-layout-toggle="inspector"]').click();
+    assert(await page.locator(".workspace").evaluate((element) => element.classList.contains("is-inspector-collapsed")), "Inspector panel did not enter collapsed state.");
+    assert(await page.locator(".canvas-panel").evaluate((element) => element.clientWidth) >= widthBeforeInspectorCollapse + 190, "Collapsed inspector did not return its width to the canvas.");
+    await page.locator('[data-layout-toggle="inspector"]').click();
+
+    const heightBeforePagesCollapse = await page.locator("#canvas-viewport").evaluate((element) => element.clientHeight);
+    await page.locator('[data-layout-toggle="pages"]').click();
+    assert(await page.locator(".canvas-panel").evaluate((element) => element.classList.contains("is-pages-collapsed")), "PAGES bar did not enter collapsed state.");
+    assert(await page.locator("#canvas-viewport").evaluate((element) => element.clientHeight) >= heightBeforePagesCollapse + 45, "Collapsed PAGES did not return its height to the canvas.");
+    await page.locator('[data-layout-toggle="pages"]').click();
+    assert(await page.evaluate(() => Boolean(localStorage.getItem("last-mile-studio:layout:v1"))), "Layout preferences were not persisted locally.");
+
+    const persistedLayout = await page.evaluate(() => JSON.parse(localStorage.getItem("last-mile-studio:layout:v1") ?? "null"));
+    await page.reload({ waitUntil: "networkidle" });
+    await page.locator("#document-status").waitFor();
+    assert(Math.abs(await page.locator("#layers-panel").evaluate((element) => element.clientWidth) - persistedLayout.layersWidth) <= 2, "Reload did not restore the layer panel width.");
+    assert(Math.abs(await page.locator("#inspector-panel").evaluate((element) => element.clientWidth) - persistedLayout.inspectorWidth) <= 2, "Reload did not restore the inspector width.");
+    await page.locator("#example-select").selectOption("deck");
+    await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("page 1/3"));
+    assert(Math.abs(await page.locator("#page-filmstrip").evaluate((element) => element.clientHeight) - persistedLayout.pagesHeight) <= 2, "Reload did not restore the PAGES height.");
+    assert(Math.abs(await page.locator("#build-panel").evaluate((element) => element.clientHeight) - persistedLayout.buildHeight) <= 2, "Reload did not restore the Build panel height.");
+
     progress("checking Phase A Build state editing and Phase B orchestration");
     assert((await page.locator("#build-status").textContent()) === "Initial / 2", "The first demo page did not initialize at Build Initial / 2.");
     assert((await page.locator(".build-group[data-build-group]").count()) === 2, "The Build panel did not group the first page into two Builds.");
@@ -610,6 +696,9 @@ async function run() {
       standaloneSlidesExport: true,
       canvasPresets: true,
       codeCollapseReclaimsCanvas: true,
+      adjustableWorkspacePanels: true,
+      panelCollapseReclaimsCanvas: true,
+      persistentLayoutPreferences: true,
       visualFragmentPackage: true,
       visualFragmentPreviewPng: true,
       visualFragmentCompatibilityReport: true,
