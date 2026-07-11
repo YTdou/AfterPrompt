@@ -1,0 +1,15 @@
+{
+  "properties": [
+    {
+      "name": "title",
+      "label": "Title",
+      "type": "text",
+      "target": "title-001",
+      "binding": {
+        "kind": "text"
+      },
+      "required": true
+    }
+  ],
+  "slots": []
+}

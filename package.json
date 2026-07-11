@@ -1,6 +1,6 @@
 {
   "name": "last-mile-studio",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "A source-first visual editor for AI-generated HTML, slides, and SVG.",

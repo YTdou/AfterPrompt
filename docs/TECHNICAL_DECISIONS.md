@@ -23,11 +23,20 @@
 - CodeMirror 6：代码编辑、语法高亮、搜索和定位；
 - Prettier：按需加载的显式格式化；
 - JSZip：按需加载的项目目录导出；
+- IndexedDB：保存可能包含二进制资源的本地 Visual Fragment 版本；不可用时显式降级到内存，不使用容量不足的 localStorage；
 - JSDOM：CLI 中解析 HTML / SVG 和解析声明式 CSS；
 - Vitest：核心模块测试；
 - Playwright Core + 系统 Chrome：真实浏览器冒烟测试。
 
-没有引入 React 或全局状态库。即使进入 Phase 4，多页状态仍由规范 DOM、活动页 ID 和现有历史快照表达；显式类和模块边界比引入第二套响应式状态更小、更容易核验。若后续进入组件生态、多人协作或大型虚拟化工作区，再评估 React。
+没有引入 React 或全局状态库。多页和组件实例状态仍由规范 DOM、活动页 ID、可读 `data-vfrag-*` 元数据和现有历史快照表达；片段库只是定义仓库，不成为页面真相。显式类和模块边界比引入第二套响应式状态更小、更容易核验。若后续进入多人协作或大型虚拟化工作区，再评估 React。
+
+## 为什么自定义 `.vfrag` 仍同时导出标准格式
+
+HTML/SVG 本身没有统一表达“局部节点 + 匹配 CSS + 资源 + 组件属性 + 插槽 + 来源与版本”的可移植容器，因此 `.vfrag` 使用可检查的 ZIP 和 JSON Schema 承载这些元数据。但它不能成为锁定格式：库中仍可导出标准 SVG、HTML/CSS、预览 SVG/PNG，也可复制源码。导入后的规范状态仍是标准 DOM/SVG。
+
+## 为什么导入分成 plan / apply
+
+ID、CSS、字体和资源冲突如果边插入边修复，很容易产生半成功文档。`planVisualFragmentInsert()` 先在内存中解析、净化、分配全部身份、重写引用并生成兼容性报告；只有用户确认后才由 `applyVisualFragmentInsertPlan()` 写入。这也让 UI、CLI 和未来 MCP 能共享同一安全决策边界。
 
 ## 为什么使用 Shadow DOM 而不是 iframe
 

@@ -1,4 +1,5 @@
 import { assignFreshIds, createUniqueEditorId, getElementByEditorId, isEditableElement } from "./ids";
+import { insertIntoComponentSlot, refreshClonedFragmentInstances, unlinkComponentInstance, updateComponentProperties } from "./fragments/component";
 import type {
   Bounds,
   CanvasSize,
@@ -13,6 +14,9 @@ import type {
 } from "./types";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
+function elementKind(element: Element, fallback: DocumentKind): DocumentKind {
+  return element.namespaceURI === SVG_NS ? "svg" : fallback;
+}
 const transformData = {
   x: "data-editor-translate-x",
   y: "data-editor-translate-y",
@@ -291,10 +295,11 @@ export function duplicateElement(document: Document, kind: DocumentKind, element
   if (!element?.parentElement) throw new Error(`Element cannot be duplicated: ${elementId}`);
   const clone = element.cloneNode(true) as Element;
   assignFreshIds(clone, document, kind);
+  refreshClonedFragmentInstances(clone, document);
   element.after(clone);
   const newId = clone.getAttribute("data-editor-id");
   if (!newId) throw new Error("Failed to assign an ID to the duplicate.");
-  moveElementBy(clone, kind, 16, 16);
+  moveElementBy(clone, elementKind(clone, kind), 16, 16);
   return newId;
 }
 
@@ -312,41 +317,66 @@ export function applyEditorCommand(document: Document, kind: DocumentKind, comma
     const createdId = addElement(document, kind, command.parentId, command.element);
     return { action: command.action, elementId: command.parentId, createdId };
   }
+  if (command.action === "updateComponentProperties") {
+    updateComponentProperties(document, command.elementId, command.properties);
+    return { action: command.action, elementId: command.elementId };
+  }
+  if (command.action === "insertIntoComponentSlot") {
+    const createdId = insertIntoComponentSlot(
+      document,
+      command.elementId,
+      command.slot,
+      command.element,
+      (targetId, targetKind) => addElement(document, targetKind, targetId, command.element),
+    );
+    return { action: command.action, elementId: command.elementId, createdId };
+  }
+  if (command.action === "unlinkComponentInstance") {
+    unlinkComponentInstance(document, command.elementId);
+    return { action: command.action, elementId: command.elementId };
+  }
 
   const element = getElementByEditorId(document, command.elementId);
   if (!element) throw new Error(`Element not found: ${command.elementId}`);
   if (element.getAttribute("data-editor-locked") === "true" && command.action !== "setLocked") {
     throw new Error(`Element is locked: ${command.elementId}`);
   }
+  const targetKind = elementKind(element, kind);
 
   switch (command.action) {
     case "updateElement":
-      applyElementChanges(element, kind, command.changes);
+      applyElementChanges(element, targetKind, command.changes);
       break;
     case "replaceText":
       element.textContent = command.text;
       break;
     case "moveElement":
-      setElementTranslation(element, kind, command.x, command.y);
+      setElementTranslation(element, targetKind, command.x, command.y);
       break;
     case "moveElementBy":
-      moveElementBy(element, kind, command.dx, command.dy);
+      moveElementBy(element, targetKind, command.dx, command.dy);
       break;
     case "resizeElement":
-      setElementSize(element, kind, command.width, command.height);
+      setElementSize(element, targetKind, command.width, command.height);
       break;
     case "rotateElement":
-      setElementRotation(element, kind, command.angle);
+      setElementRotation(element, targetKind, command.angle);
       break;
     case "updateStyle":
-      applyElementChanges(element, kind, { style: command.style });
+      applyElementChanges(element, targetKind, { style: command.style });
       break;
     case "deleteElement":
       if (element === document.body || element === document.documentElement) throw new Error("The document root cannot be deleted.");
+      if (element.hasAttribute("data-vfrag-instance-id")) {
+        const styleKey = `${element.getAttribute("data-vfrag-definition-id") ?? ""}@${element.getAttribute("data-vfrag-definition-version") ?? ""}#${element.getAttribute("data-vfrag-instance-id") ?? ""}`;
+        Array.from(document.querySelectorAll("style[data-vfrag-style]"))
+          .filter((style) => style.getAttribute("data-vfrag-style") === styleKey)
+          .forEach((style) => style.remove());
+      }
       element.remove();
       break;
     case "setVisibility":
-      setElementVisible(element, kind, command.visible);
+      setElementVisible(element, targetKind, command.visible);
       break;
     case "setLocked":
       setElementLocked(element, command.locked);
@@ -424,6 +454,7 @@ export function summarizeElement(
   boundsResolver?: (element: Element) => Bounds | null,
 ): ElementSummary {
   const id = element.getAttribute("data-editor-id") ?? "";
+  const targetKind = elementKind(element, kind);
   const parent = element.parentElement?.closest("[data-editor-id]");
   const attributes: Record<string, string> = {};
   for (const attribute of Array.from(element.attributes)) {
@@ -436,7 +467,7 @@ export function summarizeElement(
     tag: element.localName,
     name: element.getAttribute("data-editor-name") ?? element.getAttribute("aria-label") ?? id,
     text: compactText(element),
-    bounds: boundsResolver?.(element) ?? readDeclaredBounds(element, kind),
+    bounds: boundsResolver?.(element) ?? readDeclaredBounds(element, targetKind),
     parentId: parent?.getAttribute("data-editor-id") ?? null,
     locked: element.getAttribute("data-editor-locked") === "true",
     visible: element.getAttribute("data-editor-visible") !== "false" && !element.hasAttribute("hidden") && elementStyle(element).display !== "none",
@@ -458,5 +489,24 @@ export function buildStructureSummary(
         .map((element) => summarizeElement(element, kind, boundsResolver))
     : [];
   const isSlide = kind === "html" && (canvas.width / canvas.height > 1.3);
-  return { documentType: isSlide ? "html-slide" : kind, canvas, elements };
+  const schemaNames = (element: Element, attribute: string): string[] => {
+    try {
+      const parsed: unknown = JSON.parse(element.getAttribute(attribute) ?? "[]");
+      return Array.isArray(parsed)
+        ? parsed.flatMap((item) => typeof item === "object" && item !== null && "name" in item && typeof item.name === "string" ? [item.name] : [])
+        : [];
+    } catch {
+      return [];
+    }
+  };
+  const fragments = Array.from(document.querySelectorAll("[data-vfrag-instance-id]")).map((element) => ({
+    elementId: element.getAttribute("data-editor-id") ?? "",
+    definitionId: element.getAttribute("data-vfrag-definition-id") ?? "",
+    instanceId: element.getAttribute("data-vfrag-instance-id") ?? "",
+    version: element.getAttribute("data-vfrag-definition-version") ?? "",
+    linked: element.getAttribute("data-vfrag-linked") === "true",
+    properties: schemaNames(element, "data-vfrag-property-schema"),
+    slots: schemaNames(element, "data-vfrag-slot-schema"),
+  }));
+  return { documentType: isSlide ? "html-slide" : kind, canvas, elements, fragments };
 }

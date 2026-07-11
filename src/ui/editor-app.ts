@@ -10,6 +10,7 @@ import {
   duplicateElement,
   getTransformValues,
   moveElementBy,
+  readDeclaredBounds,
   setElementLocked,
   setElementVisible,
 } from "../core/commands";
@@ -26,8 +27,9 @@ import {
   ProjectAssets,
 } from "../core/project";
 import { sanitizeCss } from "../core/sanitizer";
-import type { Bounds, DocumentPage, DocumentSnapshot, ElementTreeNode, OperationLogEntry } from "../core/types";
+import type { Bounds, DocumentKind, DocumentPage, DocumentSnapshot, ElementTreeNode, OperationLogEntry } from "../core/types";
 import { SourceCodeEditor } from "./code-editor";
+import { FragmentWorkspace, type FragmentWorkspaceContext } from "./fragment-workspace";
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>'"]/g, (character) => ({
@@ -60,6 +62,10 @@ function readFileAsDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error("Failed to read the file."));
     reader.readAsDataURL(file);
   });
+}
+
+function kindForElement(element: Element, fallback: DocumentKind): DocumentKind {
+  return element.namespaceURI === "http://www.w3.org/2000/svg" ? "svg" : fallback;
 }
 
 function exampleAssets(): ProjectAssets {
@@ -241,6 +247,7 @@ export class EditorApp {
   private readonly renderer: CanvasRenderer;
   private readonly transform: TransformController;
   private readonly codeEditor: SourceCodeEditor;
+  private readonly fragments: FragmentWorkspace;
   private zoom = 1;
   private pan = { x: 0, y: 0 };
   private codeDirty = false;
@@ -248,6 +255,7 @@ export class EditorApp {
   private operationLog: OperationLogEntry[] = [];
   private spacePressed = false;
   private toastTimer = 0;
+  private fragmentCursor = { x: 640, y: 360 };
 
   constructor(private readonly host: HTMLElement) {
     host.innerHTML = appTemplate;
@@ -275,6 +283,16 @@ export class EditorApp {
       this.codeDirty = true;
       this.get("#sync-status").textContent = "代码有未应用修改";
       this.get("#sync-status").className = "sync-dirty";
+    });
+
+    this.fragments = new FragmentWorkspace(host, {
+      getContext: () => this.fragmentWorkspaceContext(),
+      commit: (label, mutate) => this.commitMutation(label, () => {
+        const nextSelection = mutate();
+        if (nextSelection) this.selectedIds = nextSelection;
+      }),
+      toast: (message, error) => this.toast(message, error),
+      notice: (message) => this.showNotice(message),
     });
 
     this.bindEvents();
@@ -396,6 +414,13 @@ export class EditorApp {
     const viewport = this.get("#canvas-viewport");
     viewport.addEventListener("wheel", (event) => this.handleWheel(event), { passive: false });
     viewport.addEventListener("pointerdown", (event) => this.beginPan(event));
+    viewport.addEventListener("pointermove", (event) => {
+      const rect = viewport.getBoundingClientRect();
+      this.fragmentCursor = {
+        x: Math.min(this.model.canvas.width, Math.max(0, (event.clientX - rect.left - this.pan.x) / this.zoom)),
+        y: Math.min(this.model.canvas.height, Math.max(0, (event.clientY - rect.top - this.pan.y) / this.zoom)),
+      };
+    });
     window.addEventListener("keydown", (event) => this.handleKeyDown(event));
     window.addEventListener("keyup", (event) => {
       if (event.code === "Space") this.spacePressed = false;
@@ -403,9 +428,51 @@ export class EditorApp {
     window.addEventListener("resize", () => this.transform.update());
   }
 
+  private fragmentWorkspaceContext(): FragmentWorkspaceContext {
+    const selectedElements = this.selectedIds.map((id) => this.model.find(id)).filter((element): element is Element => Boolean(element));
+    const selectionItems = selectedElements.map((element) => {
+      const id = element.getAttribute("data-editor-id") ?? "";
+      return {
+        element,
+        bounds: this.renderer.bounds(id) ?? readDeclaredBounds(element, kindForElement(element, this.model.kind)),
+        renderedElement: this.renderer.element(id),
+      };
+    });
+    const containerTags = new Set(["body", "main", "section", "article", "div", "aside", "header", "footer", "svg", "g"]);
+    let insertionParent: Element | null = null;
+    if (selectedElements.length > 0) {
+      const first = selectedElements[0]!;
+      let current: Element | null = first;
+      while (current) {
+        if (current.hasAttribute("data-editor-id") &&
+            current.getAttribute("data-editor-locked") !== "true" &&
+            current.getAttribute("data-editor-structural") !== "true" &&
+            containerTags.has(current.localName) &&
+            selectedElements.every((element) => current === element || current!.contains(element))) {
+          insertionParent = current;
+          break;
+        }
+        current = current.parentElement?.closest("[data-editor-id]") ?? null;
+      }
+    }
+    insertionParent ??= this.model.editingRoot(this.activePageIndex);
+    return {
+      model: this.model,
+      assets: this.assets,
+      sourcePath: this.sourcePath,
+      selectedIds: [...this.selectedIds],
+      selectionItems,
+      insertionParentId: insertionParent?.getAttribute("data-editor-id") ?? null,
+      cursor: {
+        x: Math.min(this.model.canvas.width, Math.max(0, this.fragmentCursor.x)),
+        y: Math.min(this.model.canvas.height, Math.max(0, this.fragmentCursor.y)),
+      },
+    };
+  }
+
   private createSnapshot(): DocumentSnapshot {
     const activePageId = this.model.pages()[this.activePageIndex]?.id;
-    return this.model.snapshot(this.selectedIds, activePageId);
+    return { ...this.model.snapshot(this.selectedIds, activePageId), assets: this.assets.list() };
   }
 
   private renderDocument(syncCode: boolean): void {
@@ -441,6 +508,7 @@ export class EditorApp {
     this.renderPageControl(pages);
     this.renderLayers();
     this.renderInspector();
+    this.fragments.refreshSelection();
     this.renderWarnings();
     this.updateLiveSelectionStatus();
   }
@@ -600,10 +668,11 @@ export class EditorApp {
     const bounds = this.renderer.bounds(id) ?? { x: 0, y: 0, width: 0, height: 0 };
     const computed = getComputedStyle(previewElement);
     const transform = getTransformValues(modelElement);
+    const selectedKind = kindForElement(modelElement, this.model.kind);
     const isText = ["text", "tspan", "p", "span", "label", "button", "h1", "h2", "h3", "h4", "h5", "h6", "li"].includes(modelElement.localName) || modelElement.children.length === 0 && Boolean(modelElement.textContent?.trim());
     const isImage = ["img", "image"].includes(modelElement.localName);
-    const fill = this.model.kind === "svg" ? (modelElement.getAttribute("fill") ?? computed.fill) : computed.backgroundColor;
-    const stroke = this.model.kind === "svg" ? (modelElement.getAttribute("stroke") ?? "#000000") : computed.borderColor;
+    const fill = selectedKind === "svg" ? (modelElement.getAttribute("fill") ?? computed.fill) : computed.backgroundColor;
+    const stroke = selectedKind === "svg" ? (modelElement.getAttribute("stroke") ?? "#000000") : computed.borderColor;
     const text = isText ? (modelElement.textContent ?? "") : "";
     host.innerHTML = `
       <section class="inspector-section identity-card">
@@ -646,10 +715,10 @@ export class EditorApp {
       </section>` : ""}
       <section class="inspector-section">
         <h3>外观</h3>
-        <label class="field color-field"><span>${this.model.kind === "svg" ? "填充" : "背景"}</span><input data-prop="fill" type="color" value="${colorValue(fill)}" /><input data-prop="fill" value="${escapeHtml(fill)}" /></label>
+        <label class="field color-field"><span>${selectedKind === "svg" ? "填充" : "背景"}</span><input data-prop="fill" type="color" value="${colorValue(fill)}" /><input data-prop="fill" value="${escapeHtml(fill)}" /></label>
         <label class="field color-field"><span>描边</span><input data-prop="stroke" type="color" value="${colorValue(stroke)}" /><input data-prop="stroke" value="${escapeHtml(stroke)}" /></label>
         <div class="field-grid two">
-          <label class="field"><span>描边宽度</span><input data-prop="strokeWidth" type="number" min="0" step="1" value="${numeric(this.model.kind === "svg" ? modelElement.getAttribute("stroke-width") ?? "0" : computed.borderWidth, 0)}" /></label>
+          <label class="field"><span>描边宽度</span><input data-prop="strokeWidth" type="number" min="0" step="1" value="${numeric(selectedKind === "svg" ? modelElement.getAttribute("stroke-width") ?? "0" : computed.borderWidth, 0)}" /></label>
           <label class="field"><span>透明度</span><input data-prop="opacity" type="number" min="0" max="1" step="0.05" value="${numeric(computed.opacity, 1)}" /></label>
           <label class="field"><span>圆角</span><input data-prop="borderRadius" value="${escapeHtml(computed.borderRadius)}" /></label>
           <label class="field"><span>滤镜</span><input data-prop="filter" value="${escapeHtml(computed.filter === "none" ? "" : computed.filter)}" /></label>
@@ -679,6 +748,7 @@ export class EditorApp {
     this.transform.setSelection(this.selectedIds);
     this.renderLayers();
     this.renderInspector();
+    this.fragments.refreshSelection();
     this.updateLiveSelectionStatus();
   }
 
@@ -695,19 +765,25 @@ export class EditorApp {
     }
   }
 
-  private commitMutation(label: string, mutate: () => void, nextSelection?: string[]): void {
+  private commitMutation(label: string, mutate: () => void, nextSelection?: string[]): boolean {
     try {
       mutate();
       if (nextSelection) this.selectedIds = nextSelection;
       if (this.history.commit(this.createSnapshot(), label)) this.recordOperation(label, "ui");
       this.renderDocument(true);
+      return true;
     } catch (error) {
       this.toast(error instanceof Error ? error.message : String(error), true);
+      return false;
     }
   }
 
   private restore(snapshot: DocumentSnapshot): void {
     this.model = SourceDocument.parse(snapshot.source, snapshot.sourceName, snapshot.kind, snapshot.canvas);
+    if (snapshot.assets) {
+      this.assets.dispose();
+      this.assets = new ProjectAssets(snapshot.assets);
+    }
     const pages = this.model.pages();
     const restoredPageIndex = snapshot.activePageId ? pages.findIndex((page) => page.id === snapshot.activePageId) : -1;
     this.activePageIndex = restoredPageIndex >= 0 ? restoredPageIndex : Math.min(this.activePageIndex, Math.max(0, pages.length - 1));
@@ -817,7 +893,7 @@ export class EditorApp {
         return;
       }
       const visible = element.getAttribute("data-editor-visible") !== "false" && !element.hasAttribute("hidden") && (element as HTMLElement | SVGElement).style.display !== "none";
-      this.commitMutation(visible ? "Hide element" : "Show element", () => setElementVisible(element, this.model.kind, !visible));
+      this.commitMutation(visible ? "Hide element" : "Show element", () => setElementVisible(element, kindForElement(element, this.model.kind), !visible));
       return;
     }
     if (action === "lock") {
@@ -839,10 +915,11 @@ export class EditorApp {
     if (parent && !["body", "div", "section", "main", "article", "svg", "g"].includes(parent.localName)) parent = parent.parentElement;
     parent ??= this.model.editingRoot(this.activePageIndex);
     const parentId = parent?.getAttribute("data-editor-id");
-    if (!parentId) return;
+    if (!parent || !parentId) return;
+    const parentKind = kindForElement(parent, this.model.kind);
     let createdId = "";
     this.commitMutation(`Add ${type}`, () => {
-      createdId = addElement(this.model.document, this.model.kind, parentId, type === "text"
+      createdId = addElement(this.model.document, parentKind, parentId, type === "text"
         ? { type: "text", text: "New annotation", x: 80, y: 80, width: 280, height: 64, fontSize: 28, color: this.model.kind === "html" ? "#172033" : "#172033" }
         : { type: this.model.kind === "svg" ? "rect" : "rect", x: 100, y: 100, width: 180, height: 110, fill: "#5b8cff", borderRadius: 12 });
       this.selectedIds = [createdId];
@@ -863,17 +940,18 @@ export class EditorApp {
       return;
     }
     const bounds = this.renderer.bounds(id) ?? { x: 0, y: 0, width: 0, height: 0 };
+    const targetKind = kindForElement(element, this.model.kind);
     this.commitMutation(`Update ${prop}`, () => {
-      if (prop === "x") moveElementBy(element, this.model.kind, numeric(value) - bounds.x, 0);
-      else if (prop === "y") moveElementBy(element, this.model.kind, 0, numeric(value) - bounds.y);
+      if (prop === "x") moveElementBy(element, targetKind, numeric(value) - bounds.x, 0);
+      else if (prop === "y") moveElementBy(element, targetKind, 0, numeric(value) - bounds.y);
       else if (prop === "width" || prop === "height") this.model.apply({ action: "updateElement", elementId: id, changes: { [prop]: Math.max(1, numeric(value, 1)) } });
       else if (prop === "rotation") this.model.apply({ action: "rotateElement", elementId: id, angle: numeric(value) });
-      else if (prop === "fontSize" || prop === "opacity" || prop === "strokeWidth") applyElementChanges(element, this.model.kind, { [prop]: numeric(value) });
+      else if (prop === "fontSize" || prop === "opacity" || prop === "strokeWidth") applyElementChanges(element, targetKind, { [prop]: numeric(value) });
       else if (prop === "inlineStyle") {
         const warnings: string[] = [];
         element.setAttribute("style", sanitizeCss(value, warnings));
         if (warnings.length) this.showNotice(warnings.join(" "));
-      } else applyElementChanges(element, this.model.kind, { [prop]: value });
+      } else applyElementChanges(element, targetKind, { [prop]: value });
     });
   }
 
@@ -911,7 +989,7 @@ export class EditorApp {
         const gap = (end - start - total) / (sorted.length - 1);
         let cursor = start;
         sorted.forEach((item) => {
-          moveElementBy(item.element, this.model.kind, cursor - item.bounds.x, 0);
+          moveElementBy(item.element, kindForElement(item.element, this.model.kind), cursor - item.bounds.x, 0);
           cursor += item.bounds.width + gap;
         });
         return;
@@ -924,7 +1002,7 @@ export class EditorApp {
         const gap = (end - start - total) / (sorted.length - 1);
         let cursor = start;
         sorted.forEach((item) => {
-          moveElementBy(item.element, this.model.kind, 0, cursor - item.bounds.y);
+          moveElementBy(item.element, kindForElement(item.element, this.model.kind), 0, cursor - item.bounds.y);
           cursor += item.bounds.height + gap;
         });
         return;
@@ -942,7 +1020,7 @@ export class EditorApp {
         if (mode === "top") dy = minY - item.bounds.y;
         if (mode === "middle") dy = (minY + maxY) / 2 - (item.bounds.y + item.bounds.height / 2);
         if (mode === "bottom") dy = maxY - (item.bounds.y + item.bounds.height);
-        moveElementBy(item.element, this.model.kind, dx, dy);
+        moveElementBy(item.element, kindForElement(item.element, this.model.kind), dx, dy);
       });
     });
   }
@@ -1058,7 +1136,7 @@ export class EditorApp {
       this.commitMutation("Nudge element", () => {
         this.selectedIds.forEach((id) => {
           const element = this.model.find(id);
-          if (element && element.getAttribute("data-editor-locked") !== "true") moveElementBy(element, this.model.kind, dx, dy);
+          if (element && element.getAttribute("data-editor-locked") !== "true") moveElementBy(element, kindForElement(element, this.model.kind), dx, dy);
         });
       });
     } else if ((event.key === "Delete" || event.key === "Backspace") && this.selectedIds.length === 1) {
