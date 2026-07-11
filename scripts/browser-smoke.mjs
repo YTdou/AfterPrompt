@@ -98,17 +98,26 @@ async function run() {
     assert((await page.locator("#document-status").textContent())?.includes("HTML"), "HTML example did not load.");
     assert(await page.locator("[data-layer-id]").count() >= 12, "Layer tree is unexpectedly empty.");
 
-    progress("checking that code collapse releases canvas space");
-    const viewportHeightBeforeCollapse = await page.locator("#canvas-viewport").evaluate((element) => element.clientHeight);
-    await page.locator("#toggle-code").click();
-    await page.waitForFunction(() => document.querySelector(".studio-shell")?.classList.contains("is-code-collapsed"));
-    const viewportHeightAfterCollapse = await page.locator("#canvas-viewport").evaluate((element) => element.clientHeight);
+    progress("checking the default collapsed source bar and canvas space");
+    assert(await page.locator(".studio-shell").evaluate((element) => element.classList.contains("is-code-collapsed")), "The source bar is not collapsed by default.");
     const collapsedDrawerHeight = await page.locator("#code-drawer").evaluate((element) => element.getBoundingClientRect().height);
-    assert(viewportHeightAfterCollapse >= viewportHeightBeforeCollapse + 180, `Collapsed code drawer did not release canvas height (${viewportHeightBeforeCollapse} -> ${viewportHeightAfterCollapse}).`);
     assert(collapsedDrawerHeight <= 44, `Collapsed code drawer is still ${collapsedDrawerHeight}px tall.`);
+    assert((await page.locator("#toggle-code").textContent()) === "展开源码", "Collapsed source bar does not expose the expected expand action.");
+    assert(await page.locator("#code-drawer .code-toolbar button:visible").count() === 1, "Collapsed source bar still exposes source editing actions.");
+    const viewportHeightCollapsed = await page.locator("#canvas-viewport").evaluate((element) => element.clientHeight);
+    await page.locator("#notice-bar").waitFor({ state: "hidden", timeout: 7_000 });
+    const collapsedDrawerHeightAfterNotice = await page.locator("#code-drawer").evaluate((element) => element.getBoundingClientRect().height);
+    const viewportHeightAfterNotice = await page.locator("#canvas-viewport").evaluate((element) => element.clientHeight);
+    assert(collapsedDrawerHeightAfterNotice <= 44, `Collapsed source bar expanded after the notice disappeared (${collapsedDrawerHeightAfterNotice}px).`);
+    const noticeReleasedHeight = viewportHeightAfterNotice - viewportHeightCollapsed;
+    assert(noticeReleasedHeight >= 20 && noticeReleasedHeight <= 60, `Notice space was not returned to the canvas as expected (${viewportHeightCollapsed} -> ${viewportHeightAfterNotice}).`);
     await page.locator("#toggle-code").click();
     await page.waitForFunction(() => !document.querySelector(".studio-shell")?.classList.contains("is-code-collapsed"));
     await page.waitForTimeout(50);
+    const viewportHeightExpanded = await page.locator("#canvas-viewport").evaluate((element) => element.clientHeight);
+    assert(viewportHeightCollapsed >= viewportHeightExpanded + 180, `Default collapsed source bar did not release canvas height (${viewportHeightExpanded} -> ${viewportHeightCollapsed}).`);
+    assert((await page.locator("#toggle-code").textContent()) === "收起源码", "Expanded source bar does not expose the expected collapse action.");
+    assert(await page.locator("#apply-code").isVisible(), "Source editing actions did not return after expansion.");
 
     progress("checking direct canvas text editing");
     await page.locator('#canvas-host [data-editor-id="title-001"]').dblclick();
@@ -589,6 +598,8 @@ async function run() {
     assert((await page.locator(".cm-content").innerText()).includes('width="1024"'), "The 4:3 preset did not update deck metadata in source code.");
 
     await page.locator("#preview-presentation").click();
+    await page.locator("#preview-choice-dialog").waitFor({ state: "visible" });
+    await page.locator("#preview-from-start").click();
     await page.locator("#presentation-dialog").waitFor({ state: "visible" });
     const previewFrame = page.frameLocator("#presentation-frame");
     await previewFrame.locator("#lms-status").waitFor();
@@ -601,6 +612,12 @@ async function run() {
     await previewFrame.locator("#lms-status").filter({ hasText: "2 / 4" }).waitFor();
     await previewFrame.locator("#lms-previous").click();
     await previewFrame.locator("#lms-status").filter({ hasText: "1 / 4 · Build 2 / 2" }).waitFor();
+    await page.locator("#close-presentation").click();
+
+    await page.locator("#page-select").selectOption("2");
+    await page.locator("#preview-presentation").click();
+    await page.locator("#preview-from-current").click();
+    await previewFrame.locator("#lms-status").filter({ hasText: "3 / 4 · Initial" }).waitFor();
     await page.locator("#close-presentation").click();
 
     const slidesDownloadPromise = page.waitForEvent("download");
@@ -633,6 +650,8 @@ async function run() {
     assert((await page.locator(".page-thumbnail-builds").count()) === 14, "HotCarbon import did not identify 14 Build pages.");
     assert((await page.locator("#build-status").textContent()) === "Initial / 2", "HotCarbon first page did not initialize at Initial / 2.");
     assert((await page.locator(".build-group[data-build-group]").count()) === 2, "HotCarbon first page Build groups were not detected.");
+    await page.locator("#notice-bar").waitFor({ state: "hidden", timeout: 7_000 });
+    await page.locator("#build-warnings").waitFor({ state: "hidden", timeout: 9_000 });
     await page.locator("#next-build").click();
     await page.waitForFunction(() => document.querySelector("#build-status")?.textContent === "Build 1 / 2");
     await page.locator("#next-build").click();
@@ -649,6 +668,7 @@ async function run() {
     assert(!hotSource.includes("data-editor-build-visibility"), "Editor Build observation state polluted canonical source.");
 
     await page.locator("#preview-presentation").click();
+    await page.locator("#preview-from-start").click();
     const hotPreview = page.frameLocator("#presentation-frame");
     await hotPreview.locator("#lms-status").filter({ hasText: "1 / 23 · Initial / 2" }).waitFor({ timeout: 40_000 });
     await hotPreview.locator("#lms-next").click();

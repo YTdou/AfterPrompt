@@ -61,6 +61,11 @@ textarea:focus-visible {
   grid-template-rows: 56px auto minmax(0, 1fr) 42px;
 }
 
+.studio-shell > .topbar { grid-row: 1; }
+.studio-shell > .notice-bar { grid-row: 2; }
+.studio-shell > .workspace { grid-row: 3; }
+.studio-shell > .code-drawer { grid-row: 4; }
+
 .topbar {
   display: flex;
   align-items: center;
@@ -211,6 +216,21 @@ button:disabled {
   font-size: 12px;
   line-height: 1.4;
 }
+
+.preview-choice-dialog {
+  width: min(430px, calc(100vw - 32px));
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #151923;
+  color: var(--text);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .55);
+}
+
+.preview-choice-dialog::backdrop { background: rgba(4, 7, 13, .68); }
+.preview-choice-dialog form { padding: 16px; }
+.preview-choice-dialog p { margin: 14px 0 18px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.preview-choice-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
 .workspace {
   --layers-panel-width: 250px;
@@ -1285,6 +1305,15 @@ button:disabled {
 
 .code-drawer.is-collapsed .code-editor {
   display: none;
+}
+
+.code-drawer.is-collapsed .code-toolbar > :first-child,
+.code-drawer.is-collapsed .code-toolbar .toolbar > :not(#toggle-code) {
+  display: none;
+}
+
+.code-drawer.is-collapsed .code-toolbar {
+  justify-content: flex-end;
 }
 
 .code-toolbar {

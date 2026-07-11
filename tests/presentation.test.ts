@@ -48,6 +48,13 @@ describe("standalone HTML Slides", () => {
     expect(output.querySelector("script")?.textContent).toContain("frame.srcdoc = decodeSource()");
     expect(output.querySelector("script")?.textContent).toContain("const forward = () =>");
     expect(output.querySelector("script")?.textContent).toContain("data-lms-build-visible");
+    expect(output.querySelector("script")?.textContent).toContain("const initialPageIndex = 0");
+  });
+
+  it("can initialize presentation playback from the currently edited page", () => {
+    const model = SourceDocument.parse(deckSource, "multi-page-deck.html");
+    const result = buildStandaloneSlides(model, new ProjectAssets(), "examples/multi-page-deck.html", { initialPageIndex: 1 });
+    expect(new JSDOM(result.html).window.document.querySelector("script")?.textContent).toContain("const initialPageIndex = 1");
   });
 
   it("inlines a local stylesheet and resolves its assets relative to the CSS file", () => {
