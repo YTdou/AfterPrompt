@@ -11,9 +11,16 @@ npm run cli -- summary <input> [--output structure.json]
 npm run cli -- validate <input>
 npm run cli -- prepare <input> --output <prepared-output>
 npm run cli -- apply <input> --commands <commands.json> (--output <output> | --in-place)
+npm run cli -- fragments <input>
+npm run cli -- fragment-inspect <fragment.vfrag>
+npm run cli -- fragment-validate <fragment.vfrag>
+npm run cli -- fragment-create <input> --elements <id,id> --name <name> --output <fragment.vfrag>
+npm run cli -- fragment-insert <input> --fragment <fragment.vfrag> --parent <element-id> --output <output>
 ```
 
 `input` 可以是 HTML、SVG 或 `.visual-project.json`。CLI 默认拒绝隐式覆盖源文件。
+
+`fragment-create` 支持 `--type`、`--mode`、`--fragment-id`、`--version`、`--category`、`--tags` 和 `--schema`；Schema 文件为 `{ "properties": [...], "slots": [...] }`。更新已有定义时同时传原 `--fragment-id` 和新语义版本。`fragment-insert` 支持 `--placement center|original|x,y`、`--linked` 和显式 `--in-place`。导入前会输出与 UI 相同的兼容性报告。
 
 ## 通用更新
 
@@ -140,6 +147,51 @@ SVG `rect`、`image`、`circle` 和 `ellipse` 使用原生几何属性；其他 
 `direction` 支持 `up`、`down`、`front`、`back`，只改变同一父节点内的兄弟顺序。
 
 锁定元素拒绝除 `setLocked` 之外的命令，以避免 Codex 和用户界面绕过同一保护语义。
+
+## 组件属性
+
+组件属性以定义暴露的属性名为契约，不要求 Codex 直接理解内部 DOM：
+
+```json
+{
+  "action": "updateComponentProperties",
+  "elementId": "contribution-card-instance",
+  "properties": {
+    "title": "Adaptive Sampling",
+    "accentColor": "#315EFB",
+    "showBadge": true
+  }
+}
+```
+
+命令会检查属性是否存在、枚举值、数字/布尔类型和 URL 安全性，再更新 `text`、attribute、style 或 CSS variable 绑定。修改记录在实例根节点的 `data-vfrag-property-overrides`，定义同步后仍会重新应用。
+
+## 组件插槽
+
+```json
+{
+  "action": "insertIntoComponentSlot",
+  "elementId": "contribution-card-instance",
+  "slot": "content",
+  "element": {
+    "type": "text",
+    "id": "new-evidence",
+    "text": "New evidence",
+    "x": 20,
+    "y": 40
+  }
+}
+```
+
+插槽命令检查允许元素类型、单值/多值约束和最大尺寸，再复用普通 `addElement` 创建真实节点。单值插槽已有用户内容时不会静默覆盖。
+
+解除关联但保留当前 DOM：
+
+```json
+{ "action": "unlinkComponentInstance", "elementId": "contribution-card-instance" }
+```
+
+`summary` 的 `fragments` 字段以及 `npm run cli -- fragments <input>` 会返回定义 ID、实例 ID、版本、关联状态及暴露的属性/插槽名。
 
 ## 批处理与失败语义
 

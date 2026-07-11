@@ -1,0 +1,163 @@
+# Visual Fragments
+
+Visual Fragment 是 Last Mile Studio `0.3.0` 的可移植局部视觉格式。它不替代 HTML/SVG，也不引入脱离源码的组件树：定义保存在 `.vfrag` 或本地库，导入后的实例仍是真实 DOM/SVG 节点。
+
+## 包格式
+
+`.vfrag` 是 ZIP，格式版本与组件版本分开管理：
+
+```text
+fragment.vfrag
+├── manifest.json
+├── content.html | content.svg
+├── styles.css
+├── tokens.json
+├── preview.svg
+└── assets/
+```
+
+`manifest.json` 使用 [JSON Schema](../schemas/visual-fragment-manifest.schema.json) 验证。关键身份字段：
+
+- `formatVersion`：包协议版本，当前固定为 `1.0`；
+- `fragmentId`：组件定义 ID；
+- `version`：用户定义的语义版本；
+- `data-vfrag-instance-id`：导入页面后生成的实例 ID；
+- `data-editor-id`：编辑器和 Codex 定位实际 DOM/SVG 节点的 ID。
+
+这三类 ID 不能混为一谈。定义升级保留实例 ID，节点 ID 仍按目标文档唯一性规则生成。
+
+## 保存模式
+
+### Source-preserving
+
+- 保留选中节点的 DOM/SVG 结构、class、普通 ID、稳定编辑器 ID 和语义属性；
+- 只抽取实际匹配选区节点的样式声明；
+- 将声明映射到稳定 `data-vfrag-node-key`，避免把原 class 选择器泄漏到目标页面；
+- 补充继承型计算样式，减少失去祖先上下文后的差异。
+
+### Self-contained
+
+在 Source-preserving 基础上，按节点保存布局、排版、外观、SVG paint 等计算样式。该模式跨项目一致性更高，但 CSS 更详细。两种模式都保留源节点，不会栅格化为截图。
+
+## 提取流程
+
+1. 去除被另一个选中祖先包含的重复选择；
+2. 合并真实浏览器边界，记录原页面位置；
+3. 为 HTML 建立局部坐标容器，为 SVG 建立局部 `viewBox` 和平移分组；
+4. 保留每个内部节点的稳定 `data-vfrag-node-key`；
+5. 提取匹配 CSS、继承/计算样式和 CSS 自定义属性；
+6. 收集属性、inline style 和外部 CSS 中的本地资源；
+7. 递归收集选区外被 `href` / `url(#id)` 引用的 SVG defs；
+8. 生成不执行脚本的 `preview.svg`；
+9. 写入 manifest 并在打包前再次通过同一 Schema 验证。
+
+无法读取的跨域 CSS、外部字体和缺失资源不会伪装成已打包内容，而是进入 warnings 和 permissions。
+
+## 导入规划与冲突报告
+
+导入分为 `plan` 和 `apply`。规划阶段不修改文档，检查：
+
+- HTML/SVG 方向兼容性；
+- 父节点存在、命名空间和锁定状态；
+- 普通 `id` 与 `data-editor-id`；
+- CSS class、keyframes 和 token 名称；
+- 字体、已打包资产、外部或缺失资源；
+- manifest、内容根、脚本/网络声明一致性。
+
+规划同时生成普通 ID 和编辑器 ID 映射，并重写：
+
+- `href="#id"`、`xlink:href`；
+- `url(#id)`；
+- ARIA IDREF、`for`、`headers`、`list`；
+- CSS `#id` 和 `[data-editor-id="..."]`；
+- 包内资源路径。
+
+用户确认报告后，`apply` 才一次性插入样式、节点和资源。支持方向为 HTML → HTML、SVG → SVG、SVG → inline HTML；HTML → SVG 会被阻止。
+
+## 组件属性
+
+属性绑定到 `data-vfrag-node-key`，不会依赖导入后变化的编辑器 ID。
+
+```json
+{
+  "name": "title",
+  "label": "Title",
+  "type": "text",
+  "target": "title-001",
+  "binding": { "kind": "text" },
+  "defaultValue": "Adaptive Sampling"
+}
+```
+
+绑定支持 `text`、`attribute`、`style` 和 `css-variable`。类型支持文本、数字、颜色、图片、图标、布尔、枚举、尺寸与 URL。URL 仍经过危险协议检查。
+
+页面中的属性修改走共享命令：
+
+```json
+{
+  "action": "updateComponentProperties",
+  "elementId": "contribution-card-instance",
+  "properties": {
+    "title": "Adaptive Sampling",
+    "accentColor": "#315EFB"
+  }
+}
+```
+
+实例覆盖以可读 JSON 写入根节点 `data-vfrag-property-overrides`，同步定义时重新应用。
+
+## 内容插槽
+
+插槽记录目标节点、允许类型、必填/多值、默认内容和尺寸上限。共享命令示例：
+
+```json
+{
+  "action": "insertIntoComponentSlot",
+  "elementId": "contribution-card-instance",
+  "slot": "content",
+  "element": {
+    "type": "text",
+    "text": "New evidence",
+    "x": 20,
+    "y": 40
+  }
+}
+```
+
+单值插槽第一次写入会替换默认内容，再次写入会明确失败；不会静默覆盖已有用户内容。
+
+## 实例与版本
+
+- 独立副本保存定义来源和版本，但 `data-vfrag-linked="false"`；
+- 关联实例使用 `data-vfrag-linked="true"`；
+- 解除关联只改变关联状态，不删除节点；
+- 更新定义是在本地库写入同一 `fragmentId` 的新语义版本；
+- “同步实例”只更新当前文档中的关联实例，保留位置、实例 ID、属性覆盖和已经填充的插槽内容；
+- 样式按 `fragmentId@version#instanceId` 隔离；这允许同一片段的多个实例各自修复 SVG/CSS ID 引用，也允许新旧版本并存。
+
+没有后台自动更新，也没有跨项目或云端隐式迁移。
+
+## 本地库
+
+浏览器使用 IndexedDB 数据库 `last-mile-studio-visual-fragments`。每条记录以 `fragmentId@version` 为键，保存完整包字节及收藏、使用次数、创建/更新时间和最近使用时间。IndexedDB 被禁用时会降级为内存库，并在界面明确提示。
+
+本地库提供搜索、标签、分类、收藏、最近使用、版本、导入、导出、标准格式输出和定义升级。项目 JSON 不复制整个本地库；页面实例所需的 DOM、样式和资源仍随项目保存。
+
+## ZIP 安全边界
+
+导入器拒绝：
+
+- 绝对路径、Windows 盘符、反斜杠、空段、`.` 和 `..`；
+- 超过 256 个文件；
+- 超过 24 MiB 的单文件；
+- 超过 64 MiB 的压缩包或解压总量；
+- 超过 100,000,000 像素的片段画布；PNG 预览还会限制到 4096 px 单边和 16 MP；
+- CRC 错误、重复路径、必需文件/资源缺失；
+- 未通过 JSON Schema 的 manifest；
+- manifest 与入口类型、网络声明或内容根不一致。
+
+`permissions.scripts` 在 `1.0` 中必须为 `false`。片段导入不会恢复被净化的脚本、事件属性、iframe 或 SVG 动画。
+
+## 验收
+
+单元测试覆盖包往返、Schema、资源、重复 ID、SVG 引用、属性、插槽、版本同步和本地库。真实浏览器测试覆盖保存组件、下载 `.vfrag`、预览 PNG、兼容性确认、关联插入、属性和插槽写回标准源码、定义升级和实例同步，并继续运行原有 HTML、SVG 与 Slides 验收。HTML 的完整缩略图以 `preview.svg` 为准；浏览器若因 `foreignObject` 的 canvas 安全规则拒绝 PNG 编码，PNG 使用明确告知用户的文字、尺寸与配色摘要回退。

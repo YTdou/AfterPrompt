@@ -1,0 +1,245 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://last-mile-studio.local/schemas/visual-fragment-manifest.schema.json",
+  "title": "Last Mile Studio Visual Fragment Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "formatVersion",
+    "fragmentId",
+    "name",
+    "description",
+    "fragmentType",
+    "contentType",
+    "saveMode",
+    "entry",
+    "styles",
+    "tokens",
+    "preview",
+    "canvas",
+    "coordinateSystem",
+    "insertion",
+    "properties",
+    "slots",
+    "assets",
+    "fonts",
+    "permissions",
+    "provenance",
+    "version",
+    "tags",
+    "category"
+  ],
+  "properties": {
+    "format": { "const": "last-mile-studio.visual-fragment" },
+    "formatVersion": { "const": "1.0" },
+    "fragmentId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "description": { "type": "string", "maxLength": 2000 },
+    "fragmentType": { "enum": ["element", "group", "component", "template"] },
+    "contentType": { "enum": ["html", "svg"] },
+    "saveMode": { "enum": ["source-preserving", "self-contained"] },
+    "entry": { "enum": ["content.html", "content.svg"] },
+    "styles": { "const": "styles.css" },
+    "tokens": { "const": "tokens.json" },
+    "preview": { "const": "preview.svg" },
+    "canvas": { "$ref": "#/$defs/size" },
+    "coordinateSystem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unit", "origin", "originalBounds"],
+      "properties": {
+        "unit": { "const": "px" },
+        "origin": { "$ref": "#/$defs/point" },
+        "originalBounds": { "$ref": "#/$defs/bounds" }
+      }
+    },
+    "insertion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["anchor"],
+      "properties": { "anchor": { "enum": ["top-left", "center"] } }
+    },
+    "properties": {
+      "type": "array",
+      "maxItems": 256,
+      "items": { "$ref": "#/$defs/editableProperty" }
+    },
+    "slots": {
+      "type": "array",
+      "maxItems": 128,
+      "items": { "$ref": "#/$defs/slot" }
+    },
+    "assets": {
+      "type": "array",
+      "maxItems": 256,
+      "items": { "$ref": "#/$defs/asset" }
+    },
+    "fonts": {
+      "type": "array",
+      "maxItems": 128,
+      "items": { "$ref": "#/$defs/font" }
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scripts", "network", "origins"],
+      "properties": {
+        "scripts": { "const": false },
+        "network": { "enum": ["none", "declared"] },
+        "origins": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "type": "string", "maxLength": 2048 },
+          "uniqueItems": true
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceProject", "sourceDocument", "createdAt", "generator"],
+      "properties": {
+        "sourceProject": { "type": "string", "maxLength": 512 },
+        "sourceDocument": { "type": "string", "maxLength": 512 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "generator": { "type": "string", "minLength": 1, "maxLength": 160 }
+      }
+    },
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$" },
+    "tags": {
+      "type": "array",
+      "maxItems": 64,
+      "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+      "uniqueItems": true
+    },
+    "category": { "type": "string", "maxLength": 120 }
+  },
+  "$defs": {
+    "point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": { "x": { "type": "number" }, "y": { "type": "number" } }
+    },
+    "size": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": {
+        "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000000 },
+        "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000000 }
+      }
+    },
+    "bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "width": { "type": "number", "minimum": 0, "maximum": 1000000 },
+        "height": { "type": "number", "minimum": 0, "maximum": 1000000 }
+      }
+    },
+    "binding": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "text" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "name"],
+          "properties": {
+            "kind": { "enum": ["attribute", "style"] },
+            "name": { "type": "string", "minLength": 1, "maxLength": 160 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "name"],
+          "properties": {
+            "kind": { "const": "css-variable" },
+            "name": { "type": "string", "pattern": "^--[A-Za-z0-9_-]+$" }
+          }
+        }
+      ]
+    },
+    "editableProperty": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "label", "type", "target", "binding"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "type": { "enum": ["text", "number", "color", "image", "icon", "boolean", "enum", "size", "url"] },
+        "target": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "binding": { "$ref": "#/$defs/binding" },
+        "defaultValue": { "type": ["string", "number", "boolean"] },
+        "required": { "type": "boolean" },
+        "options": {
+          "type": "array",
+          "maxItems": 128,
+          "items": { "type": "string", "maxLength": 160 },
+          "uniqueItems": true
+        }
+      }
+    },
+    "slot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "label", "target", "allowedElementTypes", "required", "multiple"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "target": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "allowedElementTypes": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "uniqueItems": true
+        },
+        "required": { "type": "boolean" },
+        "multiple": { "type": "boolean" },
+        "defaultContent": { "type": "string", "maxLength": 1000000 },
+        "size": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "minWidth": { "type": "number", "minimum": 0 },
+            "minHeight": { "type": "number", "minimum": 0 },
+            "maxWidth": { "type": "number", "minimum": 0 },
+            "maxHeight": { "type": "number", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "mimeType", "source", "required"],
+      "properties": {
+        "path": { "type": "string", "pattern": "^assets/[A-Za-z0-9._/-]+$", "maxLength": 512 },
+        "mimeType": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "source": { "type": "string", "maxLength": 2048 },
+        "required": { "type": "boolean" },
+        "external": { "type": "boolean" }
+      }
+    },
+    "font": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["family", "bundled"],
+      "properties": {
+        "family": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "source": { "type": "string", "maxLength": 2048 },
+        "bundled": { "type": "boolean" }
+      }
+    }
+  }
+}

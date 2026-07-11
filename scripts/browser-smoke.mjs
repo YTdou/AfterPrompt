@@ -162,6 +162,128 @@ async function run() {
       return host?.shadowRoot?.querySelector('[data-editor-id="title-001"]')?.textContent === "Energy-Proportional LLM Inference";
     });
 
+    progress("checking Visual Fragment save, package export, linked insert, properties, and definition sync");
+    await page.locator('[data-layer-id="title-001"]').click();
+    await page.locator("#save-fragment").click();
+    await page.locator("#fragment-save-dialog").waitFor({ state: "visible" });
+    await page.locator("#fragment-name").fill("Browser Title Component");
+    await page.locator("#fragment-type").selectOption("component");
+    await page.locator("#fragment-add-property").click();
+    const propertyRow = page.locator("#fragment-property-rows .fragment-schema-row").first();
+    await propertyRow.locator('[data-schema-field="name"]').fill("title");
+    await propertyRow.locator('[data-schema-field="label"]').fill("Title");
+    await propertyRow.locator('[data-schema-field="type"]').selectOption("text");
+    await propertyRow.locator('[data-schema-field="binding"]').selectOption("text");
+    await page.locator("#fragment-add-slot").click();
+    const slotRow = page.locator("#fragment-slot-rows .fragment-schema-row").first();
+    await slotRow.locator('[data-schema-field="name"]').fill("suffix");
+    await slotRow.locator('[data-schema-field="label"]').fill("Suffix");
+    await slotRow.locator('[data-schema-field="allowed"]').fill("span");
+    await slotRow.locator('[data-schema-field="multiple"]').check();
+    await page.locator("#fragment-save-submit").click();
+    await page.waitForTimeout(250);
+    if (await page.locator("#fragment-save-dialog").isVisible()) {
+      throw new Error(`Visual Fragment save failed: ${await page.locator("#toast").textContent()}`);
+    }
+    await page.locator("#fragment-save-dialog").waitFor({ state: "hidden" });
+
+    await page.locator("#open-fragment-library").click();
+    await page.locator("#fragment-library-dialog").waitFor({ state: "visible" });
+    const fragmentCard = page.locator('.fragment-card:has-text("Browser Title Component")').first();
+    await fragmentCard.waitFor();
+    const fragmentId = await fragmentCard.getAttribute("data-fragment-id");
+    assert(fragmentId, "Saved Visual Fragment has no definition ID.");
+    assert((await page.locator("#fragment-storage-status").textContent())?.includes("IndexedDB"), "Visual Fragment library did not use persistent browser storage.");
+
+    const fragmentDownloadPromise = page.waitForEvent("download");
+    await fragmentCard.locator('[data-fragment-action="export"]').click();
+    const fragmentDownload = await fragmentDownloadPromise;
+    const fragmentDownloadPath = await fragmentDownload.path();
+    assert(fragmentDownloadPath, ".vfrag export did not produce a download path.");
+    const fragmentBytes = await readFile(fragmentDownloadPath);
+    assert(fragmentBytes[0] === 0x50 && fragmentBytes[1] === 0x4b, ".vfrag export is not a ZIP package.");
+
+    const previewPngDownloadPromise = page.waitForEvent("download", { timeout: 8_000 }).catch(() => null);
+    await fragmentCard.locator('[data-fragment-action="preview-png"]').click();
+    const previewPngDownload = await previewPngDownloadPromise;
+    if (!previewPngDownload) throw new Error(`Fragment preview PNG export failed: ${await page.locator("#toast").textContent()}`);
+    const previewPngPath = await previewPngDownload.path();
+    assert(previewPngPath, "Fragment preview PNG export did not produce a download path.");
+    const previewPng = await readFile(previewPngPath);
+    assert(previewPng[0] === 0x89 && previewPng.subarray(1, 4).toString() === "PNG", "Fragment preview export is not a PNG file.");
+
+    await fragmentCard.locator('[data-fragment-action="insert-linked"]').click();
+    await page.locator("#fragment-report-dialog").waitFor({ state: "visible" });
+    const compatibilityText = await page.locator("#fragment-report-content").textContent();
+    assert(compatibilityText?.includes("编辑器 ID 重映射"), "Fragment insertion did not show an ID compatibility report.");
+    await page.locator("#fragment-report-confirm").click();
+    await page.locator("#fragment-report-dialog").waitFor({ state: "hidden" });
+    await page.waitForFunction((definitionId) => {
+      const host = document.querySelector("#canvas-host");
+      return Boolean(Array.from(host?.shadowRoot?.querySelectorAll("[data-vfrag-definition-id]") ?? [])
+        .find((element) => element.getAttribute("data-vfrag-definition-id") === definitionId));
+    }, fragmentId);
+    await page.locator("#fragment-library-close").click();
+    await page.locator("#fragment-library-dialog").waitFor({ state: "hidden" });
+
+    const componentRootId = await page.evaluate((definitionId) => {
+      const host = document.querySelector("#canvas-host");
+      return Array.from(host?.shadowRoot?.querySelectorAll("[data-vfrag-definition-id]") ?? [])
+        .find((element) => element.getAttribute("data-vfrag-definition-id") === definitionId)
+        ?.getAttribute("data-editor-id") ?? null;
+    }, fragmentId);
+    assert(componentRootId, "Inserted linked component could not be located by stable editor ID.");
+    await page.locator('[data-fragment-property="title"]').fill("Reusable browser title");
+    await page.locator('[data-fragment-property="title"]').press("Tab");
+    await page.waitForFunction(({ definitionId, expected }) => {
+      const host = document.querySelector("#canvas-host");
+      const root = Array.from(host?.shadowRoot?.querySelectorAll("[data-vfrag-definition-id]") ?? [])
+        .find((element) => element.getAttribute("data-vfrag-definition-id") === definitionId);
+      return root?.querySelector('[data-vfrag-node-key="title-001"]')?.textContent === expected;
+    }, { definitionId: fragmentId, expected: "Reusable browser title" });
+    const componentSourceDownloadPromise = page.waitForEvent("download");
+    await page.locator("#export-source").click();
+    const componentSourceDownload = await componentSourceDownloadPromise;
+    const componentSourcePath = await componentSourceDownload.path();
+    assert(componentSourcePath, "Component source export did not produce a download path.");
+    const componentSource = await readFile(componentSourcePath, "utf8");
+    assert(componentSource.includes("data-vfrag-property-overrides") && componentSource.includes("Reusable browser title"), "Component property override did not synchronize to exported source code.");
+
+    await page.locator("#open-fragment-library").click();
+    const originalCard = page.locator(`.fragment-card[data-fragment-id="${fragmentId}"][data-fragment-version="1.0.0"]`);
+    await originalCard.locator('[data-fragment-action="update"]').click();
+    await page.locator("#fragment-save-dialog").waitFor({ state: "visible" });
+    assert((await page.locator("#fragment-version").inputValue()) === "1.0.1", "Updating a definition did not advance the patch version.");
+    await page.locator("#fragment-save-submit").click();
+    await page.locator("#fragment-save-dialog").waitFor({ state: "hidden" });
+    const updatedCard = page.locator(`.fragment-card[data-fragment-id="${fragmentId}"][data-fragment-version="1.0.1"]`);
+    await updatedCard.waitFor();
+    await updatedCard.locator('[data-fragment-action="sync"]').click();
+    await page.locator("#fragment-library-close").click();
+    await page.waitForFunction(({ definitionId, expected }) => {
+      const host = document.querySelector("#canvas-host");
+      const root = Array.from(host?.shadowRoot?.querySelectorAll("[data-vfrag-definition-id]") ?? [])
+        .find((element) => element.getAttribute("data-vfrag-definition-id") === definitionId);
+      return root?.getAttribute("data-vfrag-definition-version") === "1.0.1" &&
+        root.querySelector('[data-vfrag-node-key="title-001"]')?.textContent === expected;
+    }, { definitionId: fragmentId, expected: "Reusable browser title" });
+    const slotControl = page.locator("[data-fragment-slot-control]").first();
+    await slotControl.locator("[data-fragment-slot-value]").fill(" · inserted slot");
+    await slotControl.locator('[data-fragment-instance-action="insert-slot"]').click();
+    await page.waitForFunction((definitionId) => {
+      const host = document.querySelector("#canvas-host");
+      const root = Array.from(host?.shadowRoot?.querySelectorAll("[data-vfrag-definition-id]") ?? [])
+        .find((element) => element.getAttribute("data-vfrag-definition-id") === definitionId);
+      return root?.querySelector('[data-vfrag-node-key="title-001"]')?.textContent?.includes("inserted slot");
+    }, fragmentId);
+    await page.locator('[data-fragment-instance-action="unlink"]').click();
+    await page.waitForFunction((definitionId) => {
+      const host = document.querySelector("#canvas-host");
+      const root = Array.from(host?.shadowRoot?.querySelectorAll("[data-vfrag-definition-id]") ?? [])
+        .find((element) => element.getAttribute("data-vfrag-definition-id") === definitionId);
+      return root?.getAttribute("data-vfrag-linked") === "false";
+    }, fragmentId);
+
     progress("checking SVG selection and polygon scaling");
     await page.locator("#example-select").selectOption("svg");
     await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.startsWith("SVG"));
@@ -268,7 +390,7 @@ async function run() {
     const slidesDownloadPath = await slidesDownload.path();
     assert(slidesDownloadPath, "Standalone Slides export did not produce a local download path.");
     const exportedSlides = await readFile(slidesDownloadPath, "utf8");
-    assert(exportedSlides.includes('content="Last Mile Studio 0.2.0"'), "Standalone Slides export has no Phase 4 generator metadata.");
+    assert(exportedSlides.includes('content="Last Mile Studio 0.3.0"'), "Standalone Slides export has no current generator metadata.");
     assert(exportedSlides.includes('sandbox="allow-same-origin"'), "Standalone Slides export does not keep imported content scriptless.");
     assert(exportedSlides.includes("demo-page-2-copy"), "Standalone Slides export lost the duplicated page order.");
 
@@ -301,6 +423,13 @@ async function run() {
       standaloneSlidesExport: true,
       canvasPresets: true,
       codeCollapseReclaimsCanvas: true,
+      visualFragmentPackage: true,
+      visualFragmentPreviewPng: true,
+      visualFragmentCompatibilityReport: true,
+      visualFragmentLinkedInstance: true,
+      visualFragmentPropertyOverride: true,
+      visualFragmentSlotInsertion: true,
+      visualFragmentDefinitionSync: true,
     }, null, 2)}\n`);
   } finally {
     await browser.close();

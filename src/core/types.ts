@@ -46,6 +46,17 @@ export interface StructureSummary {
   documentType: DocumentKind | "html-slide";
   canvas: CanvasSize;
   elements: ElementSummary[];
+  fragments: FragmentInstanceSummary[];
+}
+
+export interface FragmentInstanceSummary {
+  elementId: string;
+  definitionId: string;
+  instanceId: string;
+  version: string;
+  linked: boolean;
+  properties: string[];
+  slots: string[];
 }
 
 export interface TransformValues {
@@ -95,6 +106,8 @@ export interface NewElementSpec extends ElementChanges {
   tag?: string;
 }
 
+export type ComponentPropertyValue = string | number | boolean;
+
 export type EditorCommand =
   | { action: "updateElement"; elementId: string; changes: ElementChanges }
   | { action: "replaceText"; elementId: string; text: string }
@@ -105,6 +118,9 @@ export type EditorCommand =
   | { action: "updateStyle"; elementId: string; style: Record<string, string | number | null> }
   | { action: "deleteElement"; elementId: string }
   | { action: "addElement"; parentId: string; element: NewElementSpec }
+  | { action: "updateComponentProperties"; elementId: string; properties: Record<string, ComponentPropertyValue> }
+  | { action: "insertIntoComponentSlot"; elementId: string; slot: string; element: NewElementSpec }
+  | { action: "unlinkComponentInstance"; elementId: string }
   | { action: "setVisibility"; elementId: string; visible: boolean }
   | { action: "setLocked"; elementId: string; locked: boolean }
   | { action: "reorderElement"; elementId: string; direction: "up" | "down" | "front" | "back" };
@@ -122,6 +138,7 @@ export interface DocumentSnapshot {
   sourceName: string;
   selectedIds: string[];
   activePageId?: string;
+  assets?: ProjectAsset[];
 }
 
 export interface ProjectAsset {

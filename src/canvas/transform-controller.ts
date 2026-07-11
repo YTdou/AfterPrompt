@@ -109,8 +109,12 @@ export class TransformController {
     return model ? [preview, model] : [preview];
   }
 
+  private kindOf(element: Element): DocumentKind {
+    return element.namespaceURI === "http://www.w3.org/2000/svg" ? "svg" : this.kind;
+  }
+
   private beginGenericSvgResize = (event: PointerEvent): void => {
-    if (this.kind !== "svg" || this.selectedIds.length !== 1 || event.button !== 0) return;
+    if (this.selectedIds.length !== 1 || event.button !== 0) return;
     const handle = (event.target as Element | null)?.closest<HTMLElement>(".moveable-control.moveable-direction");
     if (!handle) return;
     const directionName = Array.from(handle.classList)
@@ -119,7 +123,7 @@ export class TransformController {
     if (!directionName) return;
     const id = this.selectedIds[0]!;
     const preview = this.renderer.element(id);
-    if (!preview || canUseNativeSize(preview, this.kind) || !("getBBox" in preview)) return;
+    if (!preview || this.kindOf(preview) !== "svg" || canUseNativeSize(preview, "svg") || !("getBBox" in preview)) return;
     const bounds = this.renderer.bounds(id);
     if (!bounds || bounds.width <= 0 || bounds.height <= 0) return;
 
@@ -159,7 +163,7 @@ export class TransformController {
         setElementScaleOrigin(target, scaleOrigin.x, scaleOrigin.y);
         setElementScale(
           target,
-          this.kind,
+          this.kindOf(target),
           transform.scaleX * width / bounds.width,
           transform.scaleY * height / bounds.height,
         );
@@ -187,7 +191,7 @@ export class TransformController {
     });
     this.moveable.on("drag", (event: OnDrag) => {
       for (const target of this.bothTargets(event.target)) {
-        setElementTranslation(target, this.kind, event.beforeTranslate[0] ?? 0, event.beforeTranslate[1] ?? 0);
+        setElementTranslation(target, this.kindOf(target), event.beforeTranslate[0] ?? 0, event.beforeTranslate[1] ?? 0);
       }
       this.callbacks.onChange();
     });
@@ -203,7 +207,7 @@ export class TransformController {
     this.moveable.on("dragGroup", (event: OnDragGroup) => {
       event.events.forEach((child) => {
         for (const target of this.bothTargets(child.target)) {
-          setElementTranslation(target, this.kind, child.beforeTranslate[0] ?? 0, child.beforeTranslate[1] ?? 0);
+          setElementTranslation(target, this.kindOf(target), child.beforeTranslate[0] ?? 0, child.beforeTranslate[1] ?? 0);
         }
       });
       this.callbacks.onChange();
@@ -215,7 +219,7 @@ export class TransformController {
       if (id) {
         const bounds = this.renderer.bounds(id) ?? { width: event.target.clientWidth, height: event.target.clientHeight, x: 0, y: 0 };
         let scaleOrigin: { x: number; y: number } | undefined;
-        if (!canUseNativeSize(event.target, this.kind) && "getBBox" in event.target) {
+        if (!canUseNativeSize(event.target, this.kindOf(event.target)) && "getBBox" in event.target) {
           const box = (event.target as SVGGraphicsElement).getBBox();
           const direction = event.direction;
           const directionX = direction[0] ?? 0;
@@ -228,23 +232,24 @@ export class TransformController {
         this.resizeStart.set(id, { bounds, transform: getTransformValues(event.target), scaleOrigin });
       }
       const transform = getTransformValues(event.target);
-      if (canUseNativeSize(event.target, this.kind) && event.dragStart) event.dragStart.set([transform.x, transform.y]);
+      if (canUseNativeSize(event.target, this.kindOf(event.target)) && event.dragStart) event.dragStart.set([transform.x, transform.y]);
       this.callbacks.onStart("Resize element");
     });
     this.moveable.on("resize", (event: OnResize) => {
       const id = idOf(event.target);
       const start = id ? this.resizeStart.get(id) : undefined;
       for (const target of this.bothTargets(event.target)) {
-        if (canUseNativeSize(target, this.kind)) {
-          setElementSize(target, this.kind, event.width, event.height);
+        const targetKind = this.kindOf(target);
+        if (canUseNativeSize(target, targetKind)) {
+          setElementSize(target, targetKind, event.width, event.height);
         } else if (start) {
           if (start.scaleOrigin) setElementScaleOrigin(target, start.scaleOrigin.x, start.scaleOrigin.y);
           const scaleX = start.transform.scaleX * event.width / Math.max(1, start.bounds.width);
           const scaleY = start.transform.scaleY * event.height / Math.max(1, start.bounds.height);
-          setElementScale(target, this.kind, scaleX, scaleY);
+          setElementScale(target, targetKind, scaleX, scaleY);
         }
-        if (canUseNativeSize(event.target, this.kind)) {
-          setElementTranslation(target, this.kind, event.drag.beforeTranslate[0] ?? 0, event.drag.beforeTranslate[1] ?? 0);
+        if (canUseNativeSize(event.target, this.kindOf(event.target))) {
+          setElementTranslation(target, targetKind, event.drag.beforeTranslate[0] ?? 0, event.drag.beforeTranslate[1] ?? 0);
         }
       }
       this.callbacks.onChange();
@@ -262,8 +267,9 @@ export class TransformController {
     });
     this.moveable.on("rotate", (event: OnRotate) => {
       for (const target of this.bothTargets(event.target)) {
-        setElementRotation(target, this.kind, event.beforeRotate);
-        if (event.drag) setElementTranslation(target, this.kind, event.drag.beforeTranslate[0] ?? 0, event.drag.beforeTranslate[1] ?? 0);
+        const targetKind = this.kindOf(target);
+        setElementRotation(target, targetKind, event.beforeRotate);
+        if (event.drag) setElementTranslation(target, targetKind, event.drag.beforeTranslate[0] ?? 0, event.drag.beforeTranslate[1] ?? 0);
       }
       this.callbacks.onChange();
     });

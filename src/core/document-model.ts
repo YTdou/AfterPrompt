@@ -1,6 +1,7 @@
 import { applyEditorCommand, buildStructureSummary, summarizeElement } from "./commands";
 import { assignFreshIds, allEditableElements, ensureStableIds, getElementByEditorId, isEditableElement } from "./ids";
 import { sanitizeDocument } from "./sanitizer";
+import { refreshClonedFragmentInstances } from "./fragments/component";
 import type {
   Bounds,
   CanvasSize,
@@ -221,6 +222,7 @@ export class SourceDocument {
     if (!page?.parentElement) throw new Error("The selected presentation page cannot be duplicated.");
     const clone = page.cloneNode(true) as Element;
     assignFreshIds(clone, this.document, this.kind);
+    refreshClonedFragmentInstances(clone, this.document);
     const label = pageLabel(page, index);
     clone.setAttribute("data-label", `${label} Copy`);
     page.after(clone);
@@ -287,9 +289,16 @@ export class SourceDocument {
 }
 
 export function snapshotsEqual(left: DocumentSnapshot, right: DocumentSnapshot): boolean {
+  const assetsEqual = (left.assets ?? []).length === (right.assets ?? []).length &&
+    (left.assets ?? []).every((asset, index) => {
+      const candidate = right.assets?.[index];
+      return Boolean(candidate && asset.path === candidate.path && asset.mimeType === candidate.mimeType &&
+        (asset.bytes === candidate.bytes || asset.bytes.length === candidate.bytes.length && asset.bytes.every((value, byteIndex) => value === candidate.bytes[byteIndex])));
+    });
   return left.source === right.source &&
     left.kind === right.kind &&
     left.canvas.width === right.canvas.width &&
     left.canvas.height === right.canvas.height &&
-    left.sourceName === right.sourceName;
+    left.sourceName === right.sourceName &&
+    assetsEqual;
 }

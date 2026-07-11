@@ -31,6 +31,11 @@ flowchart LR
   Serialize --> Export[HTML / SVG / project / ZIP]
   Model --> Presentation[Page thumbnails + preview]
   Presentation --> Slides[Standalone HTML Slides]
+  Model --> Extract[Fragment extractor]
+  Extract --> Package[Schema-validated .vfrag]
+  Package --> Library[IndexedDB library]
+  Library --> Plan[Compatibility plan]
+  Plan -->|Confirmed apply| Model
 ```
 
 ## 真相来源
@@ -59,6 +64,11 @@ flowchart LR
 | `History` | 快照 Undo / Redo、连续操作合并 | 判断业务命令合法性 |
 | `ProjectAssets` | 内存资源、Blob URL、项目 JSON、ZIP | 云存储 |
 | `presentation.ts` | 内嵌本地资源、生成隔离预览与独立 HTML Slides | 成为新的文档真相、执行导入脚本 |
+| `fragments/extract.ts` | 选区、局部坐标、匹配样式、资源、SVG defs 和预览 | 修改当前文档 |
+| `fragments/package.ts` / `schema.ts` | `.vfrag` ZIP、JSON Schema、安全限额与往返 | 决定 UI 插入位置 |
+| `fragments/import.ts` | 兼容性报告、ID/引用/资源映射与确认后写入 | 静默忽略冲突 |
+| `fragments/component.ts` | 属性、插槽、关联状态和显式实例同步 | 建立第二套组件树 |
+| `fragments/library.ts` | IndexedDB 版本库及内存降级 | 云端市场或项目真相 |
 | `SourceCodeEditor` | 代码草稿、搜索、元素定位 | 自动接受无效源码 |
 | CLI | 文件读取、命令批处理、安全写出 | 浏览器精确布局 |
 
@@ -93,7 +103,7 @@ flowchart LR
 
 ## 历史模型
 
-历史项是包含 source、document type、canvas、source name 和 selection 的快照。快照比逐命令反演更适合 MVP，因为：
+历史项是包含 source、document type、canvas、source name、selection 和项目资源引用集合的快照。资源字节在未修改时共享底层 `Uint8Array`；片段插入的 Undo 会恢复插入前资源集合。快照比逐命令反演更适合 MVP，因为：
 
 - HTML 与 SVG 操作可以共享恢复逻辑；
 - 删除、复制、重排和代码整体应用都可可靠恢复；
@@ -132,6 +142,14 @@ flowchart LR
 
 项目 JSON 还保存最近 500 条操作日志。日志是审计线索，不是恢复真相；Undo / Redo 仍只依赖当前会话的历史快照。
 
+## Visual Fragment 模型
+
+Visual Fragment 定义是规范 DOM/SVG 选区的可移植派生包。包内 `data-vfrag-node-key` 是定义内部的稳定绑定键；导入时普通 ID 和 `data-editor-id` 可以重映射，但 node key 不变，因此组件属性和插槽不依赖目标项目身份。
+
+导入严格分为只读 `planVisualFragmentInsert()` 和有副作用 `applyVisualFragmentInsertPlan()`。兼容性报告、全部 ID/资源映射和最终源码在 plan 阶段确定；用户确认后才把节点、版本隔离样式和资源写入当前项目。关联信息使用可读 `data-vfrag-*` 属性保存在规范节点上，本地库只保存定义和版本，不拥有页面实例状态。
+
+完整协议见 [VISUAL_FRAGMENTS.md](VISUAL_FRAGMENTS.md)。
+
 ## 可扩展点
 
 - `EditorCommand` 可直接复用于 HTTP API、MCP 或桌面宿主；
@@ -139,3 +157,4 @@ flowchart LR
 - `CanvasRenderer` 可以为 iframe 隔离或 CSP worker parser 提供第二实现；
 - `History` 可以替换为增量 patch；
 - `ElementChanges` 可以增加 Flex / Grid、SVG path 点编辑和组件语义。
+- Fragment library 可以换成本地文件或远端 registry 适配器，但 package/schema/plan/apply 边界保持不变。

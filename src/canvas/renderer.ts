@@ -242,6 +242,9 @@ export class CanvasRenderer {
   private rewriteResourceReferences(root: Element): void {
     if (!this.assets) return;
     for (const element of [root, ...Array.from(root.querySelectorAll("*"))]) {
+      if (element.localName === "style" && element.textContent?.includes("url(")) {
+        element.textContent = this.assets.rewriteCssUrls(element.textContent, this.sourcePath);
+      }
       for (const attributeName of ["src", "poster", "href", "xlink:href"]) {
         const value = element.getAttribute(attributeName);
         if (!value) continue;

@@ -40,7 +40,7 @@ describe("standalone HTML Slides", () => {
     const output = new JSDOM(result.html).window.document;
 
     expect(result.pageCount).toBe(3);
-    expect(output.querySelector("meta[name='generator']")?.getAttribute("content")).toBe("Last Mile Studio 0.2.0");
+    expect(output.querySelector("meta[name='generator']")?.getAttribute("content")).toBe("Last Mile Studio 0.3.0");
     expect(output.querySelector("#lms-slides")?.getAttribute("sandbox")).toBe("allow-same-origin");
     expect(output.querySelector("#lms-controls")).not.toBeNull();
     expect(output.querySelector("script")?.textContent).toContain("demo-page-3");

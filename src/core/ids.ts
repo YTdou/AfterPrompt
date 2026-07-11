@@ -24,6 +24,7 @@ function slugify(value: string): string {
 }
 
 export function isEditableElement(element: Element, kind: DocumentKind): boolean {
+  if (element.getAttribute("data-editor-structural") === "true") return false;
   const isSvgNode = kind === "svg" || element.namespaceURI === "http://www.w3.org/2000/svg";
   if (isSvgNode) return !["defs", "style", "script", "title", "desc"].includes(element.localName);
   return !ignoredHtmlTags.has(element.localName);
