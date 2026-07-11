@@ -232,6 +232,19 @@ async function run() {
     await page.locator('[data-inspector-action="select-parent"]').click();
     await page.waitForFunction(() => document.querySelector("#selection-status")?.textContent?.startsWith("accent-block-001"));
 
+    progress("checking child-first canvas hit testing");
+    const childHitPoint = await page.evaluate(() => {
+      const child = document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="takeaway-001"]');
+      if (!(child instanceof HTMLElement)) return null;
+      child.style.pointerEvents = "none";
+      const bounds = child.getBoundingClientRect();
+      return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
+    });
+    assert(childHitPoint, "Nested child has no browser hit-test bounds.");
+    await page.mouse.click(childHitPoint.x, childHitPoint.y);
+    await page.waitForFunction(() => document.querySelector("#selection-status")?.textContent?.startsWith("takeaway-001"));
+    assert(!(await page.locator('[data-inspector-action="select-parent"]').isDisabled()), "Child-first canvas selection lost parent navigation.");
+
     progress("checking Visual Fragment save, package export, linked insert, properties, and definition sync");
     await page.locator('[data-layer-id="title-001"]').click();
     await page.locator("#save-fragment").click();

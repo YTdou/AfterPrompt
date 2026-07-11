@@ -362,11 +362,40 @@ export class CanvasRenderer {
     }
   }
 
-  private elementFromEvent(event: Event): Element | null {
+  private nativeEditableElementFromEvent(event: Event): Element | null {
     for (const node of event.composedPath()) {
       if (node instanceof Element && node.hasAttribute("data-editor-id")) return node;
     }
     return null;
+  }
+
+  private elementFromEvent(event: Event): Element | null {
+    const nativeTarget = this.nativeEditableElementFromEvent(event);
+    if (!nativeTarget || !(event instanceof MouseEvent)) return nativeTarget;
+    const { clientX, clientY } = event;
+    const hitStack = this.shadow.elementsFromPoint(clientX, clientY);
+    const stackRanks = new Map<Element, number>();
+    hitStack.forEach((hit, index) => {
+      const editable = hit.closest("[data-editor-id]");
+      if (editable && !stackRanks.has(editable)) stackRanks.set(editable, index);
+    });
+    const candidates = Array.from(this.shadow.querySelectorAll("[data-editor-id]"))
+      .filter((candidate) => nativeTarget.contains(candidate) || candidate.contains(nativeTarget))
+      .filter((candidate) => {
+        const bounds = candidate.getBoundingClientRect();
+        if (bounds.width <= 0 || bounds.height <= 0 || clientX < bounds.left || clientX > bounds.right || clientY < bounds.top || clientY > bounds.bottom) return false;
+        const style = getComputedStyle(candidate);
+        return style.display !== "none" && style.visibility !== "hidden" && candidate.getAttribute("data-editor-build-visibility") !== "hidden";
+      });
+    candidates.sort((left, right) => {
+      if (left.contains(right)) return 1;
+      if (right.contains(left)) return -1;
+      const leftRank = stackRanks.get(left) ?? Number.MAX_SAFE_INTEGER;
+      const rightRank = stackRanks.get(right) ?? Number.MAX_SAFE_INTEGER;
+      if (leftRank !== rightRank) return leftRank - rightRank;
+      return 0;
+    });
+    return candidates[0] ?? nativeTarget;
   }
 
   private handleClick = (event: Event): void => {
