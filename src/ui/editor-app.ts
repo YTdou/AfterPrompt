@@ -391,6 +391,7 @@ export class EditorApp {
       const action = (event.target as Element).closest<HTMLElement>("[data-inspector-action]")?.dataset.inspectorAction;
       if (action === "replace-image") this.get<HTMLInputElement>("#image-input").click();
       else if (action === "select-parent") this.layerAction("parent");
+      else if (action === "select-child") this.layerAction("child");
     });
     this.get("#image-input").addEventListener("change", (event) => void this.replaceImage(event));
 
@@ -674,10 +675,15 @@ export class EditorApp {
     const fill = selectedKind === "svg" ? (modelElement.getAttribute("fill") ?? computed.fill) : computed.backgroundColor;
     const stroke = selectedKind === "svg" ? (modelElement.getAttribute("stroke") ?? "#000000") : computed.borderColor;
     const text = isText ? (modelElement.textContent ?? "") : "";
+    const parentId = modelElement.parentElement?.closest("[data-editor-id]")?.getAttribute("data-editor-id") ?? "";
+    const childId = modelElement.querySelector("[data-editor-id]")?.getAttribute("data-editor-id") ?? "";
     host.innerHTML = `
       <section class="inspector-section identity-card">
         <div><span class="element-badge">${escapeHtml(modelElement.localName)}</span><strong>${escapeHtml(id)}</strong></div>
-        <button data-inspector-action="select-parent">选择父级</button>
+        <div class="identity-navigation">
+          <button data-inspector-action="select-parent" title="选择最近的可编辑父级"${parentId ? "" : " disabled"}>选择父级</button>
+          <button data-inspector-action="select-child" title="选择第一个可编辑子级"${childId ? "" : " disabled"}>选择子级</button>
+        </div>
       </section>
       <section class="inspector-section">
         <h3>标识</h3>
@@ -873,6 +879,11 @@ export class EditorApp {
       const parent = element.parentElement?.closest("[data-editor-id]");
       const parentId = parent?.getAttribute("data-editor-id");
       if (parentId) this.selectElement(parentId, false);
+      return;
+    }
+    if (action === "child") {
+      const childId = element.querySelector("[data-editor-id]")?.getAttribute("data-editor-id");
+      if (childId) this.selectElement(childId, false);
       return;
     }
     if (action === "duplicate") {
@@ -1102,8 +1113,10 @@ export class EditorApp {
   }
 
   private handleKeyDown(event: KeyboardEvent): void {
-    const target = event.target as HTMLElement;
-    if (target.closest("input,textarea,select,[contenteditable],.cm-editor")) return;
+    const editableTarget = event.composedPath().some((node) =>
+      node instanceof Element && node.matches("input,textarea,select,[contenteditable],.cm-editor"),
+    );
+    if (editableTarget) return;
     if (event.code === "Space") {
       this.spacePressed = true;
       event.preventDefault();

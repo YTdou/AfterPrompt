@@ -716,6 +716,19 @@ button:disabled {
   white-space: nowrap;
 }
 
+.identity-navigation {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 5px;
+}
+
+.identity-navigation button {
+  min-height: 25px;
+  padding: 3px 6px;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
 .element-badge {
   padding: 2px 5px;
   border: 1px solid #3a5d9f;
