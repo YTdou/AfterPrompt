@@ -99,13 +99,49 @@ async function run() {
     await page.locator('#canvas-host [data-editor-id="title-001"]').dblclick();
     const inlineEditor = page.locator("#canvas-host .editor-inline-textarea");
     await inlineEditor.waitFor({ state: "visible" });
-    await inlineEditor.fill("Inline canvas title");
-    await inlineEditor.press("Control+Enter");
+    await inlineEditor.press("ArrowRight");
+    await inlineEditor.press("Backspace");
+    assert(await inlineEditor.isVisible(), "Canvas shortcuts closed the inline editor while using text navigation keys.");
+    assert(await page.locator('[data-layer-id="title-001"]').count() === 1, "Backspace inside the inline editor deleted the selected canvas element.");
+    await inlineEditor.press("Control+A");
+    await inlineEditor.pressSequentially("Inline canvas title");
+    await page.locator('#canvas-host .editor-inline-actions button[type="submit"]').click();
     await page.waitForFunction(() => {
       const host = document.querySelector("#canvas-host");
       return host?.shadowRoot?.querySelector('[data-editor-id="title-001"]')?.textContent === "Inline canvas title";
     });
     assert((await page.locator(".cm-content").innerText()).includes("Inline canvas title"), "Inline text edit did not synchronize to source code.");
+    await page.locator("#undo").click();
+    await page.waitForFunction(() => {
+      const host = document.querySelector("#canvas-host");
+      return host?.shadowRoot?.querySelector('[data-editor-id="title-001"]')?.textContent === "Energy-Proportional LLM Inference";
+    });
+
+    await page.locator('#canvas-host [data-editor-id="title-001"]').dblclick();
+    await inlineEditor.fill("Blur committed title");
+    await page.locator("#fit-canvas").click();
+    await page.waitForFunction(() => {
+      const host = document.querySelector("#canvas-host");
+      return host?.shadowRoot?.querySelector('[data-editor-id="title-001"]')?.textContent === "Blur committed title";
+    });
+    await page.locator("#undo").click();
+    await page.waitForFunction(() => {
+      const host = document.querySelector("#canvas-host");
+      return host?.shadowRoot?.querySelector('[data-editor-id="title-001"]')?.textContent === "Energy-Proportional LLM Inference";
+    });
+
+    await page.locator('#canvas-host [data-editor-id="title-001"]').dblclick();
+    await inlineEditor.fill("Cancelled inline title");
+    await page.locator('#canvas-host .editor-inline-actions button[type="button"]').click();
+    assert((await shadowText(page, "title-001")) === "Energy-Proportional LLM Inference", "Cancelling an inline text edit changed the source document.");
+
+    await page.locator('#canvas-host [data-editor-id="title-001"]').dblclick();
+    await inlineEditor.fill("Enter committed title");
+    await inlineEditor.press("Enter");
+    await page.waitForFunction(() => {
+      const host = document.querySelector("#canvas-host");
+      return host?.shadowRoot?.querySelector('[data-editor-id="title-001"]')?.textContent === "Enter committed title";
+    });
     await page.locator("#undo").click();
     await page.waitForFunction(() => {
       const host = document.querySelector("#canvas-host");
@@ -161,6 +197,16 @@ async function run() {
       const host = document.querySelector("#canvas-host");
       return host?.shadowRoot?.querySelector('[data-editor-id="title-001"]')?.textContent === "Energy-Proportional LLM Inference";
     });
+
+    progress("checking inspector parent and child navigation");
+    await page.locator('[data-layer-id="accent-block-001"]').click();
+    const selectChild = page.locator('[data-inspector-action="select-child"]');
+    assert(!(await selectChild.isDisabled()), "The inspector disabled child navigation for an element with editable descendants.");
+    await selectChild.click();
+    await page.waitForFunction(() => document.querySelector("#selection-status")?.textContent?.startsWith("takeaway-001"));
+    assert(await page.locator('[data-inspector-action="select-child"]').isDisabled(), "A leaf text element incorrectly exposes an editable child.");
+    await page.locator('[data-inspector-action="select-parent"]').click();
+    await page.waitForFunction(() => document.querySelector("#selection-status")?.textContent?.startsWith("accent-block-001"));
 
     progress("checking Visual Fragment save, package export, linked insert, properties, and definition sync");
     await page.locator('[data-layer-id="title-001"]').click();
@@ -343,8 +389,14 @@ async function run() {
 
     const thumbnailText = await page.locator('[data-thumbnail-host="1"]').evaluate((host) => host.shadowRoot?.textContent ?? "");
     assert(thumbnailText.includes("Refine the message"), "The second thumbnail is not a real DOM preview of page two.");
-    await page.locator("#page-select").selectOption("1");
+    const secondThumbnailPreview = await page.locator('[data-page-id="demo-page-2"] .page-thumbnail-preview').boundingBox();
+    assert(secondThumbnailPreview, "The second page thumbnail preview has no browser bounds.");
+    await page.mouse.click(
+      secondThumbnailPreview.x + secondThumbnailPreview.width / 2,
+      secondThumbnailPreview.y + secondThumbnailPreview.height / 2,
+    );
     await page.waitForFunction(() => document.querySelector("#page-count")?.textContent === "2 / 3");
+    assert(await page.locator(".page-thumbnail.is-active").getAttribute("data-page-id") === "demo-page-2", "Clicking the thumbnail preview center did not activate page two.");
     const secondPageLabel = await page.evaluate(() => document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-preview-page-root="active"]')?.getAttribute("data-label"));
     assert(secondPageLabel === "Visual editing", `Page switching selected the wrong slide: ${secondPageLabel}`);
 
@@ -415,9 +467,13 @@ async function run() {
       undo: true,
       svgSelection: true,
       inlineTextEditing: true,
+      inlineTextKeyboardIsolation: true,
+      inlineTextApplyCancel: true,
+      inspectorChildNavigation: true,
       polygonScaling: true,
       staticDeckPages: 4,
       pageThumbnails: true,
+      thumbnailCenterNavigation: true,
       pageDuplicateDeleteSort: true,
       presentationPreview: true,
       standaloneSlidesExport: true,

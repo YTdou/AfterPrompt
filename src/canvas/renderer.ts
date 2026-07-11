@@ -56,20 +56,68 @@ const editorCss = `
     outline: 2px solid #3774ff !important;
     outline-offset: 2px;
   }
-  .editor-inline-textarea {
+  .editor-inline-editor {
     position: absolute;
     z-index: 2147483000;
+    display: grid;
+    grid-template-rows: minmax(30px, 1fr) 30px;
     box-sizing: border-box;
-    min-width: 48px;
-    min-height: 30px;
-    resize: none;
-    padding: 2px 4px;
+    min-width: 120px;
+    min-height: 60px;
+    margin: 0;
     border: 2px solid #3774ff;
     border-radius: 3px;
     outline: none;
     background: rgba(255, 255, 255, 0.97);
     box-shadow: 0 5px 22px rgba(17, 37, 78, 0.24);
+    overflow: hidden;
+  }
+  .editor-inline-textarea {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    height: 100%;
+    min-height: 30px;
+    resize: none;
+    padding: 2px 4px;
+    border: 0;
+    border-radius: 0;
+    outline: none;
+    background: transparent;
     overflow: auto;
+  }
+  .editor-inline-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    padding: 3px 5px;
+    border-top: 1px solid rgba(55, 116, 255, 0.24);
+    background: #eef3ff;
+    font: 11px/1.2 ui-sans-serif, system-ui, sans-serif;
+  }
+  .editor-inline-actions span {
+    min-width: 0;
+    margin-right: auto;
+    overflow: hidden;
+    color: #53627d;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .editor-inline-actions button {
+    min-height: 22px;
+    padding: 2px 8px;
+    border: 1px solid #b8c6e5;
+    border-radius: 4px;
+    background: white;
+    color: #283b62;
+    cursor: pointer;
+    font: inherit;
+  }
+  .editor-inline-actions button[type="submit"] {
+    border-color: #3774ff;
+    background: #3774ff;
+    color: white;
   }
 `;
 
@@ -103,7 +151,8 @@ const staticPagesCss = `
 `;
 
 const nonInteractiveCss = `
-  [data-editor-id] {
+  .editor-preview-shell,
+  .editor-preview-shell * {
     pointer-events: none !important;
     cursor: default !important;
   }
@@ -155,6 +204,7 @@ export class CanvasRenderer {
   private callbacks: RendererCallbacks;
   private previewRoot: Element | null = null;
   private inlineFinish: ((commit: boolean) => void) | null = null;
+  private interactive = true;
 
   constructor(readonly host: HTMLElement, callbacks: RendererCallbacks) {
     this.callbacks = callbacks;
@@ -172,12 +222,14 @@ export class CanvasRenderer {
     this.model = model;
     this.assets = assets;
     this.sourcePath = sourcePath;
+    this.interactive = options.interactive !== false;
     this.shadow.replaceChildren();
     this.shadow.append(styleElement(editorCss));
-    if (options.interactive === false) this.shadow.append(styleElement(nonInteractiveCss));
 
     if (model.kind === "html") this.renderHtml(model, activePageId, options.pruneInactivePages ?? false);
     else this.renderSvg(model);
+    // Append this last so imported/static-page styles cannot re-enable pointer handling.
+    if (!this.interactive) this.shadow.append(styleElement(nonInteractiveCss));
   }
 
   private renderHtml(model: SourceDocument, activePageId?: string, pruneInactivePages = false): void {
@@ -264,6 +316,7 @@ export class CanvasRenderer {
   }
 
   private handleClick = (event: Event): void => {
+    if (!this.interactive) return;
     const mouseEvent = event as MouseEvent;
     const element = this.elementFromEvent(event);
     if (!element) return;
@@ -279,6 +332,7 @@ export class CanvasRenderer {
   };
 
   private handleDoubleClick = (event: Event): void => {
+    if (!this.interactive) return;
     const element = this.elementFromEvent(event);
     if (!element || !isTextEditable(element) || element.getAttribute("data-editor-locked") === "true") return;
     event.preventDefault();
@@ -297,24 +351,46 @@ export class CanvasRenderer {
 
     const original = element.textContent ?? "";
     const computed = getComputedStyle(element);
-    const editor = document.createElement("textarea");
-    editor.className = "editor-inline-textarea";
-    editor.value = original;
+    const editor = document.createElement("form");
+    editor.className = "editor-inline-editor";
     editor.setAttribute("aria-label", `编辑文字：${id}`);
-    editor.title = "Ctrl/Cmd + Enter 完成，Esc 取消";
-    editor.spellcheck = false;
-    editor.style.left = `${bounds.x}px`;
-    editor.style.top = `${bounds.y}px`;
-    editor.style.width = `${Math.max(48, bounds.width)}px`;
-    editor.style.height = `${Math.max(30, bounds.height)}px`;
-    editor.style.fontFamily = computed.fontFamily;
-    editor.style.fontSize = computed.fontSize;
-    editor.style.fontWeight = computed.fontWeight;
-    editor.style.fontStyle = computed.fontStyle;
-    editor.style.lineHeight = computed.lineHeight === "normal" ? "1.2" : computed.lineHeight;
-    editor.style.letterSpacing = computed.letterSpacing;
-    editor.style.textAlign = computed.textAlign;
-    editor.style.color = element.namespaceURI === "http://www.w3.org/2000/svg" ? computed.fill : computed.color;
+    const textHeight = Math.max(30, bounds.height);
+    const editorWidth = Math.max(160, bounds.width);
+    const editorHeight = textHeight + 30;
+    const maxLeft = Math.max(0, this.host.offsetWidth - editorWidth);
+    const maxTop = Math.max(0, this.host.offsetHeight - editorHeight);
+    editor.style.left = `${Math.min(Math.max(0, bounds.x), maxLeft)}px`;
+    editor.style.top = `${Math.min(Math.max(0, bounds.y), maxTop)}px`;
+    editor.style.width = `${editorWidth}px`;
+    editor.style.height = `${editorHeight}px`;
+
+    const textarea = document.createElement("textarea");
+    textarea.className = "editor-inline-textarea";
+    textarea.value = original;
+    textarea.setAttribute("aria-label", `文字内容：${id}`);
+    textarea.title = "Enter 应用，Shift + Enter 换行，Esc 取消";
+    textarea.spellcheck = false;
+    textarea.style.fontFamily = computed.fontFamily;
+    textarea.style.fontSize = computed.fontSize;
+    textarea.style.fontWeight = computed.fontWeight;
+    textarea.style.fontStyle = computed.fontStyle;
+    textarea.style.lineHeight = computed.lineHeight === "normal" ? "1.2" : computed.lineHeight;
+    textarea.style.letterSpacing = computed.letterSpacing;
+    textarea.style.textAlign = computed.textAlign;
+    textarea.style.color = element.namespaceURI === "http://www.w3.org/2000/svg" ? computed.fill : computed.color;
+
+    const actions = document.createElement("div");
+    actions.className = "editor-inline-actions";
+    const hint = document.createElement("span");
+    hint.textContent = "Enter 应用 · Shift+Enter 换行";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.textContent = "取消";
+    const apply = document.createElement("button");
+    apply.type = "submit";
+    apply.textContent = "应用";
+    actions.append(hint, cancel, apply);
+    editor.append(textarea, actions);
     element.setAttribute("data-editor-inline-editing", "true");
     shell.append(editor);
 
@@ -323,29 +399,51 @@ export class CanvasRenderer {
       if (finished) return;
       finished = true;
       this.inlineFinish = null;
-      editor.removeEventListener("blur", onBlur);
-      editor.removeEventListener("keydown", onKeyDown);
+      editor.removeEventListener("submit", onSubmit);
+      editor.removeEventListener("focusout", onFocusOut);
+      cancel.removeEventListener("click", onCancel);
+      textarea.removeEventListener("keydown", onKeyDown);
       element.removeAttribute("data-editor-inline-editing");
-      const next = editor.value;
+      const next = textarea.value;
       editor.remove();
       if (commit && next !== original) this.callbacks.onInlineTextCommit(id, next);
     };
-    const onBlur = (): void => finish(true);
+    const onSubmit = (submitEvent: SubmitEvent): void => {
+      submitEvent.preventDefault();
+      submitEvent.stopPropagation();
+      finish(true);
+    };
+    const onCancel = (mouseEvent: MouseEvent): void => {
+      mouseEvent.preventDefault();
+      mouseEvent.stopPropagation();
+      finish(false);
+    };
+    const onFocusOut = (focusEvent: FocusEvent): void => {
+      const next = focusEvent.relatedTarget;
+      if (next instanceof Node && editor.contains(next)) return;
+      finish(true);
+    };
     const onKeyDown = (keyboardEvent: KeyboardEvent): void => {
+      // Keyboard events are composed across Shadow DOM. Keep editor input from
+      // reaching canvas shortcuts such as Delete, Arrow keys, PageUp, or Undo.
+      keyboardEvent.stopPropagation();
       if (keyboardEvent.key === "Escape") {
         keyboardEvent.preventDefault();
         finish(false);
-      } else if (keyboardEvent.key === "Enter" && (keyboardEvent.ctrlKey || keyboardEvent.metaKey)) {
+      } else if (keyboardEvent.key === "Enter" && !keyboardEvent.isComposing &&
+        (!keyboardEvent.shiftKey || keyboardEvent.ctrlKey || keyboardEvent.metaKey)) {
         keyboardEvent.preventDefault();
         finish(true);
       }
     };
     this.inlineFinish = finish;
-    editor.addEventListener("blur", onBlur, { once: true });
-    editor.addEventListener("keydown", onKeyDown);
+    editor.addEventListener("submit", onSubmit);
+    editor.addEventListener("focusout", onFocusOut);
+    cancel.addEventListener("click", onCancel);
+    textarea.addEventListener("keydown", onKeyDown);
     requestAnimationFrame(() => {
-      editor.focus();
-      editor.select();
+      textarea.focus();
+      textarea.select();
     });
   }
 
