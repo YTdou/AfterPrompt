@@ -66,16 +66,18 @@ CHROME_PATH=/path/to/chrome npm run test:browser
 - 画布修改后更新底层源码；代码修改通过“应用代码”重新解析并更新画布；
 - 代码解析失败时保留上一个有效画布，不覆盖有效版本。
 
-### 演示预览与独立 Slides
+### 演示预览与可逆 HTML
 
 - 原生识别正整数 `data-build`，同一步元素作为一组累计出现；页面与 Build 是互相独立的编辑维度；
 - 编辑器提供 Playback State、Current Group 和 All Builds 三种视图；后续 Build 中的真实元素仍可选择、移动、缩放和双击编辑；
 - Build 编排面板支持设置/移除 Build、拖动元素跨组、拖动组排序、新建、拆分和合并，所有文档变更进入 Undo / Redo 并同步标准源码；
 - 页面缩略图默认显示 Final Build，并标记每页 Build 数；非法 Build 值和父子 Build 可见性冲突会明确提示；
 - 在隔离 iframe 中预览当前 HTML 演示稿，前进时先推进当前页 Build，完成后再翻页；后退时先撤销 Build，Initial 再返回上一页 Final；同时支持方向键、Page Up / Page Down、Home / End 和全屏；
-- 导出单个可独立播放的 `*-slides.html`；
+- HTML 只保留一种“导出 HTML”：生成可直接播放、也可重新导入继续编辑的单文件 HTML；
+- 导出文件以版本化 inert payload 保存规范文档，播放器和重新导入读取同一份数据，不会把播放器外壳当成一页内容；
+- 重新导入会恢复页面、Build、稳定 ID 和画布；旧版 `*-slides.html` 会尽力解包并升级为新格式；
 - 导出时内嵌已导入的本地 CSS、图片、SVG 和字体资源，无法解析的本地资源会明确提示；
-- 导入文档原有脚本始终被移除；独立 Slides 只运行编辑器生成的导航脚本，实际页面位于禁止脚本的内层 sandbox iframe；
+- 导入文档原有脚本始终被移除；导出 HTML 只运行编辑器生成的导航脚本，实际页面位于禁止脚本的内层 sandbox iframe；
 - 演示预览和独立导出是规范 HTML DOM 的派生视图，不会成为第二套文档真相。
 
 ### 视觉片段、组件与本地库
@@ -137,7 +139,7 @@ CHROME_PATH=/path/to/chrome npm run test:browser
 2. 在画布中点击标题、图片、色块或内嵌 SVG；
 3. 拖动控制框，或在右侧属性面板输入精确值；
 4. 在下方代码视图确认 `data-editor-id`、属性和样式变化；
-5. 点击“导出源文件”保留标准源码；多页演示稿可使用“演示预览”检查播放效果，再用“导出 Slides”生成单文件演示稿。
+5. 使用“演示预览”检查播放效果，再点击“导出 HTML”；该文件既可直接播放，也可重新导入继续编辑。
 
 ### 管理多页演示稿
 
@@ -145,7 +147,7 @@ CHROME_PATH=/path/to/chrome npm run test:browser
 2. 点击胶片栏缩略图切换页面；
 3. 使用“复制页”“删除页”“前移”“后移”，或直接拖动缩略图调整顺序；
 4. 在画布尺寸菜单选择 16:9、4:3 或手动输入尺寸；
-5. 点击“演示预览”检查键盘翻页，再点击“导出 Slides”。
+5. 点击“演示预览”检查键盘翻页，再点击“导出 HTML”。
 
 ### 编辑和编排 Build
 
@@ -154,7 +156,7 @@ CHROME_PATH=/path/to/chrome npm run test:browser
 3. 切换到 `Current Group` 聚焦当前组，或用 `All Builds` 查看并选择所有隐藏元素；
 4. 在右侧 Build 编排面板中选择元素并设置为已有组、New Build 或 Always Visible；也可拖动元素跨组、拖动组标题排序；
 5. 使用拆分和合并调整同一步分组，随后用 Undo / Redo 验证编排；源码中的 `data-build` 会同步更新，临时 `revealed` 状态不会写入源码；
-6. 用“演示预览”和“导出 Slides”验证 Build-first 播放语义。
+6. 用“演示预览”和“导出 HTML”验证 Build-first 播放语义，并将导出文件重新导入确认 Build 仍可编辑。
 
 ### 编辑 SVG
 
@@ -239,7 +241,7 @@ npm run cli -- fragments /tmp/ai-slide-with-fragment.html
 - [examples/codex-commands.json](examples/codex-commands.json)：修改标题、移动图片、修改色块、删除图标；
 - [examples/title-component-schema.json](examples/title-component-schema.json)：CLI 创建组件时使用的结构化属性 Schema；
 - [tests/document-model.test.ts](tests/document-model.test.ts)：解析、净化、稳定 ID、HTML/SVG 命令与错误恢复；
-- [tests/presentation.test.ts](tests/presentation.test.ts)：页面操作、资源内嵌、Build-first 状态机和独立 Slides 安全边界；
+- [tests/presentation.test.ts](tests/presentation.test.ts)：页面操作、资源内嵌、Build-first 状态机、可逆 HTML 往返和播放安全边界；
 - [tests/fragments.test.ts](tests/fragments.test.ts)：Schema、包往返、冲突修复、组件属性/插槽、实例同步和本地库；
 - [scripts/browser-smoke.mjs](scripts/browser-smoke.mjs)：真实浏览器中的基础编辑、页面管理、Build A/B、HotCarbon 真实样本，以及完整 Visual Fragment 保存—插入—修改—升级链路。
 
@@ -302,7 +304,7 @@ src/
 - DOMParser 会修复不规范 HTML，序列化会统一标签和属性格式。未编辑的语义结构、class、id、注释和资源引用会保留，但无法保证逐字符 diff；
 - 高级 SVG 滤镜、mask、clipPath、textPath、动画和外部脚本不在可靠编辑范围；
 - 页面管理只支持可静态识别、且页面节点共享同一容器的 HTML 演示稿；不会执行 Reveal.js、SlideV 或自定义框架的原始运行时；
-- 独立 Slides 会内嵌已导入的本地资源，但保留外部 HTTP(S) 引用；离线播放前应确认没有外部依赖；
+- 导出 HTML 会内嵌已导入的本地资源，但保留外部 HTTP(S) 引用；离线播放前应确认没有外部依赖；
 - 画布比例切换只修改画布和已识别 deck 的尺寸元数据，不会自动重排或缩放页面内元素；
 - Source-preserving 会保留源结构和匹配声明，但依赖复杂祖先选择器时只能以局部映射声明回退；Self-contained 更便携，但产生的 CSS 更详细；
 - 浏览器无法读取的跨域样式、外部字体或网络资源不会被伪装成已打包内容；兼容性报告会保留这些依赖；

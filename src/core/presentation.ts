@@ -3,6 +3,11 @@ import { resolveProjectPath, type ProjectAssets } from "./project";
 import { sanitizeCss, sanitizeDocument } from "./sanitizer";
 import { serializeDocument, type SourceDocument } from "./document-model";
 import type { ProjectAsset } from "./types";
+import {
+  EDITABLE_HTML_FORMAT,
+  EDITABLE_HTML_VERSION,
+  encodeEditableHtmlPayload,
+} from "./editable-html";
 
 export interface PreparedPresentationSource {
   source: string;
@@ -142,7 +147,14 @@ export function preparePresentationSource(model: SourceDocument, assets: Project
 
 export function buildStandaloneSlides(model: SourceDocument, assets: ProjectAssets, sourcePath: string, options: StandaloneSlidesOptions = {}): StandaloneSlidesResult {
   const prepared = preparePresentationSource(model, assets, sourcePath);
-  const sourceBase64 = bytesToBase64(new TextEncoder().encode(prepared.source));
+  const editablePayload = encodeEditableHtmlPayload({
+    format: EDITABLE_HTML_FORMAT,
+    version: EDITABLE_HTML_VERSION,
+    source: prepared.source,
+    sourceName: model.sourceName,
+    sourcePath,
+    canvas: { ...model.canvas },
+  });
   const pageCount = Math.max(1, prepared.pageIds.length);
   const title = model.document.title?.trim() || model.sourceName.replace(/\.html?$/i, "") || "Presentation";
   const labels = prepared.pageLabels.length ? prepared.pageLabels : [title];
@@ -158,7 +170,7 @@ export function buildStandaloneSlides(model: SourceDocument, assets: ProjectAsse
   `;
   const runtime = `
     (() => {
-      const sourceBase64 = ${scriptJson(sourceBase64)};
+      const payloadNode = document.getElementById("lms-document-payload");
       const pageIds = ${scriptJson(prepared.pageIds)};
       const pageLabels = ${scriptJson(labels)};
       const pageBuildSteps = ${scriptJson(prepared.buildSteps)};
@@ -177,9 +189,11 @@ export function buildStandaloneSlides(model: SourceDocument, assets: ProjectAsse
       let buildPosition = 0;
 
       const decodeSource = () => {
-        const binary = atob(sourceBase64);
-        const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-        return new TextDecoder().decode(bytes);
+        const encodedPayload = payloadNode.content.textContent.replace(/\\s+/g, "");
+        const payloadBinary = atob(encodedPayload);
+        const payloadBytes = Uint8Array.from(payloadBinary, (character) => character.charCodeAt(0));
+        const payload = JSON.parse(new TextDecoder().decode(payloadBytes));
+        return payload.source;
       };
 
       const resize = () => {
@@ -278,6 +292,8 @@ export function buildStandaloneSlides(model: SourceDocument, assets: ProjectAsse
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="generator" content="Last Mile Studio 0.3.0" />
+  <meta name="lms-format" content="editable-html-presentation" />
+  <meta name="lms-format-version" content="1" />
   <title>${escapeHtml(title)}</title>
   <style>
     :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #080a0f; }
@@ -295,6 +311,7 @@ export function buildStandaloneSlides(model: SourceDocument, assets: ProjectAsse
   </style>
 </head>
 <body>
+  <template id="lms-document-payload" data-encoding="base64-json">${editablePayload}</template>
   <main id="lms-stage"><iframe id="lms-slides" title="Presentation canvas" sandbox="allow-same-origin"></iframe></main>
   <nav id="lms-controls" aria-label="Presentation controls">
     <button id="lms-previous" type="button" aria-label="Previous slide">‹</button>
