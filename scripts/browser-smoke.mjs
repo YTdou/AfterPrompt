@@ -53,6 +53,14 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function editableSourceFromExport(html) {
+  const encoded = html.match(/<template\s+id="lms-document-payload"[^>]*>([^<]+)<\/template>/i)?.[1]?.trim();
+  assert(encoded, "Exported HTML does not contain an editable Last Mile Studio payload.");
+  const payload = JSON.parse(Buffer.from(encoded, "base64").toString("utf8"));
+  assert(payload.format === "last-mile-studio/editable-html" && payload.version === 1, "Exported HTML payload has an unsupported format.");
+  return payload.source;
+}
+
 async function shadowText(page, id) {
   return page.evaluate((elementId) => {
     const host = document.querySelector("#canvas-host");
@@ -326,11 +334,11 @@ async function run() {
       return root?.querySelector('[data-vfrag-node-key="title-001"]')?.textContent === expected;
     }, { definitionId: fragmentId, expected: "Reusable browser title" });
     const componentSourceDownloadPromise = page.waitForEvent("download");
-    await page.locator("#export-source").click();
+    await page.locator("#export-html").click();
     const componentSourceDownload = await componentSourceDownloadPromise;
     const componentSourcePath = await componentSourceDownload.path();
     assert(componentSourcePath, "Component source export did not produce a download path.");
-    const componentSource = await readFile(componentSourcePath, "utf8");
+    const componentSource = editableSourceFromExport(await readFile(componentSourcePath, "utf8"));
     assert(componentSource.includes("data-vfrag-property-overrides") && componentSource.includes("Reusable browser title"), "Component property override did not synchronize to exported source code.");
 
     await page.locator("#open-fragment-library").click();
@@ -391,7 +399,7 @@ async function run() {
     });
     await page.waitForTimeout(250);
     const downloadPromise = page.waitForEvent("download");
-    await page.locator("#export-source").click();
+    await page.locator("#export-html").click();
     const svgDownload = await downloadPromise;
     const svgDownloadPath = await svgDownload.path();
     assert(svgDownloadPath, "SVG export did not produce a local download path.");
@@ -634,12 +642,13 @@ async function run() {
     await page.locator("#close-presentation").click();
 
     const slidesDownloadPromise = page.waitForEvent("download");
-    await page.locator("#export-slides").click();
+    await page.locator("#export-html").click();
     const slidesDownload = await slidesDownloadPromise;
     const slidesDownloadPath = await slidesDownload.path();
     assert(slidesDownloadPath, "Standalone Slides export did not produce a local download path.");
     const exportedSlides = await readFile(slidesDownloadPath, "utf8");
     assert(exportedSlides.includes('content="Last Mile Studio 0.3.0"'), "Standalone Slides export has no current generator metadata.");
+    assert(exportedSlides.includes('name="lms-format" content="editable-html-presentation"'), "HTML export has no reversible format marker.");
     assert(exportedSlides.includes('sandbox="allow-same-origin"'), "Standalone Slides export does not keep imported content scriptless.");
     assert(exportedSlides.includes("demo-page-2-copy"), "Standalone Slides export lost the duplicated page order.");
 
@@ -656,6 +665,23 @@ async function run() {
     await exportedPage.locator("#lms-status").filter({ hasText: "2 / 4" }).waitFor();
     await exportedPage.close();
 
+    await page.locator("#file-input").setInputFiles(exportedHtmlPath);
+    await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("page 1/4"));
+    assert((await page.locator(".page-thumbnail").count()) === 4, "Re-importing exported HTML did not restore all four editable pages.");
+    assert(await page.locator("#canvas-host").evaluate((host) => !host.shadowRoot?.querySelector("#lms-stage")), "Re-importing exported HTML exposed the player shell instead of the canonical document.");
+    await page.locator("#duplicate-page").click();
+    await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("page 2/5"));
+    const secondRoundDownloadPromise = page.waitForEvent("download");
+    await page.locator("#export-html").click();
+    const secondRoundDownload = await secondRoundDownloadPromise;
+    const secondRoundPath = await secondRoundDownload.path();
+    assert(secondRoundPath, "Editing and re-exporting a re-imported HTML file did not produce a download.");
+    const secondRoundHtml = await readFile(secondRoundPath, "utf8");
+    assert(!editableSourceFromExport(secondRoundHtml).includes('id="lms-stage"'), "A second export nested the presentation player into canonical source.");
+    await page.locator("#file-input").setInputFiles(secondRoundPath);
+    await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("page 1/5"));
+    assert((await page.locator(".page-thumbnail").count()) === 5, "The second import did not preserve an edit made after the first round trip.");
+
     progress("checking the real 23-page HotCarbon Build artifact");
     await page.locator("#file-input").setInputFiles("reference/artifacts/HotCarbon_Oral_Slides_SelfContained.html");
     await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("page 1/23"), null, { timeout: 40_000 });
@@ -671,11 +697,11 @@ async function run() {
     await page.waitForFunction(() => document.querySelector("#build-status")?.textContent === "Build 2 / 2");
 
     const hotSourceDownloadPromise = page.waitForEvent("download");
-    await page.locator("#export-source").click();
+    await page.locator("#export-html").click();
     const hotSourceDownload = await hotSourceDownloadPromise;
     const hotSourcePath = await hotSourceDownload.path();
     assert(hotSourcePath, "HotCarbon sanitized source export did not produce a file.");
-    const hotSource = await readFile(hotSourcePath, "utf8");
+    const hotSource = editableSourceFromExport(await readFile(hotSourcePath, "utf8"));
     assert((hotSource.match(/data-build="[123]"/g) ?? []).length === 94, "HotCarbon sanitized source did not preserve all 94 Build elements.");
     assert(!hotSource.includes("<script"), "HotCarbon imported scripts survived sanitization.");
     assert(!hotSource.includes("data-editor-build-visibility"), "Editor Build observation state polluted canonical source.");
@@ -692,7 +718,7 @@ async function run() {
     await page.locator("#close-presentation").click();
 
     const hotSlidesPromise = page.waitForEvent("download", { timeout: 40_000 });
-    await page.locator("#export-slides").click();
+    await page.locator("#export-html").click();
     const hotSlidesDownload = await hotSlidesPromise;
     const hotSlidesPath = await hotSlidesDownload.path();
     assert(hotSlidesPath, "HotCarbon standalone Build Slides export did not produce a file.");

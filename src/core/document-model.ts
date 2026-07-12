@@ -2,6 +2,7 @@ import { applyEditorCommand, buildStructureSummary, summarizeElement } from "./c
 import { assignFreshIds, allEditableElements, ensureStableIds, getElementByEditorId, isEditableElement } from "./ids";
 import { sanitizeDocument } from "./sanitizer";
 import { refreshClonedFragmentInstances } from "./fragments/component";
+import { decodeEditableHtml } from "./editable-html";
 import {
   deriveBuildSequence,
   mergeBuildGroups,
@@ -143,10 +144,18 @@ export class SourceDocument {
 
   static parse(source: string, sourceName = "untitled.html", forcedKind?: DocumentKind, canvas?: CanvasSize): SourceDocument {
     if (!source.trim()) throw new Error("Source is empty.");
+    const editable = forcedKind === "svg" ? null : decodeEditableHtml(source, sourceName);
+    if (editable) {
+      source = editable.payload.source;
+      sourceName = editable.payload.sourceName || sourceName;
+      canvas = editable.payload.canvas;
+    }
     const kind = forcedKind ?? detectDocumentKind(source, sourceName);
     const parser = new DOMParser();
     const document = parser.parseFromString(source, kind === "svg" ? "image/svg+xml" : "text/html");
-    return SourceDocument.fromDocument(document, kind, sourceName, canvas);
+    const model = SourceDocument.fromDocument(document, kind, sourceName, canvas);
+    if (editable?.legacy) model.warnings.push("已从旧版 Last Mile Studio Slides 文件恢复可编辑源文档；再次导出会升级为可逆 HTML 格式。");
+    return model;
   }
 
   static fromDocument(document: Document, kind: DocumentKind, sourceName = "untitled.html", canvas?: CanvasSize): SourceDocument {

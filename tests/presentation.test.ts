@@ -3,6 +3,7 @@ import { JSDOM } from "jsdom";
 import deckSource from "../examples/multi-page-deck.html?raw";
 import { SourceDocument } from "../src/core/document-model";
 import { buildStandaloneSlides, preparePresentationSource } from "../src/core/presentation";
+import { decodeEditableHtml } from "../src/core/editable-html";
 import { ProjectAssets } from "../src/core/project";
 
 beforeAll(() => {
@@ -44,6 +45,8 @@ describe("standalone HTML Slides", () => {
     expect(output.querySelector("meta[name='generator']")?.getAttribute("content")).toBe("Last Mile Studio 0.3.0");
     expect(output.querySelector("#lms-slides")?.getAttribute("sandbox")).toBe("allow-same-origin");
     expect(output.querySelector("#lms-controls")).not.toBeNull();
+    expect(output.querySelector("meta[name='lms-format']")?.getAttribute("content")).toBe("editable-html-presentation");
+    expect(output.querySelector<HTMLTemplateElement>("template#lms-document-payload")?.content.textContent).toBeTruthy();
     expect(output.querySelector("script")?.textContent).toContain("demo-page-3");
     expect(output.querySelector("script")?.textContent).toContain("frame.srcdoc = decodeSource()");
     expect(output.querySelector("script")?.textContent).toContain("const forward = () =>");
@@ -89,5 +92,32 @@ describe("standalone HTML Slides", () => {
     expect(prepared.pageIds).toEqual([]);
     expect(prepared.buildSteps).toEqual([[4]]);
     expect(result.html).toContain("[[4]]");
+  });
+
+  it("round-trips playable HTML back into the editable document", () => {
+    const original = SourceDocument.parse(deckSource, "multi-page-deck.html");
+    const exported = buildStandaloneSlides(original, new ProjectAssets(), "examples/multi-page-deck.html");
+    const decoded = decodeEditableHtml(exported.html, "multi-page-deck.html");
+    const restored = SourceDocument.parse(exported.html, "multi-page-deck.html");
+
+    expect(decoded?.legacy).toBe(false);
+    expect(decoded?.payload.checksum).toMatch(/^fnv1a32:/);
+    expect(restored.sourceName).toBe("multi-page-deck.html");
+    expect(restored.canvas).toEqual(original.canvas);
+    expect(restored.pages().map(({ id }) => id)).toEqual(original.pages().map(({ id }) => id));
+    expect(restored.pages().map(({ index }) => restored.buildSequence(index).steps))
+      .toEqual(original.pages().map(({ index }) => original.buildSequence(index).steps));
+    expect(restored.document.querySelector("#lms-stage")).toBeNull();
+  });
+
+  it("upgrades a legacy 0.3.0 Slides wrapper instead of importing its player shell", () => {
+    const inner = '<!doctype html><html><body><div class="slides"><section data-editor-id="one">One</section><section data-editor-id="two">Two</section></div></body></html>';
+    const encoded = Buffer.from(inner, "utf8").toString("base64");
+    const legacy = `<!doctype html><html><head><meta name="generator" content="Last Mile Studio 0.3.0"></head><body><iframe id="lms-slides"></iframe><script>const sourceBase64 = ${JSON.stringify(encoded)}; const canvas = {"width":1920,"height":1080}; frame.srcdoc = decodeSource();</script></body></html>`;
+    const restored = SourceDocument.parse(legacy, "old-slides.html");
+
+    expect(restored.pages()).toHaveLength(2);
+    expect(restored.canvas).toEqual({ width: 1920, height: 1080 });
+    expect(restored.warnings.some((warning) => warning.includes("旧版"))).toBe(true);
   });
 });

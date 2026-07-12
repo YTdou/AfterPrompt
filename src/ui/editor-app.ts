@@ -101,8 +101,7 @@ const appTemplate = `
       </div>
       <div class="toolbar toolbar-export">
         <button id="preview-presentation" class="button">演示预览</button>
-        <button id="export-slides" class="button">导出 Slides</button>
-        <button id="export-source" class="button primary">导出源文件</button>
+        <button id="export-html" class="button primary">导出 HTML</button>
         <button id="export-project" class="button">保存项目</button>
         <button id="export-zip" class="button">导出 ZIP</button>
         <button id="export-summary" class="icon-button" title="Export AI-readable structure JSON">{ }</button>
@@ -378,8 +377,7 @@ export class EditorApp {
     this.get("#preview-presentation").addEventListener("click", () => this.get<HTMLDialogElement>("#preview-choice-dialog").showModal());
     this.get("#preview-from-start").addEventListener("click", () => this.previewPresentation(0));
     this.get("#preview-from-current").addEventListener("click", () => this.previewPresentation(this.activePageIndex));
-    this.get("#export-slides").addEventListener("click", () => this.exportSlides());
-    this.get("#export-source").addEventListener("click", () => this.exportSource());
+    this.get("#export-html").addEventListener("click", () => this.exportDocument());
     this.get("#export-project").addEventListener("click", () => this.exportProject());
     this.get("#export-zip").addEventListener("click", () => void this.exportZip());
     this.get("#export-summary").addEventListener("click", () => this.exportSummary());
@@ -598,7 +596,6 @@ export class EditorApp {
     this.get("#document-status").textContent = `${this.model.kind.toUpperCase()} · ${this.model.canvas.width} × ${this.model.canvas.height}${pageStatus} · ${this.model.editableElements().length} elements`;
     const htmlPresentationAvailable = this.model.kind === "html";
     this.get<HTMLButtonElement>("#preview-presentation").disabled = !htmlPresentationAvailable;
-    this.get<HTMLButtonElement>("#export-slides").disabled = !htmlPresentationAvailable;
     this.get("#undo").toggleAttribute("disabled", !this.history.canUndo);
     this.get("#redo").toggleAttribute("disabled", !this.history.canRedo);
     this.renderPageControl(pages);
@@ -1548,23 +1545,22 @@ export class EditorApp {
     }
   }
 
-  private exportSlides(): void {
+  private exportDocument(): void {
+    if (this.model.kind === "svg") {
+      const name = this.model.sourceName.match(/\.svg$/i) ? this.model.sourceName : `${fileStem(this.model.sourceName)}.svg`;
+      downloadText(this.model.serialize(), name, "image/svg+xml");
+      this.toast(`已导出 ${name}`);
+      return;
+    }
     try {
       const presentation = buildStandaloneSlides(this.model, this.assets, this.sourcePath);
-      const name = `${fileStem(this.model.sourceName)}-slides.html`;
+      const name = `${fileStem(this.model.sourceName)}.html`;
       downloadText(presentation.html, name, "text/html");
       if (presentation.warnings.length) this.showNotice(presentation.warnings.join(" "));
       this.toast(`已导出 ${name}`);
     } catch (error) {
       this.toast(error instanceof Error ? error.message : String(error), true);
     }
-  }
-
-  private exportSource(): void {
-    const extension = this.model.kind === "svg" ? ".svg" : ".html";
-    const name = this.model.sourceName.match(/\.(?:html?|svg)$/i) ? this.model.sourceName : `${fileStem(this.model.sourceName)}${extension}`;
-    downloadText(this.model.serialize(), name, this.model.kind === "svg" ? "image/svg+xml" : "text/html");
-    this.toast(`已导出 ${name}`);
   }
 
   private exportProject(): void {

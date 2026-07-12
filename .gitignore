@@ -7,5 +7,6 @@ exports/
 /reference/
 /.agents/
 /.codex/
+/problem/
 *.log
 .DS_Store
