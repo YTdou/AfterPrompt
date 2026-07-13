@@ -1,4 +1,3 @@
-import { getElementByEditorId } from "./ids";
 import { resolveProjectPath, type ProjectAssets } from "./project";
 import { sanitizeCss, sanitizeDocument } from "./sanitizer";
 import { serializeDocument, type SourceDocument } from "./document-model";
@@ -10,6 +9,8 @@ import {
 } from "./editable-html";
 import { runtimePresentationLayoutCss } from "./presentation-layout";
 import { refreshDeterministicTypography } from "./typography";
+import { projectPresentation } from "./presentation-projection";
+import { upsertPresentationContract } from "./presentation-contract";
 
 export interface PreparedPresentationSource {
   source: string;
@@ -172,12 +173,14 @@ export function preparePresentationSource(model: SourceDocument, assets: Project
     }
   }
 
-  const pages = model.pages();
-  const pageIds = pages.map(({ id }) => id).filter((id) => Boolean(getElementByEditorId(document, id)));
-  const pageLabels = pages.filter(({ id }) => pageIds.includes(id)).map(({ label }) => label);
-  const buildSteps = pages.length > 0
-    ? pages.filter(({ id }) => pageIds.includes(id)).map(({ index }) => model.buildSequence(index).steps)
-    : [model.buildSequence(0).steps];
+  const projection = projectPresentation(document, "html");
+  upsertPresentationContract(document, projection);
+  const pageIds = projection.pages.map(({ editorId }) => editorId).filter((id): id is string => Boolean(id));
+  const sourceLabels = new Map(model.pages().map(({ id, label }) => [id, label]));
+  const pageLabels = projection.pages.map((page, index) => sourceLabels.get(page.editorId ?? "") ?? page.key ?? page.editorId ?? `Slide ${index + 1}`);
+  const buildSteps = projection.pages.length > 0
+    ? projection.pages.map(({ build }) => build.steps)
+    : [projection.root?.build.steps ?? []];
   return {
     source: serializeDocument(document, "html"),
     pageIds,
@@ -225,6 +228,7 @@ export function buildInteractiveHtml(model: SourceDocument, assets: ProjectAsset
     const inlineStyle = element.getAttribute("style");
     if (inlineStyle?.includes("url(")) element.setAttribute("style", rewriteCssAssets(inlineStyle, sourcePath, assets, warnings));
   }
+  upsertPresentationContract(document, projectPresentation(document, "html"));
   return { html: serializeDocument(document, "html"), warnings: Array.from(warnings) };
 }
 

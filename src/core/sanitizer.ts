@@ -4,6 +4,12 @@ const blockedHtml = "script,iframe,object,embed,base,portal";
 const blockedSvg = "script,foreignObject,animate,animateMotion,animateTransform,set";
 const urlAttributes = new Set(["href", "src", "xlink:href", "poster", "action", "formaction"]);
 
+function isPreservedInertDataBlock(element: Element): boolean {
+  return element.localName === "script" &&
+    element.getAttribute("type")?.toLowerCase() === "application/json" &&
+    element.id === "lms-editing-contract";
+}
+
 function isDangerousUrl(value: string): boolean {
   const compact = value.trim().replace(/[\u0000-\u0020]+/g, "").toLowerCase();
   if (compact.startsWith("javascript:") || compact.startsWith("vbscript:")) return true;
@@ -31,7 +37,7 @@ export function sanitizeCss(css: string, warnings: string[]): string {
 export function sanitizeDocument(document: Document, kind: DocumentKind): string[] {
   const warnings: string[] = [];
   const blockedSelector = kind === "svg" ? blockedSvg : `${blockedHtml},${blockedSvg}`;
-  const blocked = Array.from(document.querySelectorAll(blockedSelector));
+  const blocked = Array.from(document.querySelectorAll(blockedSelector)).filter((element) => !isPreservedInertDataBlock(element));
   if (blocked.length > 0) {
     warnings.push(`已移除 ${blocked.length} 个可执行或不安全节点。`);
     blocked.forEach((element) => element.remove());
