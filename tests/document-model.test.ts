@@ -18,7 +18,7 @@ beforeAll(() => {
 });
 
 describe("SourceDocument", () => {
-  it("sanitizes executable HTML and assigns deterministic stable IDs", () => {
+  it("preserves executable HTML inertly and reports the safe-projection warnings", () => {
     const source = `<!doctype html><html><head><style>@import "https://bad.example/x.css"; .x{color:red}</style></head>
       <body data-editor-canvas-width="900" data-editor-canvas-height="500" onload="steal()">
         <!-- keep this comment -->
@@ -29,11 +29,11 @@ describe("SourceDocument", () => {
       </body></html>`;
     const model = SourceDocument.parse(source, "unsafe.html");
 
-    expect(model.document.querySelector("script")).toBeNull();
-    expect(model.document.body.hasAttribute("onload")).toBe(false);
-    expect(model.document.querySelector("h1")?.hasAttribute("onclick")).toBe(false);
-    expect(model.document.querySelector("a")?.hasAttribute("href")).toBe(false);
-    expect(model.document.querySelector("foreignObject")).toBeNull();
+    expect(model.document.querySelector("script")?.textContent).toContain("steal()");
+    expect(model.document.body.getAttribute("onload")).toBe("steal()");
+    expect(model.document.querySelector("h1")?.getAttribute("onclick")).toBe("steal()");
+    expect(model.document.querySelector("a")?.getAttribute("href")).toBe("javascript:steal()");
+    expect(model.document.querySelector("foreignObject")).not.toBeNull();
     expect(model.document.querySelector("h1")?.getAttribute("data-editor-id")).toBe("title");
     expect(model.document.querySelector("a")?.getAttribute("data-editor-id")).toBe("a-001");
     expect(model.canvas).toEqual({ width: 900, height: 500 });
@@ -116,7 +116,7 @@ describe("SourceDocument", () => {
 
     expect(model.canvas).toEqual({ width: 1920, height: 1080 });
     expect(model.pages().map(({ label }) => label)).toEqual(["Opening", "Results"]);
-    expect(model.document.querySelector("script")).toBeNull();
+    expect(model.document.querySelector("script")?.textContent).toContain("customElements.define");
     expect(model.treeForPage(1)[0]?.name).toBe("Results");
     expect(model.treeForPage(1)[0]?.children[0]?.children[0]?.text).toBe("Second");
     expect(model.warnings.join(" ")).toContain("2 页静态演示稿");

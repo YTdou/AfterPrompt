@@ -2,6 +2,7 @@ import { getElementByEditorId } from "../core/ids";
 import { resolveProjectPath, type ProjectAssets } from "../core/project";
 import type { Bounds, BuildViewMode } from "../core/types";
 import type { SourceDocument } from "../core/document-model";
+import { sanitizeCss, sanitizeDocument } from "../core/sanitizer";
 
 export interface RendererCallbacks {
   onSelect: (elementId: string, options: { additive: boolean; parent: boolean }) => void;
@@ -260,7 +261,9 @@ export class CanvasRenderer {
 
   private renderHtml(model: SourceDocument, activePageId: string | undefined, options: RenderOptions): void {
     for (const sourceStyle of Array.from(model.document.querySelectorAll("head style"))) {
-      const css = rewriteHtmlSelectors(this.assets?.rewriteCssUrls(sourceStyle.textContent ?? "", this.sourcePath) ?? (sourceStyle.textContent ?? ""));
+      const warnings: string[] = [];
+      const safeCss = sanitizeCss(sourceStyle.textContent ?? "", warnings);
+      const css = rewriteHtmlSelectors(this.assets?.rewriteCssUrls(safeCss, this.sourcePath) ?? safeCss);
       this.shadow.append(styleElement(css));
     }
 
@@ -286,6 +289,9 @@ export class CanvasRenderer {
     const body = pruneInactivePages && sourcePage
       ? cloneBodyWithPageBranch(model.document.body, sourcePage)
       : model.document.body.cloneNode(true) as HTMLElement;
+    const safeDocument = document.implementation.createHTMLDocument();
+    safeDocument.body.replaceWith(body);
+    sanitizeDocument(safeDocument, "html");
     if (pages.length > 0) {
       for (const page of pages) {
         const pageRoot = getElementByEditorId(body, page.id);
@@ -335,7 +341,9 @@ export class CanvasRenderer {
   private renderSvg(model: SourceDocument): void {
     const shell = document.createElement("div");
     shell.className = "editor-preview-shell";
-    const svg = model.document.documentElement.cloneNode(true) as SVGSVGElement;
+    const safeDocument = model.document.cloneNode(true) as Document;
+    sanitizeDocument(safeDocument, "svg");
+    const svg = safeDocument.documentElement.cloneNode(true) as SVGSVGElement;
     svg.setAttribute("width", "100%");
     svg.setAttribute("height", "100%");
     svg.style.display = "block";

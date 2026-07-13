@@ -16,10 +16,11 @@ Last Mile Studio 的核心不是“做一个更大的网页生成器”，而是
 
 ```mermaid
 flowchart LR
-  Source[HTML / SVG source] --> Parse[Parse + sanitize]
+  Source[HTML / SVG source] --> Parse[Inert parse]
   Parse --> IDs[Stable IDs]
-  IDs --> Model[SourceDocument]
-  Model --> Preview[Shadow DOM / SVG preview]
+  IDs --> Model[Lossless SourceDocument]
+  Model --> SafeClone[Sanitized render clone]
+  SafeClone --> Preview[Shadow DOM / SVG preview]
   Preview --> Interaction[Selection + Moveable]
   Interaction --> Commands[Shared element commands]
   Commands --> Model
@@ -117,7 +118,7 @@ flowchart LR
 
 多页内容仍然是规范 HTML 中的真实兄弟节点。`SourceDocument` 负责识别页面并执行复制、删除和重排；复制页面时整棵子树重新分配稳定 ID。胶片栏缩略图使用只包含活动页祖先链的安全 DOM 克隆，避免 N 页演示稿产生 N×N 个预览页面节点。
 
-演示预览和独立导出共享同一个生成路径：先从规范文档创建净化副本并内嵌已导入的本地资源，再生成一个编辑器拥有的播放外壳。实际页面位于 `sandbox="allow-same-origin"` 且不允许脚本的内层 iframe；外层只运行固定的翻页、缩放和全屏逻辑。该 HTML 是交付产物，不回写为编辑器状态。
+规范文档保留完整 HTML，包括惰性的脚本和事件属性。画布与演示预览从它创建净化副本：实际预览页面位于 `sandbox="allow-same-origin"` 且不允许源脚本的内层 iframe，外层只运行固定导航逻辑。“导出 HTML”走另一条保真序列化路径，内嵌本地资源但不删除或替换源运行时，也不生成 LMS 播放外壳。
 
 ## 代码同步与错误恢复
 

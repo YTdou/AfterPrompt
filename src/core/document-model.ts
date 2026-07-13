@@ -164,8 +164,11 @@ export class SourceDocument {
     if (kind === "svg" && document.documentElement.localName !== "svg") throw new Error("The SVG source has no <svg> root element.");
     if (kind === "html" && !document.body) throw new Error("The HTML source has no <body> element.");
 
-    const warnings = sanitizeDocument(document, kind);
     const assigned = ensureStableIds(document, kind);
+    // Keep the canonical source lossless. DOMParser does not execute scripts;
+    // executable content is removed from a disposable clone by the renderer.
+    const safetyClone = document.cloneNode(true) as Document;
+    const warnings = sanitizeDocument(safetyClone, kind);
     if (assigned > 0) warnings.push(`已为 ${assigned} 个可编辑节点添加稳定 data-editor-id。`);
     const pageCount = detectPageElements(document, kind).length;
     if (pageCount > 1) warnings.push(`已识别 ${pageCount} 页静态演示稿；可使用画布上方的页面选择器逐页编辑。`);
