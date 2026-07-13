@@ -8,6 +8,8 @@ import {
   EDITABLE_HTML_VERSION,
   encodeEditableHtmlPayload,
 } from "./editable-html";
+import { runtimePresentationLayoutCss } from "./presentation-layout";
+import { refreshDeterministicTypography } from "./typography";
 
 export interface PreparedPresentationSource {
   source: string;
@@ -30,6 +32,41 @@ export interface InteractiveHtmlResult {
 
 export interface StandaloneSlidesOptions {
   initialPageIndex?: number;
+}
+
+const NATIVE_BUILD_COMPAT_STYLE_ID = "lms-native-build-compat";
+
+function ensureNativeBuildCompatibility(document: Document): void {
+  if (document.getElementById(NATIVE_BUILD_COMPAT_STYLE_ID)) return;
+  if (!document.querySelector("[data-build]:not(.build)")) return;
+
+  const nativeScripts = Array.from(document.querySelectorAll("script"))
+    .map((script) => script.textContent ?? "")
+    .join("\n");
+  const usesRevealedProtocol = /classList\.toggle\(\s*['\"]revealed['\"]/.test(nativeScripts)
+    && /querySelectorAll\(\s*['\"]\[data-build\]['\"]\s*\)/.test(nativeScripts);
+  if (!usesRevealedProtocol) return;
+
+  const style = document.createElement("style");
+  style.id = NATIVE_BUILD_COMPAT_STYLE_ID;
+  style.setAttribute("data-lms-runtime-compat", "native-build");
+  style.textContent = `
+/* The editor's canonical Build contract is data-build. Some native decks only
+   hide elements carrying their legacy .build class, even though their player
+   toggles .revealed on every [data-build] element. Bridge that contract without
+   mutating the canonical DOM or overriding authored transforms. */
+[data-build]:not(.build):not(.revealed) {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+[data-build]:not(.build).revealed {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+`;
+  (document.head ?? document.documentElement).append(style);
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -155,6 +192,8 @@ export function buildInteractiveHtml(model: SourceDocument, assets: ProjectAsset
   if (model.kind !== "html") throw new Error("Interactive HTML export is available for HTML documents only.");
   const parser = new DOMParser();
   const document = parser.parseFromString(model.serialize(), "text/html");
+  refreshDeterministicTypography(document);
+  ensureNativeBuildCompatibility(document);
   const warnings = new Set<string>();
 
   for (const link of Array.from(document.querySelectorAll<HTMLLinkElement>('head link[rel~="stylesheet"][href]'))) {
@@ -205,13 +244,7 @@ export function buildStandaloneSlides(model: SourceDocument, assets: ProjectAsse
   const { width, height } = model.canvas;
   const initialPageIndex = Math.min(Math.max(0, Math.trunc(options.initialPageIndex ?? 0)), pageCount - 1);
 
-  const innerRuntimeCss = `
-    :root, html, body { width: 100% !important; height: 100% !important; min-width: 0 !important; min-height: 0 !important; margin: 0 !important; overflow: hidden !important; }
-    [data-lms-deck] { display: block !important; position: relative !important; width: 100% !important; height: 100% !important; min-width: 0 !important; min-height: 0 !important; visibility: visible !important; opacity: 1 !important; overflow: hidden !important; }
-    [data-lms-slide="inactive"] { display: none !important; visibility: hidden !important; pointer-events: none !important; }
-    [data-lms-slide="active"] { display: block !important; position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important; }
-    [data-lms-build-visible="false"] { opacity: 0 !important; visibility: hidden !important; pointer-events: none !important; }
-  `;
+  const innerRuntimeCss = runtimePresentationLayoutCss;
   const runtime = `
     (() => {
       const payloadNode = document.getElementById("lms-document-payload");

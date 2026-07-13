@@ -120,6 +120,12 @@ flowchart LR
 
 规范文档保留完整 HTML，包括惰性的脚本和事件属性。画布与演示预览从它创建净化副本：实际预览页面位于 `sandbox="allow-same-origin"` 且不允许源脚本的内层 iframe，外层只运行固定导航逻辑。“导出 HTML”走另一条保真序列化路径，内嵌本地资源但不删除或替换源运行时，也不生成 LMS 播放外壳。
 
+页面盒模型由 `presentation-layout.ts` 集中定义，编辑器安全预览和内部播放器复用相同的绝对定位、尺寸、box-sizing 与 active/inactive 规则。布局始终在文档声明的设计画布中完成，编辑器 zoom 和网页 viewport 只作用于最外层 transform。
+
+需要确定性排版的文档通过根节点 `data-lms-deterministic-font="inter"` 显式加入字体策略。`typography.ts` 在编辑器主 document 注册同一 WOFF2，在 Shadow DOM 中选择同一 family，并在导出文件中保留自包含 `@font-face`。编辑器会等待 `document.fonts.ready` 后重新渲染和测量。
+
+`layout-audit.ts` 提供按稳定 ID 的布局快照与差异比较。浏览器 gate 对字体属性、文本行数、client/scroll 尺寸和去缩放几何进行比较；行数必须完全一致，几何默认允许 0.5 px 抗锯齿舍入误差。
+
 ## 代码同步与错误恢复
 
 视觉操作后的代码是规范文档序列化结果。代码编辑是一个显式草稿分支：

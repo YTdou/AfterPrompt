@@ -300,6 +300,7 @@ export class EditorApp {
   private modelWarningSignature = "";
   private buildWarningSignature = "";
   private fragmentCursor = { x: 640, y: 360 };
+  private fontRenderToken = 0;
 
   constructor(private readonly host: HTMLElement) {
     host.innerHTML = appTemplate;
@@ -1148,12 +1149,29 @@ export class EditorApp {
       this.buildViewMode = "playback";
       this.history.reset(this.createSnapshot(), "Loaded document");
       this.renderDocument(true);
+      this.renderAfterFontsSettle(model);
       requestAnimationFrame(() => this.fitCanvas());
       this.toast(`已载入 ${sourceName}`);
     } catch (error) {
       assets.dispose();
       this.toast(error instanceof Error ? error.message : String(error), true);
     }
+  }
+
+  private renderAfterFontsSettle(model: SourceDocument): void {
+    if (model.kind !== "html" || !document.fonts) return;
+    const token = ++this.fontRenderToken;
+    void Promise.race([
+      document.fonts.ready,
+      new Promise<void>((resolve) => window.setTimeout(resolve, 2_000)),
+    ]).then(() => {
+      if (token !== this.fontRenderToken || model !== this.model) return;
+      this.renderDocument(false);
+      requestAnimationFrame(() => {
+        this.fitCanvas();
+        this.transform.update();
+      });
+    });
   }
 
   private async handleFileImport(event: Event): Promise<void> {
