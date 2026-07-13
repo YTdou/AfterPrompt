@@ -4,6 +4,8 @@ import { sanitizeDocument } from "./sanitizer";
 import { refreshClonedFragmentInstances } from "./fragments/component";
 import { decodeEditableHtml } from "./editable-html";
 import { refreshDeterministicTypography } from "./typography";
+import { auditPresentationDocument, auditPresentationSource, formatPresentationAuditIssue } from "./presentation-audit";
+import { detectPresentationPages } from "./presentation-projection";
 import {
   deriveBuildSequence,
   mergeBuildGroups,
@@ -65,27 +67,8 @@ export function detectCanvas(document: Document, kind: DocumentKind): CanvasSize
   };
 }
 
-function uniqueElements(elements: Element[]): Element[] {
-  return elements.filter((element, index) => elements.indexOf(element) === index);
-}
-
 export function detectPageElements(document: Document, kind: DocumentKind): Element[] {
-  if (kind !== "html" || !document.body) return [];
-  const selectors = [
-    "deck-stage > section",
-    "[data-editor-deck] > section",
-    ".slides > section",
-    "[data-slides] > section",
-  ];
-  for (const selector of selectors) {
-    const candidates = uniqueElements(Array.from(document.body.querySelectorAll(selector)));
-    if (candidates.length > 0) return candidates;
-  }
-
-  const directCandidates = Array.from(document.body.children).filter((element) =>
-    element.matches("section[data-slide], section[data-label], section.slide, [data-slide].slide"),
-  );
-  return directCandidates.length > 1 ? directCandidates : [];
+  return detectPresentationPages(document, kind).pages;
 }
 
 function pageLabel(element: Element, index: number): string {
@@ -145,6 +128,9 @@ export class SourceDocument {
 
   static parse(source: string, sourceName = "untitled.html", forcedKind?: DocumentKind, canvas?: CanvasSize): SourceDocument {
     if (!source.trim()) throw new Error("Source is empty.");
+    const wrapperLike = /<meta\s+name=["']lms-format["']\s+content=["']editable-html-presentation["']/i.test(source) ||
+      /<meta\s+name=["']generator["']\s+content=["']Last Mile Studio 0\.3\.0["']/i.test(source);
+    const wrapperAudit = forcedKind === "svg" || !wrapperLike ? null : auditPresentationSource(source, sourceName);
     const editable = forcedKind === "svg" ? null : decodeEditableHtml(source, sourceName);
     if (editable) {
       source = editable.payload.source;
@@ -155,6 +141,11 @@ export class SourceDocument {
     const parser = new DOMParser();
     const document = parser.parseFromString(source, kind === "svg" ? "image/svg+xml" : "text/html");
     const model = SourceDocument.fromDocument(document, kind, sourceName, canvas);
+    if (editable) {
+      wrapperAudit?.issues
+        .filter(({ code }) => code === "outer-payload-patch")
+        .forEach((item) => model.warnings.push(formatPresentationAuditIssue(item)));
+    }
     if (editable?.legacy) model.warnings.push("已从旧版 Last Mile Studio Slides 文件恢复可编辑源文档；再次导出会升级为可逆 HTML 格式。");
     return model;
   }
@@ -165,12 +156,17 @@ export class SourceDocument {
     if (kind === "svg" && document.documentElement.localName !== "svg") throw new Error("The SVG source has no <svg> root element.");
     if (kind === "html" && !document.body) throw new Error("The HTML source has no <body> element.");
 
+    const auditWarnings = kind === "html"
+      ? auditPresentationDocument(document, kind).issues
+        .filter(({ severity }) => severity !== "INFO")
+        .map(formatPresentationAuditIssue)
+      : [];
     const assigned = ensureStableIds(document, kind);
     if (kind === "html") refreshDeterministicTypography(document);
     // Keep the canonical source lossless. DOMParser does not execute scripts;
     // executable content is removed from a disposable clone by the renderer.
     const safetyClone = document.cloneNode(true) as Document;
-    const warnings = sanitizeDocument(safetyClone, kind);
+    const warnings = [...auditWarnings, ...sanitizeDocument(safetyClone, kind)];
     if (assigned > 0) warnings.push(`已为 ${assigned} 个可编辑节点添加稳定 data-editor-id。`);
     const pageCount = detectPageElements(document, kind).length;
     if (pageCount > 1) warnings.push(`已识别 ${pageCount} 页静态演示稿；可使用画布上方的页面选择器逐页编辑。`);

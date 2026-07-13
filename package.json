@@ -12,6 +12,7 @@
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run",
     "test:browser": "node scripts/browser-smoke.mjs",
+    "validate:presentation": "node --import tsx scripts/validate-presentation-html.mjs",
     "test:hotcarbon-export": "node --import tsx scripts/hotcarbon-export-smoke.mjs generate && node --import tsx scripts/hotcarbon-export-smoke.mjs verify",
     "test:layout-parity": "node scripts/layout-parity-smoke.mjs",
     "test:viewport-invariance": "node --import tsx scripts/viewport-invariance-smoke.mjs",
