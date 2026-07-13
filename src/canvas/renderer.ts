@@ -3,6 +3,8 @@ import { resolveProjectPath, type ProjectAssets } from "../core/project";
 import type { Bounds, BuildViewMode } from "../core/types";
 import type { SourceDocument } from "../core/document-model";
 import { sanitizeCss, sanitizeDocument } from "../core/sanitizer";
+import { editorPresentationLayoutCss } from "../core/presentation-layout";
+import { DETERMINISTIC_FONT_ATTRIBUTE, deterministicEditorTypographyCss, ensureEditorFontRegistered } from "../core/typography";
 
 export interface RendererCallbacks {
   onSelect: (elementId: string, options: { additive: boolean; parent: boolean }) => void;
@@ -125,35 +127,6 @@ const editorCss = `
   }
 `;
 
-const staticPagesCss = `
-  [data-editor-static-deck] {
-    display: block !important;
-    position: relative !important;
-    width: 100% !important;
-    height: 100% !important;
-    min-width: 0 !important;
-    min-height: 0 !important;
-    overflow: hidden !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-  }
-  [data-editor-preview-page-root] {
-    display: none !important;
-    visibility: hidden !important;
-    pointer-events: none !important;
-  }
-  [data-editor-preview-page-root="active"] {
-    display: block !important;
-    position: absolute !important;
-    inset: 0 !important;
-    width: 100% !important;
-    height: 100% !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    pointer-events: auto !important;
-  }
-`;
-
 const nonInteractiveCss = `
   .editor-preview-shell,
   .editor-preview-shell * {
@@ -249,12 +222,17 @@ export class CanvasRenderer {
     this.assets = assets;
     this.sourcePath = sourcePath;
     this.interactive = options.interactive !== false;
+    const deterministicFont = model.kind === "html" ? model.document.documentElement.getAttribute(DETERMINISTIC_FONT_ATTRIBUTE) : null;
+    if (deterministicFont) this.host.setAttribute(DETERMINISTIC_FONT_ATTRIBUTE, deterministicFont);
+    else this.host.removeAttribute(DETERMINISTIC_FONT_ATTRIBUTE);
+    if (deterministicFont === "inter") ensureEditorFontRegistered();
     this.shadow.replaceChildren();
     this.shadow.append(styleElement(editorCss));
     this.shadow.append(styleElement(buildPreviewCss));
 
     if (model.kind === "html") this.renderHtml(model, activePageId, options);
     else this.renderSvg(model);
+    if (deterministicFont === "inter") this.shadow.append(styleElement(deterministicEditorTypographyCss()));
     // Append this last so imported/static-page styles cannot re-enable pointer handling.
     if (!this.interactive) this.shadow.append(styleElement(nonInteractiveCss));
   }
@@ -279,7 +257,7 @@ export class CanvasRenderer {
     }
 
     const pages = model.pages();
-    if (pages.length > 0) this.shadow.append(styleElement(staticPagesCss));
+    if (pages.length > 0) this.shadow.append(styleElement(editorPresentationLayoutCss));
 
     const shell = document.createElement("div");
     shell.className = "editor-preview-shell";

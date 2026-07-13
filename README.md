@@ -79,6 +79,10 @@ CHROME_PATH=/path/to/chrome npm run test:browser
 - 导出时内嵌已导入的本地 CSS、图片、SVG 和字体资源，无法解析的本地资源会明确提示；
 - 编辑器内演示预览仍使用禁止源脚本的隔离播放器；下载导出不再用 LMS 播放外壳替换源文件运行时；
 - 演示预览是规范 HTML DOM 的安全派生视图，保真导出则直接序列化规范文档。
+- 对要求跨机器排版一致的演示稿，可在根 `<html>` 设置 `data-lms-deterministic-font="inter"`；编辑器和导出会使用同一份内嵌 Inter Variable WOFF2，并在字体就绪后进行最终渲染；
+- 编辑器与内部演示播放器从 `presentation-layout.ts` 复用固定页面盒模型，viewport 只缩放最外层画布，不改变设计坐标中的文字换行；
+- `npm run test:layout-parity` 会按 `data-editor-id` 对比真实浏览器中的字体、行数和 client/scroll 几何，默认容差为 0.5 px；
+- vendored Inter 字体使用 SIL Open Font License 1.1，许可证位于 `src/assets/fonts/Inter-OFL-1.1.txt`。
 
 ### 视觉片段、组件与本地库
 

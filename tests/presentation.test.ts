@@ -5,6 +5,7 @@ import { SourceDocument } from "../src/core/document-model";
 import { buildInteractiveHtml, buildStandaloneSlides, preparePresentationSource } from "../src/core/presentation";
 import { decodeEditableHtml } from "../src/core/editable-html";
 import { ProjectAssets } from "../src/core/project";
+import { enableDeterministicTypography } from "../src/core/typography";
 
 beforeAll(() => {
   const dom = new JSDOM("<!doctype html><html><body></body></html>");
@@ -32,6 +33,52 @@ describe("standalone HTML Slides", () => {
     expect(result.html).toContain('onclick="toggleNotes()"');
     expect(result.html).toContain(">Edited</h1>");
     expect(result.html).not.toContain('id="lms-controls"');
+  });
+
+  it("bridges data-build elements into a native revealed-based player without mutating canonical HTML", () => {
+    const source = `<!doctype html><html><head><style>
+      .build { opacity: 0 } .build.revealed { opacity: 1 }
+    </style></head><body>
+      <section data-editor-id="page">
+        <div class="build" data-build="1" data-editor-id="legacy">Legacy</div>
+        <div data-build="2" data-editor-id="edited">Edited build</div>
+      </section>
+      <script>
+        document.querySelectorAll('[data-build]').forEach((element) => {
+          element.classList.toggle('revealed', Number(element.dataset.build) <= 1);
+        });
+      </script>
+    </body></html>`;
+    const model = SourceDocument.parse(source, "native-builds.html");
+    const canonicalBefore = model.serialize();
+
+    const result = buildInteractiveHtml(model, new ProjectAssets(), "native-builds.html");
+    const output = new JSDOM(result.html).window.document;
+    const compatibilityStyle = output.querySelector<HTMLStyleElement>("#lms-native-build-compat");
+
+    expect(compatibilityStyle?.textContent).toContain("[data-build]:not(.build):not(.revealed)");
+    expect(output.querySelector("[data-editor-id='edited']")?.classList.contains("build")).toBe(false);
+    expect(model.serialize()).toBe(canonicalBefore);
+  });
+
+  it("does not inject revealed compatibility into decks with an unrelated Build runtime", () => {
+    const source = `<!doctype html><html><body>
+      <section data-editor-id="page"><div data-build="1">Build</div></section>
+      <script>document.body.dataset.ready = 'true'</script>
+    </body></html>`;
+    const model = SourceDocument.parse(source, "custom-builds.html");
+    const result = buildInteractiveHtml(model, new ProjectAssets(), "custom-builds.html");
+
+    expect(new JSDOM(result.html).window.document.querySelector("#lms-native-build-compat")).toBeNull();
+  });
+
+  it("embeds the deterministic presentation font in interactive export", () => {
+    const model = SourceDocument.parse('<!doctype html><html><head></head><body><h1 data-editor-id="title">Stable typography</h1></body></html>', "font.html");
+    enableDeterministicTypography(model.document);
+    const result = buildInteractiveHtml(model, new ProjectAssets(), "font.html");
+    expect(result.html).toContain('data-lms-deterministic-font="inter"');
+    expect(result.html).toContain('font-family: "LMS Inter"');
+    expect(result.html).toContain("data:font/woff2;base64,");
   });
 
   it("embeds local assets without changing the canonical document", () => {

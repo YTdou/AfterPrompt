@@ -3,6 +3,7 @@ import { assignFreshIds, allEditableElements, ensureStableIds, getElementByEdito
 import { sanitizeDocument } from "./sanitizer";
 import { refreshClonedFragmentInstances } from "./fragments/component";
 import { decodeEditableHtml } from "./editable-html";
+import { refreshDeterministicTypography } from "./typography";
 import {
   deriveBuildSequence,
   mergeBuildGroups,
@@ -165,6 +166,7 @@ export class SourceDocument {
     if (kind === "html" && !document.body) throw new Error("The HTML source has no <body> element.");
 
     const assigned = ensureStableIds(document, kind);
+    if (kind === "html") refreshDeterministicTypography(document);
     // Keep the canonical source lossless. DOMParser does not execute scripts;
     // executable content is removed from a disposable clone by the renderer.
     const safetyClone = document.cloneNode(true) as Document;
