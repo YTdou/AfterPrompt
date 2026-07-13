@@ -66,19 +66,19 @@ CHROME_PATH=/path/to/chrome npm run test:browser
 - 画布修改后更新底层源码；代码修改通过“应用代码”重新解析并更新画布；
 - 代码解析失败时保留上一个有效画布，不覆盖有效版本。
 
-### 演示预览与可逆 HTML
+### 演示预览与保真 HTML 导出
 
 - 原生识别正整数 `data-build`，同一步元素作为一组累计出现；页面与 Build 是互相独立的编辑维度；
 - 编辑器提供 Playback State、Current Group 和 All Builds 三种视图；后续 Build 中的真实元素仍可选择、移动、缩放和双击编辑；
 - Build 编排面板支持设置/移除 Build、拖动元素跨组、拖动组排序、新建、拆分和合并，所有文档变更进入 Undo / Redo 并同步标准源码；
 - 页面缩略图默认显示 Final Build，并标记每页 Build 数；非法 Build 值和父子 Build 可见性冲突会明确提示；
 - 在隔离 iframe 中预览当前 HTML 演示稿，前进时先推进当前页 Build，完成后再翻页；后退时先撤销 Build，Initial 再返回上一页 Final；同时支持方向键、Page Up / Page Down、Home / End 和全屏；
-- HTML 只保留一种“导出 HTML”：生成可直接播放、也可重新导入继续编辑的单文件 HTML；
-- 导出文件以版本化 inert payload 保存规范文档，播放器和重新导入读取同一份数据，不会把播放器外壳当成一页内容；
-- 重新导入会恢复页面、Build、稳定 ID 和画布；旧版 `*-slides.html` 会尽力解包并升级为新格式；
+- HTML 只保留一种“导出 HTML”：直接导出修改后的完整源文档，保留源文件自己的脚本、事件处理器和 Presentation controls；
+- 完整源码在编辑器中仅作为惰性 DOM 数据保存；画布只渲染再次净化的克隆，不执行导入脚本；
+- 重新导入会恢复页面、Build、稳定 ID、画布与原生运行时；旧版 `*-slides.html` 仍会尽力解包；
 - 导出时内嵌已导入的本地 CSS、图片、SVG 和字体资源，无法解析的本地资源会明确提示；
-- 导入文档原有脚本始终被移除；导出 HTML 只运行编辑器生成的导航脚本，实际页面位于禁止脚本的内层 sandbox iframe；
-- 演示预览和独立导出是规范 HTML DOM 的派生视图，不会成为第二套文档真相。
+- 编辑器内演示预览仍使用禁止源脚本的隔离播放器；下载导出不再用 LMS 播放外壳替换源文件运行时；
+- 演示预览是规范 HTML DOM 的安全派生视图，保真导出则直接序列化规范文档。
 
 ### 视觉片段、组件与本地库
 
@@ -235,7 +235,7 @@ npm run cli -- fragments /tmp/ai-slide-with-fragment.html
 ## 示例与验收材料
 
 - [examples/ai-slide.html](examples/ai-slide.html)：标题、两段正文、本地图片、色块和内嵌 SVG 图标；
-- [examples/multi-page-deck.html](examples/multi-page-deck.html)：页面管理、Build 状态/编排、预览和独立导出的三页演示稿；
+- [examples/multi-page-deck.html](examples/multi-page-deck.html)：页面管理、Build 状态/编排、预览和保真导出的三页演示稿；
 - [examples/simple-page.html](examples/simple-page.html)：目录导入示例，依赖本地 CSS 和图片；
 - [examples/shapes.svg](examples/shapes.svg)：`text`、`rect`、`circle`、`line`、`path`、`polygon` 和 `g`；
 - [examples/codex-commands.json](examples/codex-commands.json)：修改标题、移动图片、修改色块、删除图标；
@@ -294,7 +294,7 @@ src/
 
 当前 MVP 不声称完整支持所有网页或 SVG：
 
-- 只支持静态视觉内容；导入页面的 JavaScript 交互会被移除；
+- 画布只支持静态视觉编辑；导入页面的 JavaScript 不在编辑器内执行，但会保留到 HTML 导出；
 - 视觉修改写入 inline style 或标准 SVG 属性，不会反向编辑复杂样式表规则；
 - 对 Flex / Grid 流式元素使用可逆的 CSS transform，避免无提示改成绝对定位；尚未提供“转换为自由定位”的显式命令；
 - 多选支持组拖动、对齐和分布；多选组缩放与组旋转暂未开放；

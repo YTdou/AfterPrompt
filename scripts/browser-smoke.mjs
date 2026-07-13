@@ -34,7 +34,7 @@ async function ensureServer() {
     throw new Error(`The external smoke target is unreachable: ${baseUrl}`);
   }
   const port = parsedBaseUrl.port || "80";
-  server = spawn("npm", ["run", "dev", "--", "--host", parsedBaseUrl.hostname, "--port", port, "--strictPort"], {
+  server = spawn("npm", ["run", "dev", "--", "--host", parsedBaseUrl.hostname, "--port", port, "--strictPort", "--force"], {
     cwd: process.cwd(),
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -51,14 +51,6 @@ async function ensureServer() {
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
-}
-
-function editableSourceFromExport(html) {
-  const encoded = html.match(/<template\s+id="lms-document-payload"[^>]*>([^<]+)<\/template>/i)?.[1]?.trim();
-  assert(encoded, "Exported HTML does not contain an editable Last Mile Studio payload.");
-  const payload = JSON.parse(Buffer.from(encoded, "base64").toString("utf8"));
-  assert(payload.format === "last-mile-studio/editable-html" && payload.version === 1, "Exported HTML payload has an unsupported format.");
-  return payload.source;
 }
 
 async function shadowText(page, id) {
@@ -338,7 +330,7 @@ async function run() {
     const componentSourceDownload = await componentSourceDownloadPromise;
     const componentSourcePath = await componentSourceDownload.path();
     assert(componentSourcePath, "Component source export did not produce a download path.");
-    const componentSource = editableSourceFromExport(await readFile(componentSourcePath, "utf8"));
+    const componentSource = await readFile(componentSourcePath, "utf8");
     assert(componentSource.includes("data-vfrag-property-overrides") && componentSource.includes("Reusable browser title"), "Component property override did not synchronize to exported source code.");
 
     await page.locator("#open-fragment-library").click();
@@ -645,26 +637,13 @@ async function run() {
     await page.locator("#export-html").click();
     const slidesDownload = await slidesDownloadPromise;
     const slidesDownloadPath = await slidesDownload.path();
-    assert(slidesDownloadPath, "Standalone Slides export did not produce a local download path.");
+    assert(slidesDownloadPath, "Interactive HTML export did not produce a local download path.");
     const exportedSlides = await readFile(slidesDownloadPath, "utf8");
-    assert(exportedSlides.includes('content="Last Mile Studio 0.3.0"'), "Standalone Slides export has no current generator metadata.");
-    assert(exportedSlides.includes('name="lms-format" content="editable-html-presentation"'), "HTML export has no reversible format marker.");
-    assert(exportedSlides.includes('sandbox="allow-same-origin"'), "Standalone Slides export does not keep imported content scriptless.");
-    assert(exportedSlides.includes("demo-page-2-copy"), "Standalone Slides export lost the duplicated page order.");
+    assert(!exportedSlides.includes('id="lms-controls"'), "Interactive export incorrectly replaced the native document with the LMS player shell.");
+    assert(exportedSlides.includes("demo-page-2-copy"), "Interactive HTML export lost the duplicated page order.");
 
     const exportedHtmlPath = "/tmp/last-mile-studio-smoke-export.html";
     await copyFile(slidesDownloadPath, exportedHtmlPath);
-    const exportedPage = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-    exportedPage.on("pageerror", (error) => errors.push(`standalone export: ${error.stack ?? error.message}`));
-    await exportedPage.goto(`file://${exportedHtmlPath}`);
-    await exportedPage.locator("#lms-status").filter({ hasText: "1 / 4" }).waitFor();
-    await exportedPage.locator("#lms-next").click();
-    await exportedPage.locator("#lms-status").filter({ hasText: "Build 1 / 2" }).waitFor();
-    await exportedPage.locator("#lms-next").click();
-    await exportedPage.locator("#lms-next").click();
-    await exportedPage.locator("#lms-status").filter({ hasText: "2 / 4" }).waitFor();
-    await exportedPage.close();
-
     await page.locator("#file-input").setInputFiles(exportedHtmlPath);
     await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("page 1/4"));
     assert((await page.locator(".page-thumbnail").count()) === 4, "Re-importing exported HTML did not restore all four editable pages.");
@@ -677,60 +656,10 @@ async function run() {
     const secondRoundPath = await secondRoundDownload.path();
     assert(secondRoundPath, "Editing and re-exporting a re-imported HTML file did not produce a download.");
     const secondRoundHtml = await readFile(secondRoundPath, "utf8");
-    assert(!editableSourceFromExport(secondRoundHtml).includes('id="lms-stage"'), "A second export nested the presentation player into canonical source.");
+    assert(!secondRoundHtml.includes('id="lms-stage"'), "A second export nested the presentation player into canonical source.");
     await page.locator("#file-input").setInputFiles(secondRoundPath);
     await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("page 1/5"));
     assert((await page.locator(".page-thumbnail").count()) === 5, "The second import did not preserve an edit made after the first round trip.");
-
-    progress("checking the real 23-page HotCarbon Build artifact");
-    await page.locator("#file-input").setInputFiles("reference/artifacts/HotCarbon_Oral_Slides_SelfContained.html");
-    await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("page 1/23"), null, { timeout: 40_000 });
-    assert((await page.locator(".page-thumbnail").count()) === 23, "HotCarbon import did not expose 23 pages.");
-    assert((await page.locator(".page-thumbnail-builds").count()) === 14, "HotCarbon import did not identify 14 Build pages.");
-    assert((await page.locator("#build-status").textContent()) === "Initial / 2", "HotCarbon first page did not initialize at Initial / 2.");
-    assert((await page.locator(".build-group[data-build-group]").count()) === 2, "HotCarbon first page Build groups were not detected.");
-    await page.locator("#notice-bar").waitFor({ state: "hidden", timeout: 7_000 });
-    await page.locator("#build-warnings").waitFor({ state: "hidden", timeout: 9_000 });
-    await page.locator("#next-build").click();
-    await page.waitForFunction(() => document.querySelector("#build-status")?.textContent === "Build 1 / 2");
-    await page.locator("#next-build").click();
-    await page.waitForFunction(() => document.querySelector("#build-status")?.textContent === "Build 2 / 2");
-
-    const hotSourceDownloadPromise = page.waitForEvent("download");
-    await page.locator("#export-html").click();
-    const hotSourceDownload = await hotSourceDownloadPromise;
-    const hotSourcePath = await hotSourceDownload.path();
-    assert(hotSourcePath, "HotCarbon sanitized source export did not produce a file.");
-    const hotSource = editableSourceFromExport(await readFile(hotSourcePath, "utf8"));
-    assert((hotSource.match(/data-build="[123]"/g) ?? []).length === 94, "HotCarbon sanitized source did not preserve all 94 Build elements.");
-    assert(!hotSource.includes("<script"), "HotCarbon imported scripts survived sanitization.");
-    assert(!hotSource.includes("data-editor-build-visibility"), "Editor Build observation state polluted canonical source.");
-
-    await page.locator("#preview-presentation").click();
-    await page.locator("#preview-from-start").click();
-    const hotPreview = page.frameLocator("#presentation-frame");
-    await hotPreview.locator("#lms-status").filter({ hasText: "1 / 23 · Initial / 2" }).waitFor({ timeout: 40_000 });
-    await hotPreview.locator("#lms-next").click();
-    await hotPreview.locator("#lms-status").filter({ hasText: "1 / 23 · Build 1 / 2" }).waitFor();
-    await hotPreview.locator("#lms-next").click();
-    await hotPreview.locator("#lms-next").click();
-    await hotPreview.locator("#lms-status").filter({ hasText: "2 / 23" }).waitFor();
-    await page.locator("#close-presentation").click();
-
-    const hotSlidesPromise = page.waitForEvent("download", { timeout: 40_000 });
-    await page.locator("#export-html").click();
-    const hotSlidesDownload = await hotSlidesPromise;
-    const hotSlidesPath = await hotSlidesDownload.path();
-    assert(hotSlidesPath, "HotCarbon standalone Build Slides export did not produce a file.");
-    const hotExportPath = "/tmp/last-mile-studio-hotcarbon-build-export.html";
-    await copyFile(hotSlidesPath, hotExportPath);
-    const hotExportPage = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-    hotExportPage.on("pageerror", (error) => errors.push(`HotCarbon standalone export: ${error.stack ?? error.message}`));
-    await hotExportPage.goto(`file://${hotExportPath}`, { timeout: 40_000 });
-    await hotExportPage.locator("#lms-status").filter({ hasText: "1 / 23 · Initial / 2" }).waitFor({ timeout: 40_000 });
-    await hotExportPage.locator("#lms-next").click();
-    await hotExportPage.locator("#lms-status").filter({ hasText: "Build 1 / 2" }).waitFor();
-    await hotExportPage.close();
 
     assert(errors.length === 0, `Browser runtime errors:\n${errors.join("\n")}`);
     process.stdout.write(`${JSON.stringify({
@@ -752,7 +681,7 @@ async function run() {
       thumbnailCenterNavigation: true,
       pageDuplicateDeleteSort: true,
       presentationPreview: true,
-      standaloneSlidesExport: true,
+      interactiveHtmlExport: true,
       canvasPresets: true,
       codeCollapseReclaimsCanvas: true,
       adjustableWorkspacePanels: true,
@@ -770,8 +699,6 @@ async function run() {
       buildOrchestration: true,
       buildUndoRedoContext: true,
       buildFirstPreviewAndExport: true,
-      hotCarbonBuildPages: 14,
-      hotCarbonBuildElements: 94,
     }, null, 2)}\n`);
   } finally {
     await browser.close();

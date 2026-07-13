@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { JSDOM } from "jsdom";
 import deckSource from "../examples/multi-page-deck.html?raw";
 import { SourceDocument } from "../src/core/document-model";
-import { buildStandaloneSlides, preparePresentationSource } from "../src/core/presentation";
+import { buildInteractiveHtml, buildStandaloneSlides, preparePresentationSource } from "../src/core/presentation";
 import { decodeEditableHtml } from "../src/core/editable-html";
 import { ProjectAssets } from "../src/core/project";
 
@@ -18,6 +18,22 @@ beforeAll(() => {
 });
 
 describe("standalone HTML Slides", () => {
+  it("exports the edited canonical HTML with its native runtime intact", () => {
+    const source = `<!doctype html><html><head><script>window.nativeControls = true</script></head><body>
+      <button id="notesBtn" onclick="toggleNotes()">Notes</button><h1 id="title">Original</h1>
+      <script>function toggleNotes(){ document.body.classList.toggle("notes") }</script></body></html>`;
+    const model = SourceDocument.parse(source, "interactive.html");
+    model.apply({ action: "replaceText", elementId: "title", text: "Edited" });
+
+    const result = buildInteractiveHtml(model, new ProjectAssets(), "interactive.html");
+
+    expect(result.html).toContain("window.nativeControls = true");
+    expect(result.html).toContain("function toggleNotes()");
+    expect(result.html).toContain('onclick="toggleNotes()"');
+    expect(result.html).toContain(">Edited</h1>");
+    expect(result.html).not.toContain('id="lms-controls"');
+  });
+
   it("embeds local assets without changing the canonical document", () => {
     const model = SourceDocument.parse(deckSource, "multi-page-deck.html");
     const canonicalBefore = model.serialize();

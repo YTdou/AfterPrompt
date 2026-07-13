@@ -16,7 +16,7 @@ import {
 } from "../core/commands";
 import { snapshotsEqual, SourceDocument } from "../core/document-model";
 import { History } from "../core/history";
-import { buildStandaloneSlides } from "../core/presentation";
+import { buildInteractiveHtml, buildStandaloneSlides } from "../core/presentation";
 import {
   createSavedProject,
   downloadBlob,
@@ -1553,7 +1553,7 @@ export class EditorApp {
       return;
     }
     try {
-      const presentation = buildStandaloneSlides(this.model, this.assets, this.sourcePath);
+      const presentation = buildInteractiveHtml(this.model, this.assets, this.sourcePath);
       const name = `${fileStem(this.model.sourceName)}.html`;
       downloadText(presentation.html, name, "text/html");
       if (presentation.warnings.length) this.showNotice(presentation.warnings.join(" "));

@@ -23,6 +23,11 @@ export interface StandaloneSlidesResult {
   warnings: string[];
 }
 
+export interface InteractiveHtmlResult {
+  html: string;
+  warnings: string[];
+}
+
 export interface StandaloneSlidesOptions {
   initialPageIndex?: number;
 }
@@ -143,6 +148,45 @@ export function preparePresentationSource(model: SourceDocument, assets: Project
     buildSteps,
     warnings: Array.from(warnings),
   };
+}
+
+/** Export the edited canonical HTML without replacing its native runtime. */
+export function buildInteractiveHtml(model: SourceDocument, assets: ProjectAssets, sourcePath: string): InteractiveHtmlResult {
+  if (model.kind !== "html") throw new Error("Interactive HTML export is available for HTML documents only.");
+  const parser = new DOMParser();
+  const document = parser.parseFromString(model.serialize(), "text/html");
+  const warnings = new Set<string>();
+
+  for (const link of Array.from(document.querySelectorAll<HTMLLinkElement>('head link[rel~="stylesheet"][href]'))) {
+    const reference = link.getAttribute("href") ?? "";
+    const path = resolveProjectPath(reference, sourcePath);
+    if (!path) continue;
+    const css = assets.text(path);
+    if (css === null) {
+      warnings.add(`可交互 HTML 未能内嵌本地样式表：${path}`);
+      continue;
+    }
+    const style = document.createElement("style");
+    style.setAttribute("data-lms-embedded-from", path);
+    style.textContent = rewriteCssAssets(css, path, assets, warnings);
+    link.replaceWith(style);
+  }
+
+  for (const style of Array.from(document.querySelectorAll("style"))) {
+    if (style.hasAttribute("data-lms-embedded-from")) continue;
+    style.textContent = rewriteCssAssets(style.textContent ?? "", sourcePath, assets, warnings);
+  }
+  for (const element of Array.from(document.querySelectorAll("*"))) {
+    rewriteAttributeAsset(element, "src", sourcePath, assets, warnings);
+    rewriteAttributeAsset(element, "poster", sourcePath, assets, warnings);
+    if (["image", "use"].includes(element.localName)) {
+      rewriteAttributeAsset(element, "href", sourcePath, assets, warnings);
+      rewriteAttributeAsset(element, "xlink:href", sourcePath, assets, warnings);
+    }
+    const inlineStyle = element.getAttribute("style");
+    if (inlineStyle?.includes("url(")) element.setAttribute("style", rewriteCssAssets(inlineStyle, sourcePath, assets, warnings));
+  }
+  return { html: serializeDocument(document, "html"), warnings: Array.from(warnings) };
 }
 
 export function buildStandaloneSlides(model: SourceDocument, assets: ProjectAssets, sourcePath: string, options: StandaloneSlidesOptions = {}): StandaloneSlidesResult {
