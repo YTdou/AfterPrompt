@@ -11,6 +11,7 @@ import type {
   VisualFragmentPackage,
   VisualFragmentPlacement,
 } from "./types";
+import { normalizeFragmentRootBuildContext } from "./context";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const GENERIC_FONTS = new Set(["serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui", "ui-serif", "ui-sans-serif", "ui-monospace"]);
@@ -51,6 +52,8 @@ function parseFragmentRoot(fragment: VisualFragmentPackage): { root: Element; wa
   if (!root) throw new Error("片段入口没有根元素。");
   if (fragment.manifest.contentType === "html" && parsed.body.children.length !== 1) throw new Error("content.html 必须且只能包含一个片段根元素。");
   if (root.getAttribute("data-vfrag-root") !== fragment.manifest.fragmentId) throw new Error("片段根元素与 manifest.fragmentId 不一致。");
+  const normalizedBuilds = normalizeFragmentRootBuildContext(root, true);
+  if (normalizedBuilds > 0) warnings.push(`已移除 ${normalizedBuilds} 个来自源页面的顶层 Build 状态；组件内部 Build 保持不变。`);
   return { root, warnings };
 }
 
@@ -202,6 +205,10 @@ function setPlacement(root: Element, placement: VisualFragmentPlacement, model: 
     x = placement.x;
     y = placement.y;
   }
+  const maxX = Math.max(0, model.canvas.width - fragment.manifest.canvas.width);
+  const maxY = Math.max(0, model.canvas.height - fragment.manifest.canvas.height);
+  x = Math.min(maxX, Math.max(0, Number.isFinite(x) ? x : 0));
+  y = Math.min(maxY, Math.max(0, Number.isFinite(y) ? y : 0));
   if (model.kind === "svg") {
     root.setAttribute("x", String(x));
     root.setAttribute("y", String(y));

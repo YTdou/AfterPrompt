@@ -56,6 +56,22 @@ describe("SourceDocument", () => {
     expect(model.serialize()).toContain("data-editor-id=\"title-001\"");
   });
 
+  it("reserves authored IDs before filling earlier gaps and repairs explicit duplicates deterministically", () => {
+    const model = SourceDocument.parse(`<!doctype html><html><body>
+      <div class="generated-first"><span data-editor-id="span-001">First</span></div>
+      <div data-editor-id="div-001">Authored owner</div>
+      <div data-editor-id="div-001">Duplicate owner</div>
+    </body></html>`, "stable-ids.html");
+    const divs = Array.from(model.document.body.querySelectorAll(":scope > div"));
+    const ids = divs.map((element) => element.getAttribute("data-editor-id"));
+
+    expect(ids[0]).toBe("div-002");
+    expect(ids[1]).toBe("div-001");
+    expect(ids[2]).toBe("div-003");
+    expect(new Set(Array.from(model.document.querySelectorAll("[data-editor-id]"), (element) => element.getAttribute("data-editor-id"))).size)
+      .toBe(model.document.querySelectorAll("[data-editor-id]").length);
+  });
+
   it("enforces the same lock boundary for structured commands", () => {
     const model = SourceDocument.parse(slideSource, "ai-slide.html");
     model.apply({ action: "setLocked", elementId: "title-001", locked: true });
@@ -120,6 +136,53 @@ describe("SourceDocument", () => {
     expect(model.treeForPage(1)[0]?.name).toBe("Results");
     expect(model.treeForPage(1)[0]?.children[0]?.children[0]?.text).toBe("Second");
     expect(model.warnings.join(" ")).toContain("2 页静态演示稿");
+  });
+
+  it("keeps author-excluded backup nodes in source without exposing black editor pages", () => {
+    const source = `<!doctype html><html><body><deck-stage>
+      <section data-editor-id="b1" data-label="B1">B1</section>
+      <section data-editor-id="removed-backup" data-label="Removed" data-backup-remove="true">Removed source material</section>
+      <section data-editor-id="b2" data-label="B2">B2</section>
+    </deck-stage></body></html>`;
+    const model = SourceDocument.parse(source, "excluded-backup.html");
+
+    expect(model.pages().map(({ id }) => id)).toEqual(["b1", "b2"]);
+    expect(model.pageElement(1)?.getAttribute("data-label")).toBe("B2");
+    expect(model.find("removed-backup")?.textContent).toBe("Removed source material");
+    expect(model.serialize()).toContain('data-backup-remove="true"');
+  });
+
+  it("exposes fragment descendants through structural wrappers and repairs legacy page-level Build state", () => {
+    const model = SourceDocument.parse(`<!doctype html><html><head><style>
+      .build { opacity: 0; filter: blur(3px); pointer-events: none; }
+      .build.revealed { opacity: 1; filter: none; pointer-events: auto; }
+    </style></head><body><deck-stage><section data-editor-id="page-one">
+      <div data-vfrag-root="legacy-card" data-editor-id="legacy-card-instance">
+        <div data-editor-structural="true" data-vfrag-coordinate-layer="">
+          <div class="card build revealed" data-build="3" aria-hidden="false" data-editor-id="card-content">
+            <b data-editor-id="card-title">Visible title</b>
+          </div>
+        </div>
+      </div>
+    </section></deck-stage></body></html>`, "legacy-fragment.html");
+
+    const pageTree = model.treeForPage(0)[0]!;
+    expect(pageTree.children[0]?.id).toBe("legacy-card-instance");
+    expect(pageTree.children[0]?.children[0]?.id).toBe("card-content");
+    expect(pageTree.children[0]?.children[0]?.children[0]?.id).toBe("card-title");
+    expect(pageTree.children[0]?.children.some(({ id }) => id === "div-001")).toBe(false);
+
+    const content = model.find("card-content") as HTMLElement;
+    expect(content.hasAttribute("data-build")).toBe(false);
+    expect(content.classList.contains("build")).toBe(false);
+    expect(content.classList.contains("revealed")).toBe(false);
+    expect(content.style.opacity).toBe("1");
+    expect(content.style.filter).toBe("none");
+    expect(model.buildSequence(0).elementCount).toBe(0);
+    expect(model.warnings.join(" ")).toContain("旧片段");
+
+    model.apply({ action: "splitBuildGroup", pageId: "page-one", elementIds: ["legacy-card-instance"], targetPosition: 0 });
+    expect(model.buildSequence(0).groups.map(({ elementIds }) => elementIds)).toEqual([["legacy-card-instance"]]);
   });
 
   it("duplicates, deletes, and sorts presentation pages with fresh stable IDs", () => {

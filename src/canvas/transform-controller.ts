@@ -43,6 +43,9 @@ export class TransformController {
     this.moveable = new Moveable(this.container, {
       target: null,
       draggable: true,
+      edgeDraggable: true,
+      dragArea: false,
+      passDragArea: false,
       resizable: true,
       rotatable: true,
       scalable: false,
@@ -80,6 +83,12 @@ export class TransformController {
       resizable: Boolean(singleTarget),
       scalable: false,
       rotatable: Boolean(singleTarget),
+      // A fragment root usually contains editable descendants that otherwise
+      // win hit testing before Moveable can start a drag. While the root is
+      // selected, give it an explicit drag surface; descendants remain
+      // reachable through the layer tree and child-navigation controls.
+      dragArea: Boolean(singleTarget?.hasAttribute("data-vfrag-root")),
+      passDragArea: false,
     }, () => this.moveable.updateRect());
   }
 

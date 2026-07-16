@@ -1,4 +1,5 @@
 import { getElementByEditorId } from "./ids";
+import { normalizeFragmentRootBuildContext } from "./fragments/context";
 import type { BuildGroup, BuildWarning, PageBuildSequence } from "./types";
 
 export function readBuildStep(element: Element): number | null {
@@ -75,6 +76,7 @@ export function setElementBuild(document: Document, elementIds: string[], step: 
     return element;
   });
   elements.forEach((element) => {
+    if (element.hasAttribute("data-vfrag-root")) normalizeFragmentRootBuildContext(element, true);
     if (step === null) element.removeAttribute("data-build");
     else element.setAttribute("data-build", String(step));
     // Runtime state is never canonical Build data.

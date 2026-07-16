@@ -278,6 +278,16 @@ async function run() {
     const fragmentId = await fragmentCard.getAttribute("data-fragment-id");
     assert(fragmentId, "Saved Visual Fragment has no definition ID.");
     assert((await page.locator("#fragment-storage-status").textContent())?.includes("IndexedDB"), "Visual Fragment library did not use persistent browser storage.");
+    const libraryPreview = fragmentCard.locator(".fragment-preview img");
+    await libraryPreview.evaluate((image) => image.decode());
+    const libraryPreviewState = await libraryPreview.evaluate((image) => ({
+      naturalWidth: image.naturalWidth,
+      naturalHeight: image.naturalHeight,
+      width: image.getBoundingClientRect().width,
+      height: image.getBoundingClientRect().height,
+      opacity: getComputedStyle(image).opacity,
+    }));
+    assert(libraryPreviewState.naturalWidth > 0 && libraryPreviewState.naturalHeight > 0 && libraryPreviewState.height >= 20 && libraryPreviewState.opacity === "1", `Fragment library preview is effectively empty: ${JSON.stringify(libraryPreviewState)}`);
 
     const fragmentDownloadPromise = page.waitForEvent("download");
     await fragmentCard.locator('[data-fragment-action="export"]').click();
@@ -296,6 +306,9 @@ async function run() {
     const previewPng = await readFile(previewPngPath);
     assert(previewPng[0] === 0x89 && previewPng.subarray(1, 4).toString() === "PNG", "Fragment preview export is not a PNG file.");
 
+    await page.locator("#fragment-library-close").click();
+    await page.locator('[data-layer-id="accent-block-001"]').click();
+    await page.locator("#open-fragment-library").click();
     await fragmentCard.locator('[data-fragment-action="insert-linked"]').click();
     await page.locator("#fragment-report-dialog").waitFor({ state: "visible" });
     const compatibilityText = await page.locator("#fragment-report-content").textContent();
@@ -317,6 +330,32 @@ async function run() {
         ?.getAttribute("data-editor-id") ?? null;
     }, fragmentId);
     assert(componentRootId, "Inserted linked component could not be located by stable editor ID.");
+    const insertedGeometry = await page.evaluate((rootId) => {
+      const host = document.querySelector("#canvas-host");
+      const root = host?.shadowRoot?.querySelector(`[data-editor-id="${rootId}"]`);
+      const pageRoot = host?.shadowRoot?.querySelector('[data-editor-preview-page-root="active"]') ?? host?.shadowRoot?.querySelector("body");
+      if (!host || !root || !pageRoot) return null;
+      const hostBounds = host.getBoundingClientRect();
+      const rootBounds = root.getBoundingClientRect();
+      return {
+        parentId: root.parentElement?.getAttribute("data-editor-id"),
+        pageId: pageRoot.getAttribute("data-editor-id"),
+        inside: rootBounds.left >= hostBounds.left - 1 && rootBounds.top >= hostBounds.top - 1 && rootBounds.right <= hostBounds.right + 1 && rootBounds.bottom <= hostBounds.bottom + 1,
+      };
+    }, componentRootId);
+    assert(insertedGeometry?.parentId === insertedGeometry?.pageId && insertedGeometry?.inside, `Fragment was not inserted into the active editable slice: ${JSON.stringify(insertedGeometry)}`);
+    const fragmentDragArea = page.locator(".moveable-area");
+    await fragmentDragArea.waitFor({ state: "visible" });
+    const fragmentDragBox = await fragmentDragArea.boundingBox();
+    assert(fragmentDragBox && fragmentDragBox.width > 5 && fragmentDragBox.height > 5, `Inserted fragment has no usable drag surface: ${JSON.stringify(fragmentDragBox)}`);
+    await page.mouse.move(fragmentDragBox.x + fragmentDragBox.width / 2, fragmentDragBox.y + fragmentDragBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(fragmentDragBox.x + fragmentDragBox.width / 2 + 30, fragmentDragBox.y + fragmentDragBox.height / 2 + 18, { steps: 5 });
+    await page.mouse.up();
+    await page.waitForFunction((rootId) => {
+      const root = document.querySelector("#canvas-host")?.shadowRoot?.querySelector(`[data-editor-id="${rootId}"]`);
+      return Math.abs(Number(root?.getAttribute("data-editor-translate-x") ?? 0)) > 1;
+    }, componentRootId);
     await page.locator('[data-fragment-property="title"]').fill("Reusable browser title");
     await page.locator('[data-fragment-property="title"]').press("Tab");
     await page.waitForFunction(({ definitionId, expected }) => {
@@ -688,6 +727,9 @@ async function run() {
       panelCollapseReclaimsCanvas: true,
       persistentLayoutPreferences: true,
       visualFragmentPackage: true,
+      visualFragmentLibraryPreview: true,
+      visualFragmentActiveSlicePlacement: true,
+      visualFragmentRootDrag: true,
       visualFragmentPreviewPng: true,
       visualFragmentCompatibilityReport: true,
       visualFragmentLinkedInstance: true,

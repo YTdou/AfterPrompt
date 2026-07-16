@@ -49,16 +49,21 @@ export function allEditableElements(document: Document, kind: DocumentKind): Ele
 
 export function ensureStableIds(document: Document, kind: DocumentKind): number {
   const elements = allEditableElements(document, kind);
-  const used = new Set<string>();
+  const firstExplicitOwner = new Map<string, Element>();
+  for (const element of elements) {
+    const existing = element.getAttribute(EDITOR_ID)?.trim();
+    if (existing && !firstExplicitOwner.has(existing)) firstExplicitOwner.set(existing, element);
+  }
+  // Reserve every authored ID before allocating any missing one. Otherwise an
+  // earlier unlabelled node can consume an ID that is explicitly declared
+  // later in the document, creating duplicate and reload-unstable identities.
+  const used = new Set(firstExplicitOwner.keys());
   const counters = new Map<string, number>();
   let assigned = 0;
 
   for (const element of elements) {
     const existing = element.getAttribute(EDITOR_ID)?.trim();
-    if (existing && !used.has(existing)) {
-      used.add(existing);
-      continue;
-    }
+    if (existing && firstExplicitOwner.get(existing) === element) continue;
 
     const sourceId = slugify(element.getAttribute("id") ?? "");
     let base = sourceId || slugify(element.localName) || "element";

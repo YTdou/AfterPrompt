@@ -15,6 +15,8 @@ import {
   type VisualFragmentSelectionItem,
   type VisualFragmentSlot,
 } from "./types";
+import { assertVisualFragmentManifest } from "./schema";
+import { neutralizePortableTopLevelBuild } from "./context";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
@@ -149,11 +151,40 @@ function computedStyle(mapping: CloneMapping): CSSStyleDeclaration | null {
   const element = mapping.rendered ?? mapping.source;
   const view = element.ownerDocument.defaultView;
   if (!view?.getComputedStyle) return null;
+  const portableBuildContext = mapping.topLevel && mapping.source.hasAttribute("data-build");
+  const originalClass = element.getAttribute("class");
+  const originalAriaHidden = element.getAttribute("aria-hidden");
+  const originalBuildVisibility = element.getAttribute("data-editor-build-visibility");
   try {
-    return view.getComputedStyle(element);
+    if (portableBuildContext) {
+      element.classList.add("revealed");
+      element.setAttribute("aria-hidden", "false");
+      element.setAttribute("data-editor-build-visibility", "shown");
+    }
+    const source = view.getComputedStyle(element);
+    const snapshot = element.ownerDocument.createElement("span").style;
+    for (let index = 0; index < source.length; index += 1) {
+      const property = source.item(index);
+      const value = source.getPropertyValue(property);
+      if (value) snapshot.setProperty(property, value, source.getPropertyPriority(property));
+    }
+    return snapshot;
   } catch {
     return null;
+  } finally {
+    if (portableBuildContext) {
+      if (originalClass === null) element.removeAttribute("class");
+      else element.setAttribute("class", originalClass);
+      if (originalAriaHidden === null) element.removeAttribute("aria-hidden");
+      else element.setAttribute("aria-hidden", originalAriaHidden);
+      if (originalBuildVisibility === null) element.removeAttribute("data-editor-build-visibility");
+      else element.setAttribute("data-editor-build-visibility", originalBuildVisibility);
+    }
   }
+}
+
+function isBuildRuntimeSelector(selector: string): boolean {
+  return /(?:^|[^A-Za-z0-9_-])\.(?:build|revealed)(?![A-Za-z0-9_-])|\[(?:data-build|aria-hidden|data-editor-build-[^\]]*)/i.test(selector);
 }
 
 function cssEscapeString(value: string): string {
@@ -183,6 +214,7 @@ function mappingForSelector(selector: string, mappings: CloneMapping[]): Array<{
   const matchable = pseudo ? selector.slice(0, -pseudo.length).trim() : selector;
   if (!matchable || /:(?:hover|active|focus|visited|target|checked|disabled|enabled|open)(?:\b|\()/i.test(matchable)) return [];
   return mappings.flatMap((mapping) => {
+    if (mapping.topLevel && mapping.source.hasAttribute("data-build") && isBuildRuntimeSelector(selector)) return [];
     try {
       return mapping.source.matches(matchable) ? [{ mapping, pseudo }] : [];
     } catch {
@@ -368,9 +400,29 @@ function extractCssBlock(block: CssBlock, mappings: CloneMapping[], fragmentId: 
   return { css: walk(rules), fontFaces, keyframes };
 }
 
-function collectCssBlocks(model: SourceDocument, assets: ProjectAssets, sourcePath: string, warnings: string[]): CssBlock[] {
+function selectedFragmentStyleKeys(mappings: CloneMapping[]): Set<string> {
+  const keys = new Set<string>();
+  for (const { source } of mappings) {
+    const root = source.closest("[data-vfrag-root]");
+    if (!root) continue;
+    const definitionId = root.getAttribute("data-vfrag-definition-id") ?? root.getAttribute("data-vfrag-root");
+    const version = root.getAttribute("data-vfrag-definition-version");
+    const instanceId = root.getAttribute("data-vfrag-instance-id");
+    if (definitionId && version && instanceId) keys.add(`${definitionId}@${version}#${instanceId}`);
+  }
+  return keys;
+}
+
+function collectCssBlocks(model: SourceDocument, assets: ProjectAssets, sourcePath: string, warnings: string[], mappings: CloneMapping[]): CssBlock[] {
   const blocks: CssBlock[] = [];
+  const relevantFragmentStyles = selectedFragmentStyleKeys(mappings);
   Array.from(model.document.querySelectorAll("style")).forEach((style, index) => {
+    const fragmentStyleKey = style.getAttribute("data-vfrag-style");
+    // Imported fragment styles are generated artifacts. Feeding every prior
+    // instance back into a new extraction recursively duplicates embedded
+    // fonts and other payloads. Only the style belonging to the selected
+    // fragment is relevant when updating/re-saving that definition.
+    if (fragmentStyleKey && !relevantFragmentStyles.has(fragmentStyleKey)) return;
     blocks.push({ css: style.textContent ?? "", sourcePath, label: `内联样式 ${index + 1}` });
   });
   for (const link of Array.from(model.document.querySelectorAll('link[rel~="stylesheet"][href]'))) {
@@ -381,6 +433,16 @@ function collectCssBlocks(model: SourceDocument, assets: ProjectAssets, sourcePa
     else warnings.push(`未能读取样式表：${reference}`);
   }
   return blocks;
+}
+
+function uniqueCssRules(rules: string[]): string[] {
+  const seen = new Set<string>();
+  return rules.filter((rule) => {
+    const normalized = rule.trim();
+    if (!normalized || seen.has(normalized)) return false;
+    seen.add(normalized);
+    return true;
+  });
 }
 
 function customProperties(style: CSSStyleDeclaration | null): Record<string, string> {
@@ -660,6 +722,9 @@ export function extractVisualFragment(
     clones.push(clone);
     mappings.push(...pairClones(item.element, clone, item.renderedElement ?? null, usedKeys, true, item.bounds));
   }
+  for (const mapping of mappings) {
+    if (mapping.topLevel && mapping.source.hasAttribute("data-build")) neutralizePortableTopLevelBuild(mapping.clone);
+  }
 
   const boundMetadata = bindComponentMetadata(options.properties ?? [], options.slots ?? [], mappings);
   const ownerDocument = model.document;
@@ -748,7 +813,7 @@ export function extractVisualFragment(
     }
   }
 
-  const cssBlocks = collectCssBlocks(model, projectAssets, sourcePath, warnings);
+  const cssBlocks = collectCssBlocks(model, projectAssets, sourcePath, warnings, mappings);
   const bundler = new AssetBundler(projectAssets);
   const extractedBlocks = cssBlocks.map((block) => ({ block, extracted: extractCssBlock(block, mappings, fragmentId, warnings) }));
   for (const { extracted } of extractedBlocks) {
@@ -766,14 +831,14 @@ export function extractVisualFragment(
     }
   }
   const matchedCss = extractedBlocks.map(({ block, extracted }) => bundler.rewriteCss(extracted.css, block.sourcePath)).filter(Boolean);
-  const fontFaceCss = extractedBlocks.flatMap(({ block, extracted }) => extracted.fontFaces
+  const fontFaceCss = uniqueCssRules(extractedBlocks.flatMap(({ block, extracted }) => extracted.fontFaces
     .filter((css) => {
       if (fontFamilies.size === 0) return true;
       const family = css.match(/font-family\s*:\s*([^;}]+)/i)?.[1]?.trim().replace(/^['"]|['"]$/g, "");
       return !family || fontFamilies.has(family);
     })
-    .map((css) => bundler.rewriteCss(css, block.sourcePath)));
-  const keyframeCss = extractedBlocks.flatMap(({ block, extracted }) => extracted.keyframes.map((css) => bundler.rewriteCss(css, block.sourcePath)));
+    .map((css) => bundler.rewriteCss(css, block.sourcePath))));
+  const keyframeCss = uniqueCssRules(extractedBlocks.flatMap(({ block, extracted }) => extracted.keyframes.map((css) => bundler.rewriteCss(css, block.sourcePath))));
 
   rewriteElementAssets(contentRoot, bundler, sourcePath);
   warnings.push(...bundler.warnings);
@@ -790,10 +855,14 @@ export function extractVisualFragment(
     const source = fontFaceCss
       .find((rule) => new RegExp(`font-family\\s*:\\s*['\"]?${family.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i").test(rule))
       ?.match(/url\(\s*['"]?([^)'"\s]+)['"]?\s*\)/i)?.[1];
+    const embedded = Boolean(source && /^data:/i.test(source));
     return {
       family,
-      bundled: bundler.dependencies.some((asset) => !asset.external && fontSources.includes(asset.path)),
-      ...(source ? { source } : {}),
+      bundled: embedded || bundler.dependencies.some((asset) => !asset.external && fontSources.includes(asset.path)),
+      // A data URL is the font payload, not a useful provenance reference. It
+      // already lives in styles.css, and copying it into this short manifest
+      // field can make a fragment fail its own public Schema validation.
+      ...(source && !embedded ? { source } : {}),
     };
   });
 
@@ -835,6 +904,7 @@ export function extractVisualFragment(
     tags: normalizeTags(options.tags),
     category: (options.category ?? "Uncategorized").trim().slice(0, 120),
   };
+  assertVisualFragmentManifest(manifest);
   return { manifest, content, styles, tokens, assets: bundler.assets, previewSvg, warnings: Array.from(new Set(warnings)) };
 }
 
