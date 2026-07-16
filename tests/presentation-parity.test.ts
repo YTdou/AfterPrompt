@@ -52,4 +52,16 @@ describe("presentation projection parity", () => {
 
     expect(comparePresentationProjections(expected, projectPresentation(model.document, "html"))).toEqual([]);
   });
+
+  it("projects only playable pages while retaining author-excluded backup DOM", () => {
+    const document = new JSDOM(`<!doctype html><html><body><deck-stage>
+      <section data-editor-id="b1">B1</section>
+      <section data-editor-id="removed" data-backup-remove="true">Removed</section>
+      <section data-editor-id="b2">B2</section>
+    </deck-stage></body></html>`).window.document;
+    const projection = projectPresentation(document, "html");
+
+    expect(projection.pages.map(({ editorId }) => editorId)).toEqual(["b1", "b2"]);
+    expect(document.querySelector('[data-editor-id="removed"]')).not.toBeNull();
+  });
 });

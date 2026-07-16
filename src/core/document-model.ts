@@ -2,6 +2,7 @@ import { applyEditorCommand, buildStructureSummary, summarizeElement } from "./c
 import { assignFreshIds, allEditableElements, ensureStableIds, getElementByEditorId, isEditableElement } from "./ids";
 import { sanitizeDocument } from "./sanitizer";
 import { refreshClonedFragmentInstances } from "./fragments/component";
+import { normalizeLegacyFragmentBuildContexts } from "./fragments/context";
 import { decodeEditableHtml } from "./editable-html";
 import { refreshDeterministicTypography } from "./typography";
 import { auditPresentationDocument, auditPresentationSource, formatPresentationAuditIssue } from "./presentation-audit";
@@ -96,6 +97,16 @@ function treeLabel(element: Element): string {
   return text ? text.slice(0, 36) : element.localName;
 }
 
+function treeChildren(element: Element, kind: DocumentKind): ElementTreeNode[] {
+  return Array.from(element.children).flatMap((child): ElementTreeNode[] => {
+    // Fragment coordinate/defs wrappers exist for rendering, not for user
+    // structure. Traverse through any number of structural wrappers so the
+    // real editable descendants stay visible without fake layer rows.
+    if (child.getAttribute("data-editor-structural") === "true") return treeChildren(child, kind);
+    return isEditableElement(child, kind) && child.hasAttribute("data-editor-id") ? [toTree(child, kind)] : [];
+  });
+}
+
 function toTree(element: Element, kind: DocumentKind): ElementTreeNode {
   return {
     id: element.getAttribute("data-editor-id") ?? "",
@@ -104,9 +115,7 @@ function toTree(element: Element, kind: DocumentKind): ElementTreeNode {
     text: element.children.length === 0 ? element.textContent?.trim().slice(0, 120) : undefined,
     locked: element.getAttribute("data-editor-locked") === "true",
     visible: element.getAttribute("data-editor-visible") !== "false" && !element.hasAttribute("hidden") && (element as HTMLElement | SVGElement).style.display !== "none",
-    children: Array.from(element.children)
-      .filter((child) => isEditableElement(child, kind) && child.hasAttribute("data-editor-id"))
-      .map((child) => toTree(child, kind)),
+    children: treeChildren(element, kind),
   };
 }
 
@@ -163,11 +172,14 @@ export class SourceDocument {
       : [];
     const assigned = ensureStableIds(document, kind);
     if (kind === "html") refreshDeterministicTypography(document);
-    // Keep the canonical source lossless. DOMParser does not execute scripts;
-    // executable content is removed from a disposable clone by the renderer.
+    const normalizedFragmentBuilds = normalizeLegacyFragmentBuildContexts(document);
+    // Apart from the targeted legacy fragment migration above, keep canonical
+    // source lossless. DOMParser does not execute scripts; executable content
+    // is removed from a disposable clone by the renderer.
     const safetyClone = document.cloneNode(true) as Document;
     const warnings = [...auditWarnings, ...sanitizeDocument(safetyClone, kind)];
     if (assigned > 0) warnings.push(`已为 ${assigned} 个可编辑节点添加稳定 data-editor-id。`);
+    if (normalizedFragmentBuilds > 0) warnings.push(`已修复 ${normalizedFragmentBuilds} 个旧片段中误带的页面级 Build 状态。`);
     const pageCount = detectPageElements(document, kind).length;
     if (pageCount > 1) warnings.push(`已识别 ${pageCount} 页静态演示稿；可使用画布上方的页面选择器逐页编辑。`);
     return new SourceDocument(document, kind, sourceName, warnings, canvas);

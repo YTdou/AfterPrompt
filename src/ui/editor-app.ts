@@ -508,24 +508,11 @@ export class EditorApp {
         renderedElement: this.renderer.element(id),
       };
     });
-    const containerTags = new Set(["body", "main", "section", "article", "div", "aside", "header", "footer", "svg", "g"]);
-    let insertionParent: Element | null = null;
-    if (selectedElements.length > 0) {
-      const first = selectedElements[0]!;
-      let current: Element | null = first;
-      while (current) {
-        if (current.hasAttribute("data-editor-id") &&
-            current.getAttribute("data-editor-locked") !== "true" &&
-            current.getAttribute("data-editor-structural") !== "true" &&
-            containerTags.has(current.localName) &&
-            selectedElements.every((element) => current === element || current!.contains(element))) {
-          insertionParent = current;
-          break;
-        }
-        current = current.parentElement?.closest("[data-editor-id]") ?? null;
-      }
-    }
-    insertionParent ??= this.model.editingRoot(this.activePageIndex);
+    // Library insertion is a page-level action. Basing its parent on the
+    // current selection silently changes the coordinate space: a canvas point
+    // then becomes a child-local point and can place the new instance outside
+    // the active slice. Component slots have their own explicit insertion path.
+    const insertionParent = this.model.editingRoot(this.activePageIndex);
     return {
       model: this.model,
       assets: this.assets,

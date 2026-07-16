@@ -60,6 +60,35 @@ function inlinePackageAssets(value: string, fragment: VisualFragmentPackage): st
   return fragment.assets.reduce((result, asset) => result.replaceAll(asset.path, bytesToDataUrl(asset.mimeType, asset.bytes)), value);
 }
 
+function fragmentPreviewText(fragment: VisualFragmentPackage): string {
+  const parsed = new DOMParser().parseFromString(
+    fragment.content,
+    fragment.manifest.contentType === "svg" ? "image/svg+xml" : "text/html",
+  );
+  return (parsed.documentElement.textContent ?? "").replace(/\s+/g, " ").trim();
+}
+
+function previewFallbackSvg(fragment: VisualFragmentPackage): string {
+  const colors = Array.from(new Set(Array.from(fragment.styles.matchAll(/#[0-9a-fA-F]{6}\b/g), (match) => match[0]))).slice(0, 6);
+  const palette = colors.length ? colors : ["#315efb", "#78a2ff"];
+  const text = fragmentPreviewText(fragment) || fragment.manifest.description || fragment.manifest.name;
+  const lines = Array.from({ length: 3 }, (_, index) => text.slice(index * 34, (index + 1) * 34)).filter(Boolean);
+  const swatchWidth = 320 / palette.length;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180">
+    <rect width="320" height="180" rx="12" fill="#f7f9fc"/>
+    ${palette.map((color, index) => `<rect x="${index * swatchWidth}" width="${Math.ceil(swatchWidth)}" height="12" fill="${color}"/>`).join("")}
+    <text x="18" y="42" fill="#172033" font-family="system-ui,sans-serif" font-size="16" font-weight="700">${escapeHtml(fragment.manifest.name.slice(0, 30))}</text>
+    <text x="18" y="64" fill="#667085" font-family="system-ui,sans-serif" font-size="10" font-weight="600">${escapeHtml(fragment.manifest.fragmentType.toUpperCase())} · ${fragment.manifest.canvas.width.toFixed(0)} × ${fragment.manifest.canvas.height.toFixed(0)}</text>
+    ${lines.map((line, index) => `<text x="18" y="${94 + index * 20}" fill="#344054" font-family="system-ui,sans-serif" font-size="12">${escapeHtml(line)}</text>`).join("")}
+    <rect x="0.5" y="0.5" width="319" height="179" rx="11.5" fill="none" stroke="#d0d5dd"/>
+  </svg>`;
+}
+
+function needsPreviewFallback(fragment: VisualFragmentPackage): boolean {
+  const ratio = fragment.manifest.canvas.width / Math.max(1, fragment.manifest.canvas.height);
+  return fragment.manifest.contentType === "html" && (ratio > 8 || ratio < 0.125);
+}
+
 async function copyText(value: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(value);
@@ -423,7 +452,7 @@ export class FragmentWorkspace {
     }
     results.innerHTML = records.map((record, index) => `
       <article class="fragment-card" data-fragment-id="${escapeHtml(record.fragmentId)}" data-fragment-version="${escapeHtml(record.version)}">
-        <div class="fragment-preview"><img data-fragment-preview="${index}" alt="${escapeHtml(record.manifest.name)} 预览" /></div>
+        <div class="fragment-preview"><img data-fragment-preview="${index}" alt="${escapeHtml(record.manifest.name)} 预览" /><span>${record.manifest.canvas.width.toFixed(0)} × ${record.manifest.canvas.height.toFixed(0)}</span></div>
         <div class="fragment-card-body">
           <div class="fragment-card-title"><div><strong>${escapeHtml(record.manifest.name)}</strong><span>${escapeHtml(record.manifest.fragmentType)} · ${escapeHtml(record.manifest.contentType)}</span></div><button data-fragment-action="favorite" title="收藏">${record.favorite ? "★" : "☆"}</button></div>
           <p>${escapeHtml(record.manifest.description || "无描述")}</p>
@@ -446,10 +475,19 @@ export class FragmentWorkspace {
       </article>`).join("");
     packages.forEach((fragment, index) => {
       if (!fragment) return;
-      const url = URL.createObjectURL(new Blob([fragment.previewSvg], { type: "image/svg+xml" }));
+      const fallback = previewFallbackSvg(fragment);
+      const source = needsPreviewFallback(fragment) ? fallback : inlinePackageAssets(fragment.previewSvg, fragment);
+      const url = URL.createObjectURL(new Blob([source], { type: "image/svg+xml" }));
       this.previewUrls.add(url);
       const image = results.querySelector<HTMLImageElement>(`[data-fragment-preview="${index}"]`);
-      if (image) image.src = url;
+      if (!image) return;
+      image.addEventListener("load", () => image.closest(".fragment-preview")?.classList.add("is-loaded"), { once: true });
+      image.addEventListener("error", () => {
+        const fallbackUrl = URL.createObjectURL(new Blob([fallback], { type: "image/svg+xml" }));
+        this.previewUrls.add(fallbackUrl);
+        image.src = fallbackUrl;
+      }, { once: true });
+      image.src = url;
     });
   }
 

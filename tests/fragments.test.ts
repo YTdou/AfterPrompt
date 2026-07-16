@@ -105,6 +105,149 @@ describe("Visual Fragment packages", () => {
     expect(restored.previewSvg).toContain("<foreignObject");
   });
 
+  it("keeps embedded font payloads in CSS without overflowing manifest font metadata", async () => {
+    const embeddedFont = `data:font/woff2;base64,${"A".repeat(4096)}`;
+    const model = SourceDocument.parse(`<!doctype html><html><head><style>
+      @font-face { font-family: "Embedded Font"; src: url("${embeddedFont}") format("woff2"); }
+      .label { position:absolute; width:240px; height:48px; font-family:"Embedded Font"; }
+    </style></head><body data-editor-canvas-width="800" data-editor-canvas-height="600">
+      <div class="label" data-editor-id="label-001">Embedded type</div>
+    </body></html>`, "embedded-font.html");
+    const fragment = extractVisualFragment(model, new ProjectAssets(), "embedded-font.html", [{
+      element: model.find("label-001")!,
+      bounds: { x: 20, y: 30, width: 240, height: 48 },
+    }], {
+      name: "Embedded Font Label",
+      fragmentType: "element",
+      saveMode: "self-contained",
+    });
+
+    expect(validateVisualFragmentManifest(fragment.manifest)).toEqual({ valid: true, issues: [] });
+    expect(fragment.manifest.fonts).toContainEqual({ family: "Embedded Font", bundled: true });
+    expect(fragment.manifest.fonts.find((font) => font.family === "Embedded Font")).not.toHaveProperty("source");
+    expect(fragment.styles).toContain(embeddedFont);
+
+    const restored = await decodeVisualFragmentPackage(await encodeVisualFragmentPackage(fragment));
+    expect(restored.manifest.fonts).toContainEqual({ family: "Embedded Font", bundled: true });
+    expect(restored.styles).toContain(embeddedFont);
+  });
+
+  it("does not recursively absorb unrelated saved-fragment styles and preserves nested layers", async () => {
+    const primaryFont = `data:font/woff2;base64,${"A".repeat(4096)}`;
+    const unrelatedFont = `data:font/woff2;base64,${"B".repeat(4096)}`;
+    const model = SourceDocument.parse(`<!doctype html><html><head>
+      <style>
+        @font-face { font-family: "Primary"; src: url("${primaryFont}"); }
+        .whole-component { position:absolute; width:360px; height:180px; font-family:"Primary"; }
+        .whole-component .panel { color:#123456; }
+      </style>
+      <style data-vfrag-style="old-a@1.0.0#old-a-instance" data-editor-structural="true">
+        @font-face { font-family: "Unrelated"; src: url("${unrelatedFont}"); }
+        [data-vfrag-root="old-a"] { color:red; }
+      </style>
+      <style data-vfrag-style="old-b@1.0.0#old-b-instance" data-editor-structural="true">
+        @font-face { font-family: "Unrelated"; src: url("${unrelatedFont}"); }
+        [data-vfrag-root="old-b"] { color:blue; }
+      </style>
+    </head><body data-editor-canvas-width="800" data-editor-canvas-height="600">
+      <div class="whole-component" data-editor-id="whole-component">
+        <div class="panel" data-editor-id="panel-a"><strong data-editor-id="title-a">Title</strong></div>
+        <div class="panel" data-editor-id="panel-b"><span data-editor-id="copy-b">Copy</span></div>
+      </div>
+    </body></html>`, "recursive-fragment-styles.html");
+    const fragment = extractVisualFragment(model, new ProjectAssets(), "recursive-fragment-styles.html", [{
+      element: model.find("whole-component")!,
+      bounds: { x: 40, y: 50, width: 360, height: 180 },
+    }], {
+      name: "Whole Component",
+      fragmentType: "component",
+      saveMode: "self-contained",
+    });
+
+    expect(fragment.styles).toContain(primaryFont);
+    expect(fragment.styles).not.toContain(unrelatedFont);
+    expect(fragment.styles.match(/@font-face/gi)).toHaveLength(1);
+    const content = new DOMParser().parseFromString(fragment.content, "text/html");
+    expect(content.querySelector('[data-vfrag-node-key="panel-a"] [data-vfrag-node-key="title-a"]')).not.toBeNull();
+    expect(content.querySelector('[data-vfrag-node-key="panel-b"] [data-vfrag-node-key="copy-b"]')).not.toBeNull();
+    expect((await encodeVisualFragmentPackage(fragment)).byteLength).toBeLessThan(1024 * 1024);
+  });
+
+  it("separates source-page Build state from a portable component's stable visual style", () => {
+    const model = SourceDocument.parse(`<!doctype html><html><head><style>
+      .future-path { position:absolute; width:420px; height:90px; background:#f8f9fa; color:#53616c; }
+      .build { opacity:0; transform:translateY(18px) scale(.985); filter:blur(3px); pointer-events:none; }
+      .build.revealed { opacity:1; transform:none; filter:none; pointer-events:auto; }
+    </style></head><body data-editor-canvas-width="800" data-editor-canvas-height="600">
+      <div class="future-path build" data-build="3" aria-hidden="true" data-editor-id="future-path">
+        <b data-editor-id="future-title">Future work</b>
+      </div>
+    </body></html>`, "build-source.html");
+    const source = model.find("future-path")!;
+    const renderedDocument = new JSDOM(`<!doctype html><html><head><style>
+      .future-path { position:absolute; width:420px; height:90px; background:#f8f9fa; color:#53616c; }
+      .build { opacity:0; transform:translateY(18px) scale(.985); filter:blur(3px); pointer-events:none; }
+      .build.revealed { opacity:1; transform:none; filter:none; pointer-events:auto; }
+    </style></head><body>${source.outerHTML}</body></html>`).window.document;
+    const rendered = renderedDocument.querySelector('[data-editor-id="future-path"]')!;
+    const fragment = extractVisualFragment(model, new ProjectAssets(), "build-source.html", [{
+      element: source,
+      renderedElement: rendered,
+      bounds: { x: 100, y: 200, width: 420, height: 90 },
+    }], {
+      name: "Portable Future Path",
+      fragmentType: "component",
+      saveMode: "self-contained",
+    });
+
+    const parsed = new DOMParser().parseFromString(fragment.content, "text/html");
+    const portableRoot = parsed.querySelector('[data-vfrag-node-key="future-path"]')!;
+    expect(portableRoot.hasAttribute("data-build")).toBe(false);
+    expect(portableRoot.classList.contains("build")).toBe(false);
+    expect(portableRoot.getAttribute("aria-hidden")).toBeNull();
+    expect(fragment.styles).not.toContain("Source selector: .build");
+    expect(fragment.styles).toContain("opacity: 1");
+    expect(fragment.styles).toContain("filter: none");
+
+    // Extraction observes a temporary revealed state but restores canonical source.
+    expect(source.getAttribute("data-build")).toBe("3");
+    expect(source.classList.contains("build")).toBe(true);
+    expect(source.classList.contains("revealed")).toBe(false);
+    expect(source.getAttribute("aria-hidden")).toBe("true");
+    expect(rendered.classList.contains("revealed")).toBe(false);
+    expect(rendered.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("repairs legacy top-level Build context during import while preserving nested component choreography", () => {
+    const fragment = extractComponent();
+    const parsed = new DOMParser().parseFromString(fragment.content, "text/html");
+    const coordinateLayer = parsed.querySelector("[data-vfrag-coordinate-layer]")!;
+    const topLevel = coordinateLayer.firstElementChild!;
+    topLevel.classList.add("build");
+    topLevel.setAttribute("data-build", "4");
+    topLevel.setAttribute("aria-hidden", "true");
+    topLevel.insertAdjacentHTML("beforeend", '<span class="build" data-build="2" data-editor-id="internal-step">Internal step</span>');
+    fragment.content = `${parsed.body.firstElementChild!.outerHTML}\n`;
+
+    const target = blankTarget();
+    const plan = planVisualFragmentInsert(target.model, target.assets, fragment, {
+      parentId: target.parentId,
+      placement: { mode: "center" },
+      linked: false,
+      targetSourcePath: "target/index.html",
+    });
+    const planned = new DOMParser().parseFromString(plan.content, "text/html");
+    const plannedTopLevel = planned.querySelector("[data-vfrag-coordinate-layer] > *")!;
+    const plannedInternal = planned.querySelector('[data-vfrag-node-key="card-001"] [data-editor-id^="internal-step"]')!;
+
+    expect(plannedTopLevel.hasAttribute("data-build")).toBe(false);
+    expect(plannedTopLevel.classList.contains("build")).toBe(false);
+    expect((plannedTopLevel as HTMLElement).style.opacity).toBe("1");
+    expect(plannedInternal.getAttribute("data-build")).toBe("2");
+    expect(plannedInternal.classList.contains("build")).toBe(true);
+    expect(plan.report.warnings.join(" ")).toContain("源页面的顶层 Build");
+  });
+
   it("rejects manifests outside the public JSON Schema", () => {
     const manifest = structuredClone(extractComponent().manifest) as unknown as Record<string, unknown>;
     manifest.unexpected = true;
@@ -179,6 +322,32 @@ describe("Visual Fragment import", () => {
     expect(fills.some((value) => value?.startsWith("url(#contribution-card-paint"))).toBe(true);
     expect(target.model.document.querySelectorAll('style[data-vfrag-style^="contribution-card@1.0.0#"]')).toHaveLength(2);
     expect(target.assets.get("target/fragments/contribution-card/1.0.0/icon.svg")).toBeDefined();
+    const centeredRoot = target.model.find(first.rootEditorIds[0]!) as HTMLElement;
+    expect(centeredRoot.style.left).toBe("280px");
+    expect(centeredRoot.style.top).toBe("240px");
+  });
+
+  it("constrains original and explicit placement to the editable canvas", () => {
+    const fragment = extractComponent();
+    fragment.manifest.coordinateSystem.origin = { x: 4_000, y: -200 };
+    const target = blankTarget();
+    const original = insertVisualFragment(target.model, target.assets, fragment, {
+      parentId: target.parentId,
+      placement: { mode: "original" },
+      linked: false,
+      targetSourcePath: "target/index.html",
+    });
+    const explicit = insertVisualFragment(target.model, target.assets, fragment, {
+      parentId: target.parentId,
+      placement: { mode: "point", x: -500, y: 5_000 },
+      linked: false,
+      targetSourcePath: "target/index.html",
+    });
+
+    const originalRoot = target.model.find(original.rootEditorIds[0]!) as HTMLElement;
+    const explicitRoot = target.model.find(explicit.rootEditorIds[0]!) as HTMLElement;
+    expect({ left: originalRoot.style.left, top: originalRoot.style.top }).toEqual({ left: "560px", top: "0px" });
+    expect({ left: explicitRoot.style.left, top: explicitRoot.style.top }).toEqual({ left: "0px", top: "480px" });
   });
 
   it("blocks undeclared network references before mutating the target", () => {
@@ -284,6 +453,7 @@ describe("Visual Fragment import", () => {
     expect(parsed.querySelectorAll("[data-vfrag-root]")).toHaveLength(1);
     expect(parsed.querySelectorAll("[data-vfrag-coordinate-layer]")).toHaveLength(1);
     expect(updated.manifest.properties[0]?.target).toBe("title-001");
+    expect(updated.styles).toContain("Source selector:");
   });
 
   it("syncs linked instances while preserving instance identity and property overrides", () => {

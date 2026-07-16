@@ -53,13 +53,21 @@ function uniqueElements(elements: Element[]): Element[] {
   return elements.filter((element, index) => elements.indexOf(element) === index);
 }
 
+function isAuthorExcludedPage(element: Element): boolean {
+  // Some native decks retain backup material in canonical HTML while their
+  // runtime explicitly removes it from the playable slide collection. Keep
+  // those nodes losslessly in SourceDocument, but do not expose a blank page
+  // in the editor's page projection.
+  return element.hasAttribute("data-backup-remove");
+}
+
 export function detectPresentationPages(document: Document, kind: DocumentKind): PresentationPageDetection {
   if (kind !== "html" || !document.body) {
     return { mode: "none", strategy: "none", container: null, pages: [], candidateParents: [] };
   }
 
   for (const selector of PRESENTATION_PAGE_SELECTORS) {
-    const pages = uniqueElements(Array.from(document.body.querySelectorAll(selector)));
+    const pages = uniqueElements(Array.from(document.body.querySelectorAll(selector))).filter((page) => !isAuthorExcludedPage(page));
     if (pages.length === 0) continue;
     const candidateParents = uniqueElements(pages.map((page) => page.parentElement).filter((parent): parent is HTMLElement => Boolean(parent)));
     return {
@@ -72,7 +80,7 @@ export function detectPresentationPages(document: Document, kind: DocumentKind):
   }
 
   const directCandidates = Array.from(document.body.children).filter((element) =>
-    element.matches("section[data-slide], section[data-label], section.slide, [data-slide].slide"),
+    element.matches("section[data-slide], section[data-label], section.slide, [data-slide].slide") && !isAuthorExcludedPage(element),
   );
   if (directCandidates.length > 1) {
     return {
