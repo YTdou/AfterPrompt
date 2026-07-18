@@ -37,6 +37,28 @@ describe("History", () => {
     expect(history.undo()).toEqual({ source: "a", page: "two" });
     expect(history.canUndo).toBe(false);
   });
+
+  it("evicts oldest snapshots when their total weight exceeds the memory budget", () => {
+    const history = new History("0000", (left, right) => left === right, 100, 12, (value) => value.length);
+    history.commit("1111", "One");
+    history.commit("2222", "Two");
+    history.commit("3333", "Three");
+
+    expect(history.retainedWeight).toBeLessThanOrEqual(12);
+    expect(history.undo()).toBe("2222");
+    expect(history.undo()).toBe("1111");
+    expect(history.undo()).toBeNull();
+  });
+
+  it("includes redo states in the retained-weight budget", () => {
+    const history = new History("0000", (left, right) => left === right, 100, 12, (value) => value.length);
+    history.commit("1111", "one");
+    history.commit("2222", "two");
+    expect(history.undo()).toBe("1111");
+    history.replaceCurrent("111111111111");
+    expect(history.retainedWeight).toBeLessThanOrEqual(12);
+    expect(history.canRedo).toBe(false);
+  });
 });
 
 describe("project resource paths", () => {

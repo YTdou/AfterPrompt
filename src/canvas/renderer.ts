@@ -166,6 +166,121 @@ function styleElement(text: string): HTMLStyleElement {
   return style;
 }
 
+interface CachedStyleSource {
+  node: Element;
+  text: string;
+}
+
+interface CachedDocumentStyles {
+  assets: ProjectAssets;
+  assetRevision: number;
+  sourcePath: string;
+  sources: CachedStyleSource[];
+  texts: string[];
+  sheets?: CSSStyleSheet[] | null;
+}
+
+const documentStyleCache = new WeakMap<SourceDocument, CachedDocumentStyles>();
+const trailingStyleCache = new Map<string, CSSStyleSheet>();
+
+function collectDocumentStyleSources(model: SourceDocument, assets: ProjectAssets, sourcePath: string): CachedStyleSource[] {
+  const sources: CachedStyleSource[] = Array.from(model.document.querySelectorAll("head style"), (node) => ({
+    node,
+    text: node.textContent ?? "",
+  }));
+  for (const node of Array.from(model.document.querySelectorAll('head link[rel~="stylesheet"][href]'))) {
+    const href = node.getAttribute("href") ?? "";
+    const path = resolveProjectPath(href, sourcePath);
+    sources.push({ node, text: `${href}\0${path ? assets.text(path) ?? "" : ""}` });
+  }
+  return sources;
+}
+
+function sameStyleSources(left: CachedStyleSource[], right: CachedStyleSource[]): boolean {
+  return left.length === right.length && left.every((source, index) => {
+    const candidate = right[index];
+    return candidate?.node === source.node && candidate.text === source.text;
+  });
+}
+
+function cachedDocumentStyles(
+  model: SourceDocument,
+  assets: ProjectAssets,
+  sourcePath: string,
+  onWarning?: (message: string) => void,
+): CachedDocumentStyles {
+  const sources = collectDocumentStyleSources(model, assets, sourcePath);
+  const existing = documentStyleCache.get(model);
+  if (existing && existing.assets === assets && existing.assetRevision === assets.revision &&
+      existing.sourcePath === sourcePath && sameStyleSources(existing.sources, sources)) return existing;
+
+  const texts: string[] = [];
+  for (const sourceStyle of Array.from(model.document.querySelectorAll("head style"))) {
+    const warnings: string[] = [];
+    const safeCss = sanitizeCss(sourceStyle.textContent ?? "", warnings);
+    texts.push(rewriteHtmlSelectors(assets.rewriteCssUrls(safeCss, sourcePath)));
+  }
+  for (const link of Array.from(model.document.querySelectorAll('head link[rel~="stylesheet"][href]'))) {
+    const href = link.getAttribute("href") ?? "";
+    const path = resolveProjectPath(href, sourcePath);
+    const css = path ? assets.text(path) : null;
+    if (css !== null && css !== undefined) texts.push(rewriteHtmlSelectors(assets.rewriteCssUrls(css, path!)));
+    else onWarning?.(`样式表未载入预览：${href}`);
+  }
+  const cached: CachedDocumentStyles = {
+    assets,
+    assetRevision: assets.revision,
+    sourcePath,
+    sources,
+    texts,
+  };
+  documentStyleCache.set(model, cached);
+  return cached;
+}
+
+function applyCachedDocumentStyles(shadow: ShadowRoot, cached: CachedDocumentStyles): void {
+  const supportsAdoptedSheets = "adoptedStyleSheets" in shadow && typeof CSSStyleSheet !== "undefined" &&
+    typeof CSSStyleSheet.prototype.replaceSync === "function";
+  if (supportsAdoptedSheets) {
+    if (cached.sheets === undefined) {
+      try {
+        cached.sheets = cached.texts.map((text) => {
+          const sheet = new CSSStyleSheet();
+          sheet.replaceSync(text);
+          return sheet;
+        });
+      } catch {
+        cached.sheets = null;
+      }
+    }
+    if (cached.sheets) {
+      shadow.adoptedStyleSheets = cached.sheets;
+      return;
+    }
+  }
+  cached.texts.forEach((text) => shadow.append(styleElement(text)));
+}
+
+function appendTrailingStyle(shadow: ShadowRoot, text: string): void {
+  const supportsAdoptedSheets = "adoptedStyleSheets" in shadow && typeof CSSStyleSheet !== "undefined" &&
+    typeof CSSStyleSheet.prototype.replaceSync === "function";
+  if (supportsAdoptedSheets) {
+    try {
+      let sheet = trailingStyleCache.get(text);
+      if (!sheet) {
+        sheet = new CSSStyleSheet();
+        sheet.replaceSync(text);
+        trailingStyleCache.set(text, sheet);
+      }
+      shadow.adoptedStyleSheets = [...shadow.adoptedStyleSheets, sheet];
+      return;
+    } catch {
+      // Fall through for browsers with partial constructable-sheet support.
+    }
+  }
+  shadow.append(styleElement(text));
+}
+
 function rewriteHtmlSelectors(css: string): string {
   return css
     .replace(/:root\b/g, ":host")
@@ -226,38 +341,26 @@ export class CanvasRenderer {
     if (deterministicFont) this.host.setAttribute(DETERMINISTIC_FONT_ATTRIBUTE, deterministicFont);
     else this.host.removeAttribute(DETERMINISTIC_FONT_ATTRIBUTE);
     if (deterministicFont === "inter") ensureEditorFontRegistered();
+    if ("adoptedStyleSheets" in this.shadow) this.shadow.adoptedStyleSheets = [];
     this.shadow.replaceChildren();
     this.shadow.append(styleElement(editorCss));
     this.shadow.append(styleElement(buildPreviewCss));
 
     if (model.kind === "html") this.renderHtml(model, activePageId, options);
     else this.renderSvg(model);
-    if (deterministicFont === "inter") this.shadow.append(styleElement(deterministicEditorTypographyCss()));
+    if (deterministicFont === "inter") appendTrailingStyle(this.shadow, deterministicEditorTypographyCss());
     // Append this last so imported/static-page styles cannot re-enable pointer handling.
-    if (!this.interactive) this.shadow.append(styleElement(nonInteractiveCss));
+    if (!this.interactive) appendTrailingStyle(this.shadow, nonInteractiveCss);
   }
 
   private renderHtml(model: SourceDocument, activePageId: string | undefined, options: RenderOptions): void {
-    for (const sourceStyle of Array.from(model.document.querySelectorAll("head style"))) {
-      const warnings: string[] = [];
-      const safeCss = sanitizeCss(sourceStyle.textContent ?? "", warnings);
-      const css = rewriteHtmlSelectors(this.assets?.rewriteCssUrls(safeCss, this.sourcePath) ?? safeCss);
-      this.shadow.append(styleElement(css));
-    }
-
-    for (const link of Array.from(model.document.querySelectorAll('head link[rel~="stylesheet"][href]'))) {
-      const href = link.getAttribute("href") ?? "";
-      const path = resolveProjectPath(href, this.sourcePath);
-      const css = path ? this.assets?.text(path) : null;
-      if (css !== null && css !== undefined) {
-        this.shadow.append(styleElement(rewriteHtmlSelectors(this.assets?.rewriteCssUrls(css, path!) ?? css)));
-      } else {
-        this.callbacks.onWarning?.(`样式表未载入预览：${href}`);
-      }
-    }
+    if (this.assets) applyCachedDocumentStyles(
+      this.shadow,
+      cachedDocumentStyles(model, this.assets, this.sourcePath, this.callbacks.onWarning),
+    );
 
     const pages = model.pages();
-    if (pages.length > 0) this.shadow.append(styleElement(editorPresentationLayoutCss));
+    if (pages.length > 0) appendTrailingStyle(this.shadow, editorPresentationLayoutCss);
 
     const shell = document.createElement("div");
     shell.className = "editor-preview-shell";
@@ -545,5 +648,17 @@ export class CanvasRenderer {
 
   containsNode(node: Node): boolean {
     return this.shadow.contains(node);
+  }
+
+  dispose(): void {
+    this.inlineFinish?.(false);
+    this.inlineFinish = null;
+    this.shadow.removeEventListener("click", this.handleClick, { capture: true });
+    this.shadow.removeEventListener("dblclick", this.handleDoubleClick, { capture: true });
+    if ("adoptedStyleSheets" in this.shadow) this.shadow.adoptedStyleSheets = [];
+    this.shadow.replaceChildren();
+    this.previewRoot = null;
+    this.model = null;
+    this.assets = null;
   }
 }

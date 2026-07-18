@@ -8,6 +8,13 @@ if (!deployBasePath.startsWith("/") || !deployBasePath.endsWith("/")) {
 
 export default defineConfig({
   base: deployBasePath,
+  // JSZip is intentionally loaded on demand by project/fragment workflows.
+  // Pre-bundle it at dev-server startup so the first Save Fragment click does
+  // not discover a new dependency, invalidate the page's optimizer hash, and
+  // fail with an Outdated Optimize Dep / 504 response.
+  optimizeDeps: {
+    include: ["jszip"],
+  },
   server: {
     port: 4173,
   },

@@ -45,6 +45,7 @@ function base64ToBytes(value: string): Uint8Array {
 export class ProjectAssets {
   private readonly assets = new Map<string, ProjectAsset>();
   private readonly urls = new Map<string, string>();
+  private revisionValue = 0;
 
   constructor(initial: ProjectAsset[] = []) {
     initial.forEach((asset) => this.set(asset));
@@ -56,6 +57,7 @@ export class ProjectAssets {
     if (previousUrl) URL.revokeObjectURL(previousUrl);
     this.urls.delete(path);
     this.assets.set(path, { ...asset, path });
+    this.revisionValue += 1;
   }
 
   get(path: string): ProjectAsset | undefined {
@@ -70,6 +72,11 @@ export class ProjectAssets {
     for (const url of this.urls.values()) URL.revokeObjectURL(url);
     this.urls.clear();
     this.assets.clear();
+    this.revisionValue += 1;
+  }
+
+  get revision(): number {
+    return this.revisionValue;
   }
 
   objectUrl(path: string): string | null {

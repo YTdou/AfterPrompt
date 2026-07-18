@@ -5,6 +5,7 @@ import { refreshClonedFragmentInstances } from "./fragments/component";
 import { normalizeLegacyFragmentBuildContexts } from "./fragments/context";
 import { decodeEditableHtml } from "./editable-html";
 import { refreshDeterministicTypography } from "./typography";
+import { compactRedundantFragmentFontFaces } from "./fragment-style-migration";
 import { auditPresentationDocument, auditPresentationSource, formatPresentationAuditIssue } from "./presentation-audit";
 import { detectPresentationPages } from "./presentation-projection";
 import {
@@ -172,6 +173,9 @@ export class SourceDocument {
       : [];
     const assigned = ensureStableIds(document, kind);
     if (kind === "html") refreshDeterministicTypography(document);
+    const compactedFragmentStyles = kind === "html"
+      ? compactRedundantFragmentFontFaces(document)
+      : { removedFontFaces: 0, removedBytes: 0, changedStyleBlocks: 0 };
     const normalizedFragmentBuilds = normalizeLegacyFragmentBuildContexts(document);
     // Apart from the targeted legacy fragment migration above, keep canonical
     // source lossless. DOMParser does not execute scripts; executable content
@@ -179,6 +183,9 @@ export class SourceDocument {
     const safetyClone = document.cloneNode(true) as Document;
     const warnings = [...auditWarnings, ...sanitizeDocument(safetyClone, kind)];
     if (assigned > 0) warnings.push(`已为 ${assigned} 个可编辑节点添加稳定 data-editor-id。`);
+    if (compactedFragmentStyles.removedFontFaces > 0) {
+      warnings.push(`已从 ${compactedFragmentStyles.changedStyleBlocks} 个片段样式中合并 ${compactedFragmentStyles.removedFontFaces} 条重复字体规则，减少 ${(compactedFragmentStyles.removedBytes / 1024 / 1024).toFixed(2)} MiB。`);
+    }
     if (normalizedFragmentBuilds > 0) warnings.push(`已修复 ${normalizedFragmentBuilds} 个旧片段中误带的页面级 Build 状态。`);
     const pageCount = detectPageElements(document, kind).length;
     if (pageCount > 1) warnings.push(`已识别 ${pageCount} 页静态演示稿；可使用画布上方的页面选择器逐页编辑。`);
