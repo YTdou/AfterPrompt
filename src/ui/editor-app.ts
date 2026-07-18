@@ -301,11 +301,19 @@ export class EditorApp {
   private buildWarningSignature = "";
   private fragmentCursor = { x: 640, y: 360 };
   private fontRenderToken = 0;
+  private thumbnailObserver: IntersectionObserver | null = null;
+  private readonly thumbnailRenderers = new Map<number, CanvasRenderer>();
 
   constructor(private readonly host: HTMLElement) {
     host.innerHTML = appTemplate;
     this.model = SourceDocument.parse(defaultHtml, "ai-slide.html");
-    this.history = new History(this.createSnapshot(), snapshotsEqual);
+    this.history = new History(
+      this.createSnapshot(),
+      snapshotsEqual,
+      100,
+      192 * 1024 * 1024,
+      (snapshot) => snapshot.source.length * 2 + (snapshot.assets ?? []).reduce((sum, asset) => sum + asset.bytes.byteLength, 0),
+    );
 
     this.renderer = new CanvasRenderer(this.get("#canvas-host"), {
       onSelect: (id, options) => this.selectElement(id, options.additive),
@@ -604,6 +612,7 @@ export class EditorApp {
     this.get(".canvas-panel").classList.toggle("has-page-filmstrip", hasPages);
     control.hidden = !hasPages;
     filmstrip.hidden = !hasPages;
+    this.clearThumbnailRenderers();
     if (!hasPages) {
       thumbnails.replaceChildren();
       return;
@@ -637,7 +646,8 @@ export class EditorApp {
     `;
     }).join("");
 
-    pages.forEach((page) => {
+    const renderThumbnail = (page: DocumentPage): void => {
+      if (this.thumbnailRenderers.has(page.index)) return;
       const host = thumbnails.querySelector<HTMLElement>(`[data-thumbnail-host="${page.index}"]`);
       if (!host) return;
       const renderer = new CanvasRenderer(host, {
@@ -651,10 +661,37 @@ export class EditorApp {
         activeBuildStep: sequence.maxStep,
         buildViewMode: "playback",
       });
-    });
+      this.thumbnailRenderers.set(page.index, renderer);
+    };
+    const releaseThumbnail = (pageIndex: number): void => {
+      if (Math.abs(pageIndex - this.activePageIndex) <= 2) return;
+      this.thumbnailRenderers.get(pageIndex)?.dispose();
+      this.thumbnailRenderers.delete(pageIndex);
+    };
+    pages.filter((page) => Math.abs(page.index - this.activePageIndex) <= 2).forEach(renderThumbnail);
+    if (typeof IntersectionObserver !== "undefined") {
+      this.thumbnailObserver = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          const button = entry.target as HTMLElement;
+          const pageIndex = Number(button.dataset.pageIndex);
+          const page = pages[pageIndex];
+          if (!page) continue;
+          if (entry.isIntersecting) renderThumbnail(page);
+          else releaseThumbnail(pageIndex);
+        }
+      }, { root: thumbnails, rootMargin: "80px" });
+      thumbnails.querySelectorAll<HTMLElement>(".page-thumbnail").forEach((thumbnail) => this.thumbnailObserver?.observe(thumbnail));
+    }
     requestAnimationFrame(() => {
       thumbnails.querySelector(".page-thumbnail.is-active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
     });
+  }
+
+  private clearThumbnailRenderers(): void {
+    this.thumbnailObserver?.disconnect();
+    this.thumbnailObserver = null;
+    this.thumbnailRenderers.forEach((renderer) => renderer.dispose());
+    this.thumbnailRenderers.clear();
   }
 
   private renderBuildControl(sequence: PageBuildSequence): void {

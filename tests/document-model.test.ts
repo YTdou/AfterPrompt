@@ -72,6 +72,30 @@ describe("SourceDocument", () => {
       .toBe(model.document.querySelectorAll("[data-editor-id]").length);
   });
 
+  it("compacts only duplicate fragment font payloads while preserving unique fonts and component rules", () => {
+    const shared = `data:font/woff2;base64,${"A".repeat(2048)}`;
+    const unique = `data:font/woff2;base64,${"B".repeat(1024)}`;
+    const model = SourceDocument.parse(`<!doctype html><html><head>
+      <style>@font-face { font-family:"Shared"; src:url("${shared}"); }</style>
+      <style data-vfrag-style="one@1.0.0#one">
+        @font-face { font-family: "Shared"; src: url("${shared}"); }
+        .one { color:red; }
+      </style>
+      <style data-vfrag-style="two@1.0.0#two">
+        @font-face { font-family:"Shared"; src:url("${shared}"); }
+        @font-face { font-family:"Unique"; src:url("${unique}"); }
+        .two { color:blue; }
+      </style>
+    </head><body><div class="one" data-editor-id="one">One</div><div class="two" data-editor-id="two">Two</div></body></html>`, "duplicate-fragment-fonts.html");
+    const fragmentStyles = Array.from(model.document.querySelectorAll("style[data-vfrag-style]"), (style) => style.textContent ?? "").join("\n");
+
+    expect(fragmentStyles).not.toContain(shared);
+    expect(fragmentStyles).toContain(unique);
+    expect(fragmentStyles).toContain(".one");
+    expect(fragmentStyles).toContain(".two");
+    expect(model.warnings.join(" ")).toContain("合并 2 条重复字体规则");
+  });
+
   it("enforces the same lock boundary for structured commands", () => {
     const model = SourceDocument.parse(slideSource, "ai-slide.html");
     model.apply({ action: "setLocked", elementId: "title-001", locked: true });
