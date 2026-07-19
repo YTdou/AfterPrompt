@@ -133,38 +133,40 @@ function fragmentStructureLabel(fragment: VisualFragmentLibraryRecord["manifest"
 
 const fragmentUi = `
   <input id="fragment-import-input" type="file" accept=".vfrag,.svg,.png,.jpg,.jpeg,application/zip,image/svg+xml,image/png,image/jpeg" hidden />
-  <dialog id="fragment-save-dialog" class="fragment-dialog fragment-save-dialog">
+  <dialog id="fragment-save-dialog" class="fragment-dialog fragment-save-dialog studio-dialog" aria-labelledby="fragment-save-title">
     <form id="fragment-save-form" method="dialog">
       <header class="fragment-dialog-heading">
-        <div><span class="eyebrow">LOCAL FRAGMENT FILE</span><h2>保存本地片段</h2></div>
+        <div><span class="eyebrow">LOCAL FRAGMENT FILE</span><h2 id="fragment-save-title">保存本地片段</h2></div>
         <button value="cancel" aria-label="关闭">×</button>
       </header>
       <p class="fragment-purpose-note">片段以你拥有的 <code>.vfrag</code> 文件为主；组件和 SVG 保留结构，PNG/JPG 作为单一图片图层。</p>
       <div class="fragment-form-grid">
-        <label class="field"><span>名称</span><input id="fragment-name" required maxlength="160" /></label>
-        <label class="field"><span>版本</span><input id="fragment-version" value="1.0.0" required /></label>
-        <label class="field"><span>类型</span><select id="fragment-type"><option value="element">Element</option><option value="group">Group</option><option value="component">Component</option><option value="template">Template</option></select></label>
-        <label class="field"><span>保存模式</span><select id="fragment-mode"><option value="source-preserving">Source-preserving</option><option value="self-contained" selected>Self-contained</option></select></label>
-        <label class="field"><span>保存位置</span><select id="fragment-save-target"><option value="directory">本地片段目录（推荐）</option><option value="file">下载 .vfrag 文件</option><option value="both">保存到目录并下载</option></select></label>
-        <label class="field"><span>分类</span><input id="fragment-category" value="Uncategorized" /></label>
-        <label class="field"><span>标签（逗号分隔）</span><input id="fragment-tags" /></label>
+        <label class="field"><span>名称</span><input id="fragment-name" name="fragment-name" autocomplete="off" required maxlength="160" /></label>
+        <label class="field"><span>版本</span><input id="fragment-version" name="fragment-version" autocomplete="off" value="1.0.0" required /></label>
+        <label class="field"><span>类型</span><select id="fragment-type" name="fragment-type"><option value="element">Element</option><option value="group">Group</option><option value="component">Component</option><option value="template">Template</option></select></label>
+        <label class="field"><span>保存模式</span><select id="fragment-mode" name="fragment-mode"><option value="source-preserving">Source-preserving</option><option value="self-contained" selected>Self-contained</option></select></label>
+        <label class="field"><span>保存位置</span><select id="fragment-save-target" name="fragment-save-target"><option value="directory">本地片段目录（推荐）</option><option value="file">下载 .vfrag 文件</option><option value="both">保存到目录并下载</option></select></label>
+        <label class="field"><span>分类</span><input id="fragment-category" name="fragment-category" autocomplete="off" value="Uncategorized" /></label>
+        <label class="field"><span>标签（逗号分隔）</span><input id="fragment-tags" name="fragment-tags" autocomplete="off" /></label>
       </div>
       <section class="fragment-save-storage">
         <div><strong id="fragment-save-storage-title">尚未连接本地片段目录</strong><small id="fragment-save-storage-detail">默认下载 .vfrag 文件；浏览器临时数据不作为长期保存。</small></div>
         <button id="fragment-save-connect-directory" type="button">选择本地片段目录</button>
       </section>
-      <label class="field stack"><span>描述</span><textarea id="fragment-description" rows="3" maxlength="2000"></textarea></label>
+      <label class="field stack"><span>描述</span><textarea id="fragment-description" name="fragment-description" autocomplete="off" rows="3" maxlength="2000"></textarea></label>
       <section id="fragment-component-schema" class="fragment-schema-editor" hidden>
         <div class="fragment-schema-heading"><div><h3>组件属性</h3><p>将内部节点的文字、属性或样式暴露给用户和 Codex。</p></div><button id="fragment-add-property" type="button">＋ 属性</button></div>
+        <div class="fragment-schema-columns property-columns" aria-hidden="true"><span>程序名</span><span>显示名称</span><span>类型</span><span>目标节点</span><span>绑定</span><span>属性 / 样式名</span><span>枚举值</span><span>约束</span></div>
         <div id="fragment-property-rows" class="fragment-schema-rows"></div>
         <div class="fragment-schema-heading"><div><h3>内容插槽</h3><p>定义允许用户或 Codex 插入内容的位置与约束。</p></div><button id="fragment-add-slot" type="button">＋ 插槽</button></div>
+        <div class="fragment-schema-columns slot-columns" aria-hidden="true"><span>程序名</span><span>显示名称</span><span>目标节点</span><span>允许内容</span><span>默认内容</span><span>尺寸约束</span><span>选项</span></div>
         <div id="fragment-slot-rows" class="fragment-schema-rows"></div>
       </section>
       <footer class="fragment-dialog-actions"><span id="fragment-save-selection"></span><button value="cancel">取消</button><button id="fragment-save-submit" type="submit" value="default" class="button primary">下载 .vfrag</button></footer>
     </form>
   </dialog>
 
-  <dialog id="fragment-library-dialog" class="fragment-dialog fragment-library-dialog">
+  <dialog id="fragment-library-dialog" class="fragment-dialog fragment-library-dialog studio-dialog" aria-labelledby="fragment-library-title">
     <div class="fragment-dialog-heading">
       <div><span class="eyebrow">LOCAL FRAGMENTS</span><h2 id="fragment-library-title">本地片段</h2><small id="fragment-storage-status"></small></div>
       <button id="fragment-library-close" type="button" aria-label="关闭">×</button>
@@ -180,11 +182,11 @@ const fragmentUi = `
       </div>
     </section>
     <div class="fragment-library-toolbar">
-      <input id="fragment-search" type="search" placeholder="搜索名称、描述、标签或 ID" />
-      <select id="fragment-category-filter"><option value="">全部分类</option></select>
+      <input id="fragment-search" name="fragment-search" type="search" autocomplete="off" aria-label="搜索片段" placeholder="搜索名称、描述、标签或 ID" />
+      <select id="fragment-category-filter" aria-label="片段分类"><option value="">全部分类</option></select>
       <label class="checkbox"><input id="fragment-favorite-filter" type="checkbox" /> 仅收藏</label>
       <label class="checkbox"><input id="fragment-recent-filter" type="checkbox" /> 最近使用优先</label>
-      <select id="fragment-placement">
+      <select id="fragment-placement" aria-label="插入位置">
         <option value="center">画布中心</option>
         <option value="original">原始位置</option>
         <option value="cursor">最近鼠标位置</option>
@@ -198,7 +200,7 @@ const fragmentUi = `
     <div id="fragment-library-results" class="fragment-library-results"></div>
   </dialog>
 
-  <dialog id="fragment-report-dialog" class="fragment-dialog fragment-report-dialog">
+  <dialog id="fragment-report-dialog" class="fragment-dialog fragment-report-dialog studio-dialog" aria-labelledby="fragment-report-title">
     <form method="dialog">
       <header class="fragment-dialog-heading"><div><span class="eyebrow">COMPATIBILITY</span><h2 id="fragment-report-title">导入兼容性报告</h2></div><button value="cancel" aria-label="关闭">×</button></header>
       <div id="fragment-report-content" class="fragment-report-content"></div>
@@ -384,15 +386,19 @@ export class FragmentWorkspace {
     row.className = "fragment-schema-row property-row";
     const bindingName = property?.binding.kind === "text" ? "" : property?.binding.name ?? "";
     row.innerHTML = `
-      <input data-schema-field="name" placeholder="propertyName" value="${escapeHtml(property?.name ?? "")}" />
-      <input data-schema-field="label" placeholder="显示名称" value="${escapeHtml(property?.label ?? "")}" />
-      <select data-schema-field="type">${["text", "number", "color", "image", "icon", "boolean", "enum", "size", "url"].map((type) => `<option${property?.type === type ? " selected" : ""}>${type}</option>`).join("")}</select>
-      <select data-schema-field="target">${this.candidateOptions(property?.target)}</select>
-      <select data-schema-field="binding">${["text", "attribute", "style", "css-variable"].map((kind) => `<option${property?.binding.kind === kind ? " selected" : ""}>${kind}</option>`).join("")}</select>
-      <input data-schema-field="bindingName" placeholder="属性/样式名" value="${escapeHtml(bindingName)}" />
-      <input data-schema-field="options" placeholder="枚举选项，逗号分隔" value="${escapeHtml(property?.options?.join(", ") ?? "")}" />
+      <input data-schema-field="name" aria-label="属性程序名" placeholder="propertyName" value="${escapeHtml(property?.name ?? "")}" />
+      <input data-schema-field="label" aria-label="属性显示名称" placeholder="显示名称" value="${escapeHtml(property?.label ?? "")}" />
+      <select data-schema-field="type" aria-label="属性类型">${["text", "number", "color", "image", "icon", "boolean", "enum", "size", "url"].map((type) => `<option${property?.type === type ? " selected" : ""}>${type}</option>`).join("")}</select>
+      <select data-schema-field="target" aria-label="属性目标节点">${this.candidateOptions(property?.target)}</select>
+      <select data-schema-field="binding" aria-label="属性绑定类型">${["text", "attribute", "style", "css-variable"].map((kind) => `<option${property?.binding.kind === kind ? " selected" : ""}>${kind}</option>`).join("")}</select>
+      <input data-schema-field="bindingName" aria-label="绑定属性或样式名" placeholder="属性/样式名" value="${escapeHtml(bindingName)}" />
+      <input data-schema-field="options" aria-label="属性枚举选项" placeholder="枚举选项，逗号分隔" value="${escapeHtml(property?.options?.join(", ") ?? "")}" />
       <label class="checkbox"><input data-schema-field="required" type="checkbox"${property?.required ? " checked" : ""} />必填</label>
-      <button type="button" data-remove-schema-row title="删除属性">×</button>`;
+      <button type="button" data-remove-schema-row title="删除属性" aria-label="删除属性">×</button>`;
+    row.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input, select").forEach((field) => {
+      field.name = `fragment-property-${field.dataset.schemaField ?? "field"}`;
+      if (field instanceof HTMLInputElement) field.autocomplete = "off";
+    });
     this.get("#fragment-property-rows").append(row);
   }
 
@@ -400,18 +406,22 @@ export class FragmentWorkspace {
     const row = document.createElement("div");
     row.className = "fragment-schema-row slot-row";
     row.innerHTML = `
-      <input data-schema-field="name" placeholder="slotName" value="${escapeHtml(slot?.name ?? "")}" />
-      <input data-schema-field="label" placeholder="显示名称" value="${escapeHtml(slot?.label ?? "")}" />
-      <select data-schema-field="target">${this.candidateOptions(slot?.target)}</select>
-      <input data-schema-field="allowed" placeholder="text,image,rect" value="${escapeHtml(slot?.allowedElementTypes.join(", ") ?? "")}" />
-      <input data-schema-field="default" placeholder="默认内容说明" value="${escapeHtml(slot?.defaultContent ?? "")}" />
-      <input data-schema-field="minWidth" type="number" min="0" placeholder="最小宽" value="${slot?.size?.minWidth ?? ""}" />
-      <input data-schema-field="minHeight" type="number" min="0" placeholder="最小高" value="${slot?.size?.minHeight ?? ""}" />
-      <input data-schema-field="maxWidth" type="number" min="0" placeholder="最大宽" value="${slot?.size?.maxWidth ?? ""}" />
-      <input data-schema-field="maxHeight" type="number" min="0" placeholder="最大高" value="${slot?.size?.maxHeight ?? ""}" />
+      <input data-schema-field="name" aria-label="插槽程序名" placeholder="slotName" value="${escapeHtml(slot?.name ?? "")}" />
+      <input data-schema-field="label" aria-label="插槽显示名称" placeholder="显示名称" value="${escapeHtml(slot?.label ?? "")}" />
+      <select data-schema-field="target" aria-label="插槽目标节点">${this.candidateOptions(slot?.target)}</select>
+      <input data-schema-field="allowed" aria-label="插槽允许的元素类型" placeholder="text,image,rect" value="${escapeHtml(slot?.allowedElementTypes.join(", ") ?? "")}" />
+      <input data-schema-field="default" aria-label="插槽默认内容" placeholder="默认内容说明" value="${escapeHtml(slot?.defaultContent ?? "")}" />
+      <input data-schema-field="minWidth" aria-label="插槽最小宽度" type="number" min="0" placeholder="最小宽" value="${slot?.size?.minWidth ?? ""}" />
+      <input data-schema-field="minHeight" aria-label="插槽最小高度" type="number" min="0" placeholder="最小高" value="${slot?.size?.minHeight ?? ""}" />
+      <input data-schema-field="maxWidth" aria-label="插槽最大宽度" type="number" min="0" placeholder="最大宽" value="${slot?.size?.maxWidth ?? ""}" />
+      <input data-schema-field="maxHeight" aria-label="插槽最大高度" type="number" min="0" placeholder="最大高" value="${slot?.size?.maxHeight ?? ""}" />
       <label class="checkbox"><input data-schema-field="required" type="checkbox"${slot?.required ? " checked" : ""} />必填</label>
       <label class="checkbox"><input data-schema-field="multiple" type="checkbox"${slot?.multiple ? " checked" : ""} />多个</label>
-      <button type="button" data-remove-schema-row title="删除插槽">×</button>`;
+      <button type="button" data-remove-schema-row title="删除插槽" aria-label="删除插槽">×</button>`;
+    row.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input, select").forEach((field) => {
+      field.name = `fragment-slot-${field.dataset.schemaField ?? "field"}`;
+      if (field instanceof HTMLInputElement) field.autocomplete = "off";
+    });
     this.get("#fragment-slot-rows").append(row);
   }
 
@@ -698,6 +708,9 @@ export class FragmentWorkspace {
   private async renderLibrary(): Promise<void> {
     this.refreshStorageUi();
     const token = ++this.renderToken;
+    const results = this.get("#fragment-library-results");
+    results.setAttribute("aria-busy", "true");
+    results.innerHTML = '<div class="fragment-loading" role="status"><strong>正在读取片段</strong><span>检查本地索引与预览资源…</span></div>';
     const allRecords = await this.library.list();
     const categorySelect = this.get<HTMLSelectElement>("#fragment-category-filter");
     const selectedCategory = categorySelect.value;
@@ -715,19 +728,19 @@ export class FragmentWorkspace {
     }));
     if (token !== this.renderToken) return;
     this.clearPreviewUrls();
-    const results = this.get("#fragment-library-results");
+    results.setAttribute("aria-busy", "false");
     if (!records.length) {
       const directoryMode = this.directoryLibrary !== null && this.library === this.directoryLibrary;
       results.innerHTML = directoryMode
-        ? `<div class="fragment-empty"><span>◇</span><strong>这个本地目录还没有片段</strong><p>保存当前选区，或导入 .vfrag、SVG、PNG、JPG 文件。SVG/组件保留结构，PNG/JPG 为单一图片图层。</p></div>`
-        : `<div class="fragment-empty"><span>◇</span><strong>临时片段剪贴板为空</strong><p>这里仅用于短期复制粘贴。长期保存请选择本地目录或下载 .vfrag 文件。</p></div>`;
+        ? `<div class="fragment-empty"><span aria-hidden="true">◇</span><strong>这个本地目录还没有片段</strong><p>保存当前选区，或导入 .vfrag、SVG、PNG、JPG 文件。SVG/组件保留结构，PNG/JPG 为单一图片图层。</p></div>`
+        : `<div class="fragment-empty"><span aria-hidden="true">◇</span><strong>临时片段剪贴板为空</strong><p>这里仅用于短期复制粘贴。长期保存请选择本地目录或下载 .vfrag 文件。</p></div>`;
       return;
     }
     results.innerHTML = records.map((record, index) => `
       <article class="fragment-card" data-fragment-id="${escapeHtml(record.fragmentId)}" data-fragment-version="${escapeHtml(record.version)}">
-        <div class="fragment-preview"><img data-fragment-preview="${index}" alt="${escapeHtml(record.manifest.name)} 预览" /><span>${record.manifest.canvas.width.toFixed(0)} × ${record.manifest.canvas.height.toFixed(0)}</span></div>
+        <div class="fragment-preview"><img data-fragment-preview="${index}" width="${Math.max(1, Math.round(record.manifest.canvas.width))}" height="${Math.max(1, Math.round(record.manifest.canvas.height))}" loading="lazy" alt="${escapeHtml(record.manifest.name)} 预览" /><span>${record.manifest.canvas.width.toFixed(0)} × ${record.manifest.canvas.height.toFixed(0)}</span></div>
         <div class="fragment-card-body">
-          <div class="fragment-card-title"><div><strong>${escapeHtml(record.manifest.name)}</strong><span>${escapeHtml(record.manifest.fragmentType)} · ${escapeHtml(fragmentStructureLabel(record.manifest))}</span></div><button data-fragment-action="favorite" title="收藏">${record.favorite ? "★" : "☆"}</button></div>
+          <div class="fragment-card-title"><div><strong>${escapeHtml(record.manifest.name)}</strong><span>${escapeHtml(record.manifest.fragmentType)} · ${escapeHtml(fragmentStructureLabel(record.manifest))}</span></div><button data-fragment-action="favorite" title="${record.favorite ? "取消收藏" : "收藏"}" aria-label="${record.favorite ? "取消收藏" : "收藏"} ${escapeHtml(record.manifest.name)}">${record.favorite ? "★" : "☆"}</button></div>
           <p>${escapeHtml(record.manifest.description || "无描述")}</p>
           <div class="fragment-card-meta"><span>${escapeHtml(record.manifest.category)}</span><span>v${escapeHtml(record.version)}</span><span>使用 ${record.useCount}</span><span title="${escapeHtml(record.manifest.provenance.sourceProject)}">来源 ${escapeHtml(record.manifest.provenance.sourceProject)}</span></div>
           <div class="fragment-tags">${record.manifest.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>
