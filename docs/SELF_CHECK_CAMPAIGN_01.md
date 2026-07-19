@@ -186,4 +186,4 @@ The full browser smoke on the frozen concurrent snapshot failed before reaching 
 | General code coverage | Not instrumented |
 | Campaign-wide mutation score | Not measured |
 
-The most important remaining action is a separate campaign for Finding C. The unrelated notice auto-dismiss browser-smoke failure must also be triaged against the concurrently changing live tree before any global release-readiness claim.
+Finding C was repaired and independently verified in `SELF_CHECK_CAMPAIGN_02.md`. The historical notice auto-dismiss failure was also rechecked on a clean frozen baseline and found ineligible for repair because the 4-second product contract and the original 7-second browser oracle both passed.
