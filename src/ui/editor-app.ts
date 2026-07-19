@@ -51,6 +51,10 @@ import { SourceCodeEditor } from "./code-editor";
 import { FragmentWorkspace, type FragmentWorkspaceContext } from "./fragment-workspace";
 import { EditorLayoutController } from "./layout-controller";
 
+type InspectorGroup = "design" | "build" | "advanced";
+
+const INSPECTOR_GROUP_STORAGE_KEY = "last-mile-studio:inspector-group:v1";
+
 function escapeHtml(value: string): string {
   return value.replace(/[&<>'"]/g, (character) => ({
     "&": "&amp;",
@@ -300,48 +304,59 @@ const appTemplate = `
 
       <section class="canvas-panel">
         <div class="canvas-toolbar">
-          <div class="toolbar">
+          <div class="canvas-mode-row">
+            <div class="canvas-playback-controls">
+              <div id="page-control" class="toolbar page-control" hidden>
+                <span class="tool-label">页面</span>
+                <button id="previous-page" title="上一页 (Page Up)" aria-label="上一页">‹</button>
+                <select id="page-select" aria-label="选择要编辑的页面"></select>
+                <span id="page-count">1 / 1</span>
+                <button id="next-page" title="下一页 (Page Down)" aria-label="下一页">›</button>
+              </div>
+              <div id="build-control" class="toolbar build-control" hidden>
+                <span class="tool-label">Build</span>
+                <button id="previous-build" title="Previous Build (Alt + [)" aria-label="Previous Build">‹</button>
+                <span id="build-status">Initial / 0</span>
+                <button id="next-build" title="Next Build (Alt + ])" aria-label="Next Build">›</button>
+                <select id="build-view-mode" aria-label="Build 视图">
+                  <option value="playback">Playback State</option>
+                  <option value="group">Current Group</option>
+                  <option value="all">All Builds</option>
+                </select>
+              </div>
+            </div>
+            <div class="canvas-view-controls">
+              <div class="toolbar canvas-size-control">
+                <select id="canvas-preset" aria-label="画布尺寸预设">
+                  <option value="custom">自定义</option>
+                  <option value="1920x1080">16:9 · 1920×1080</option>
+                  <option value="1024x768">4:3 · 1024×768</option>
+                </select>
+                <label>W <input id="canvas-width" type="number" min="1" step="1" aria-label="画布宽度" /></label>
+                <span>×</span>
+                <label>H <input id="canvas-height" type="number" min="1" step="1" aria-label="画布高度" /></label>
+              </div>
+              <div class="toolbar zoom-control">
+                <button id="zoom-out" title="Zoom out" aria-label="缩小画布">−</button>
+                <button id="zoom-display" title="Reset zoom">100%</button>
+                <button id="zoom-in" title="Zoom in" aria-label="放大画布">＋</button>
+                <button id="fit-canvas">适应窗口</button>
+              </div>
+            </div>
+          </div>
+          <div class="toolbar selection-toolbar" hidden aria-label="选区操作">
+            <span class="selection-context-label">选区</span>
             <span class="tool-label">对齐</span>
             <button data-align="left" title="Align left">左</button>
-            <button data-align="center" title="Align horizontal center">中</button>
+            <button data-align="center" title="Align horizontal center">水平居中</button>
             <button data-align="right" title="Align right">右</button>
             <button data-align="top" title="Align top">上</button>
-            <button data-align="middle" title="Align vertical center">中</button>
+            <button data-align="middle" title="Align vertical center">垂直居中</button>
             <button data-align="bottom" title="Align bottom">下</button>
-            <button data-align="distribute-x" title="Distribute horizontally">横分布</button>
-            <button data-align="distribute-y" title="Distribute vertically">纵分布</button>
-          </div>
-          <div id="page-control" class="toolbar page-control" hidden>
-            <button id="previous-page" title="上一页 (Page Up)" aria-label="上一页">‹</button>
-            <select id="page-select" aria-label="选择要编辑的页面"></select>
-            <span id="page-count">1 / 1</span>
-            <button id="next-page" title="下一页 (Page Down)" aria-label="下一页">›</button>
-          </div>
-          <div id="build-control" class="toolbar build-control" hidden>
-            <button id="previous-build" title="Previous Build (Alt + [)" aria-label="Previous Build">‹</button>
-            <span id="build-status">Initial / 0</span>
-            <button id="next-build" title="Next Build (Alt + ])" aria-label="Next Build">›</button>
-            <select id="build-view-mode" aria-label="Build 视图">
-              <option value="playback">Playback State</option>
-              <option value="group">Current Group</option>
-              <option value="all">All Builds</option>
-            </select>
-          </div>
-          <div class="toolbar canvas-size-control">
-            <select id="canvas-preset" aria-label="画布尺寸预设">
-              <option value="custom">自定义</option>
-              <option value="1920x1080">16:9 · 1920×1080</option>
-              <option value="1024x768">4:3 · 1024×768</option>
-            </select>
-            <label>W <input id="canvas-width" type="number" min="1" step="1" /></label>
-            <span>×</span>
-            <label>H <input id="canvas-height" type="number" min="1" step="1" /></label>
-          </div>
-          <div class="toolbar zoom-control">
-            <button id="zoom-out" title="Zoom out" aria-label="缩小画布">−</button>
-            <button id="zoom-display" title="Reset zoom">100%</button>
-            <button id="zoom-in" title="Zoom in" aria-label="放大画布">＋</button>
-            <button id="fit-canvas">适应窗口</button>
+            <span class="selection-distribute-controls">
+              <button data-align="distribute-x" title="Distribute horizontally">横向分布</button>
+              <button data-align="distribute-y" title="Distribute vertically">纵向分布</button>
+            </span>
           </div>
         </div>
         <div id="canvas-viewport" class="canvas-viewport" tabindex="0">
@@ -351,16 +366,21 @@ const appTemplate = `
           </div>
           <div class="canvas-hint">滚轮缩放 · Space/中键拖动画布 · 方向键微调</div>
         </div>
-        <div class="canvas-status">
-          <span id="document-status"></span>
-          <span id="selection-status">未选择元素</span>
-          <span id="sync-status" class="sync-ok">代码已同步</span>
+        <div class="canvas-status" aria-label="文档与同步状态">
+          <span id="document-status" data-label="文档"></span>
+          <span id="selection-status" data-label="选区">未选择元素</span>
+          <span id="sync-status" data-label="同步" class="sync-ok" role="status" aria-live="polite">代码已同步</span>
         </div>
       </section>
 
       <aside id="inspector-panel" class="panel inspector-panel">
         <button class="panel-collapse-toggle" data-layout-toggle="inspector" aria-controls="inspector-panel" aria-label="折叠或展开编排与属性面板"></button>
-        <div class="panel-heading"><div><span class="eyebrow">INSPECTOR</span><h2>编排与属性</h2></div></div>
+        <div class="panel-heading"><div><span class="eyebrow">INSPECTOR</span><h2>检查器</h2></div></div>
+        <div class="inspector-tabs" role="group" aria-label="检查器分组">
+          <button type="button" data-inspector-group="design" aria-controls="inspector-content">Design</button>
+          <button type="button" data-inspector-group="build" aria-controls="build-panel">Build</button>
+          <button type="button" data-inspector-group="advanced" aria-controls="inspector-content">Advanced</button>
+        </div>
         <section id="build-panel" class="build-panel" hidden>
           <div class="build-panel-heading"><span class="eyebrow">BUILD SEQUENCE</span><strong>放映顺序编排</strong></div>
           <div id="build-selection-controls" class="build-selection-controls"></div>
@@ -369,7 +389,6 @@ const appTemplate = `
         </section>
         <div class="layout-resizer row-resizer build-resizer" data-layout-resizer="build" role="separator" aria-orientation="horizontal" aria-label="调整 Build 编排与元素属性的高度" tabindex="0"></div>
         <section class="element-properties-panel">
-          <div class="element-properties-heading"><span class="eyebrow">ELEMENT PROPERTIES</span><strong>元素属性</strong></div>
           <div id="inspector-content" class="inspector-content"></div>
         </section>
         <div class="layout-resizer column-resizer" data-layout-resizer="inspector" role="separator" aria-orientation="vertical" aria-label="调整编排与属性面板宽度" tabindex="0"></div>
@@ -463,6 +482,7 @@ export class EditorApp {
   private layerAutoScrollSpeed = 0;
   private thumbnailObserver: IntersectionObserver | null = null;
   private readonly thumbnailRenderers = new Map<number, CanvasRenderer>();
+  private readonly inspectorGroups = this.restoreInspectorGroups();
 
   constructor(private readonly host: HTMLElement) {
     host.innerHTML = appTemplate;
@@ -545,6 +565,21 @@ export class EditorApp {
       button.addEventListener("click", () => {
         if (button.dataset.fragmentContextAction === "insert") this.fragments.chooseInsertFile();
         else void this.fragments.openLibrary(button.dataset.fragmentContextAction === "clipboard" ? "clipboard" : "directory");
+      });
+    });
+    this.host.querySelectorAll<HTMLButtonElement>(".inspector-tabs [data-inspector-group]").forEach((button) => {
+      button.addEventListener("click", () => this.setInspectorGroup(button.dataset.inspectorGroup as InspectorGroup));
+      button.addEventListener("keydown", (event) => {
+        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        const tabs = Array.from(this.host.querySelectorAll<HTMLButtonElement>(".inspector-tabs [data-inspector-group]:not([hidden])"));
+        const current = tabs.indexOf(button);
+        const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1
+          : (current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+        const target = tabs[next];
+        if (target) {
+          target.focus();
+        }
       });
     });
     this.get("#import-document-action").addEventListener("click", () => {
@@ -1015,7 +1050,7 @@ export class EditorApp {
   private renderBuildPanel(sequence: PageBuildSequence): void {
     const panel = this.get("#build-panel");
     const hasPresentationPage = this.model.kind === "html" && (this.model.pages().length > 0 || sequence.elementCount > 0);
-    panel.hidden = !hasPresentationPage;
+    this.updateInspectorHierarchy(hasPresentationPage);
     if (!hasPresentationPage) return;
 
     const selectedOnPage = this.selectedIds.filter((id) => this.model.elementBelongsToPage(id, this.activePageIndex));
@@ -1645,12 +1680,13 @@ export class EditorApp {
 
   private renderInspector(): void {
     const host = this.get("#inspector-content");
+    this.updateCanvasContext();
     if (this.selectedIds.length === 0) {
-      host.innerHTML = `<div class="empty-state"><span>◇</span><p>点击画布或图层选择元素</p><small>选择后可精确编辑布局、文本、图像与样式。</small></div>`;
+      host.innerHTML = `<div class="empty-state" data-inspector-pane="design advanced"><span>◇</span><p>尚未选择元素</p><small>从画布或图层中选择元素，Design 与 Advanced 属性会在这里出现。</small></div>`;
       return;
     }
     if (this.selectedIds.length > 1) {
-      host.innerHTML = `<div class="multi-selection"><strong>${this.selectedIds.length} 个元素</strong><p>${this.selectedIds.map(escapeHtml).join(" · ")}</p><small>可拖动整组，或使用画布上方的对齐与分布工具。</small></div>`;
+      host.innerHTML = `<div class="multi-selection" data-inspector-pane="design advanced"><span class="element-badge">MULTI</span><strong>${this.selectedIds.length} 个元素</strong><p>${this.selectedIds.map(escapeHtml).join(" · ")}</p><small>拖动选区可整体移动；画布上方已显示对齐与分布命令。单击一个图层可返回单选属性。</small></div>`;
       return;
     }
     const id = this.selectedIds[0]!;
@@ -1670,19 +1706,19 @@ export class EditorApp {
     const parentId = modelElement.parentElement?.closest("[data-editor-id]")?.getAttribute("data-editor-id") ?? "";
     const childId = modelElement.querySelector("[data-editor-id]")?.getAttribute("data-editor-id") ?? "";
     host.innerHTML = `
-      <section class="inspector-section identity-card">
+      <section class="inspector-section identity-card" data-inspector-pane="design">
         <div><span class="element-badge">${escapeHtml(modelElement.localName)}</span><strong>${escapeHtml(id)}</strong></div>
         <div class="identity-navigation">
           <button data-inspector-action="select-parent" title="选择最近的可编辑父级"${parentId ? "" : " disabled"}>选择父级</button>
           <button data-inspector-action="select-child" title="选择第一个可编辑子级"${childId ? "" : " disabled"}>选择子级</button>
         </div>
       </section>
-      <section class="inspector-section">
+      <section class="inspector-section" data-inspector-pane="advanced">
         <h3>标识</h3>
         <label class="field"><span>显示名称</span><input data-prop="name" value="${escapeHtml(modelElement.getAttribute("data-editor-name") ?? "")}" placeholder="Layer name" /></label>
         <label class="field"><span>CSS class</span><input data-prop="className" value="${escapeHtml(modelElement.getAttribute("class") ?? "")}" /></label>
       </section>
-      <section class="inspector-section">
+      <section class="inspector-section" data-inspector-pane="design">
         <div class="section-title-row"><h3>几何</h3><label class="checkbox"><input id="keep-ratio" type="checkbox" /> 锁定比例</label></div>
         <div class="field-grid four">
           <label class="field"><span>X</span><input data-prop="x" type="number" step="1" value="${bounds.x.toFixed(1)}" /></label>
@@ -1692,7 +1728,7 @@ export class EditorApp {
         </div>
         <label class="field"><span>旋转角度</span><input data-prop="rotation" type="number" step="1" value="${transform.rotation.toFixed(1)}" /></label>
       </section>
-      ${isText ? `<section class="inspector-section">
+      ${isText ? `<section class="inspector-section" data-inspector-pane="design">
         <h3>文本</h3>
         <label class="field stack"><span>内容</span><textarea data-prop="text" rows="4">${escapeHtml(text)}</textarea></label>
         <div class="field-grid two">
@@ -1706,13 +1742,13 @@ export class EditorApp {
         <p class="font-status${fontCatalog.selectedId ? "" : " is-warning"}" data-font-status>${fontCatalog.selectedId ? "正在确认本机字体…" : "自定义字体栈 · 可用性未验证"}</p>
         <label class="field color-field"><span>文字颜色</span><input data-prop="color" type="color" value="${colorValue(computed.color)}" aria-label="选择文字颜色" /><input data-prop="color" value="${escapeHtml(computed.color)}" aria-label="文字颜色值" /></label>
       </section>` : ""}
-      ${isImage ? `<section class="inspector-section">
+      ${isImage ? `<section class="inspector-section" data-inspector-pane="design">
         <h3>图像</h3>
         <label class="field stack"><span>资源路径 / Data URL</span><input data-prop="src" value="${escapeHtml(modelElement.getAttribute(modelElement.localName === "image" ? "href" : "src") ?? "")}" /></label>
         <button class="wide-button" data-inspector-action="replace-image">选择图片替换</button>
         <label class="field"><span>Object fit</span><select data-prop="objectFit"><option>contain</option><option>cover</option><option>fill</option><option>none</option><option>scale-down</option></select></label>
       </section>` : ""}
-      <section class="inspector-section">
+      <section class="inspector-section" data-inspector-pane="design">
         <h3>外观</h3>
         <label class="field color-field"><span>${selectedKind === "svg" ? "填充" : "背景"}</span><input data-prop="fill" type="color" value="${colorValue(fill)}" aria-label="选择填充或背景颜色" /><input data-prop="fill" value="${escapeHtml(fill)}" aria-label="填充或背景颜色值" /></label>
         <label class="field color-field"><span>描边</span><input data-prop="stroke" type="color" value="${colorValue(stroke)}" aria-label="选择描边颜色" /><input data-prop="stroke" value="${escapeHtml(stroke)}" aria-label="描边颜色值" /></label>
@@ -1724,7 +1760,7 @@ export class EditorApp {
         </div>
         <div class="field stack"><span>阴影</span>${shadowEditorMarkup(computed.boxShadow)}</div>
       </section>
-      <section class="inspector-section">
+      <section class="inspector-section" data-inspector-pane="advanced">
         <h3>Inline style</h3>
         <label class="field stack"><textarea data-prop="inlineStyle" rows="4" spellcheck="false" aria-label="Inline style">${escapeHtml(modelElement.getAttribute("style") ?? "")}</textarea></label>
       </section>
@@ -1739,6 +1775,54 @@ export class EditorApp {
       const entry = fontEntryById(fontCatalog.selectedId);
       if (entry) void this.refreshFontStatus(id, entry);
     }
+  }
+
+  private restoreInspectorGroups(): Set<InspectorGroup> {
+    try {
+      const saved = JSON.parse(localStorage.getItem(INSPECTOR_GROUP_STORAGE_KEY) ?? "null") as unknown;
+      const groups = Array.isArray(saved)
+        ? saved.filter((value): value is InspectorGroup => value === "design" || value === "build" || value === "advanced")
+        : [];
+      return new Set(groups.length ? groups : ["design", "build"]);
+    } catch {
+      return new Set(["design", "build"]);
+    }
+  }
+
+  private setInspectorGroup(group: InspectorGroup): void {
+    if (this.inspectorGroups.has(group)) this.inspectorGroups.delete(group);
+    else this.inspectorGroups.add(group);
+    try {
+      localStorage.setItem(INSPECTOR_GROUP_STORAGE_KEY, JSON.stringify(Array.from(this.inspectorGroups)));
+    } catch {
+      // Disclosure remains usable when browser storage is unavailable.
+    }
+    const buildButton = this.host.querySelector<HTMLButtonElement>('[data-inspector-group="build"]');
+    this.updateInspectorHierarchy(!buildButton?.hidden);
+  }
+
+  private updateInspectorHierarchy(buildAvailable: boolean): void {
+    this.get("#inspector-panel").dataset.inspectorGroups = Array.from(this.inspectorGroups).join(" ");
+    this.host.querySelectorAll<HTMLButtonElement>(".inspector-tabs [data-inspector-group]").forEach((button) => {
+      const group = button.dataset.inspectorGroup as InspectorGroup;
+      button.hidden = group === "build" && !buildAvailable;
+      button.setAttribute("aria-expanded", String(this.inspectorGroups.has(group)));
+    });
+    const buildExpanded = buildAvailable && this.inspectorGroups.has("build");
+    const propertiesExpanded = this.inspectorGroups.has("design") || this.inspectorGroups.has("advanced");
+    this.get("#build-panel").hidden = !buildExpanded;
+    this.host.querySelector<HTMLElement>(".build-resizer")!.hidden = !buildExpanded || !propertiesExpanded;
+    this.host.querySelector<HTMLElement>(".element-properties-panel")!.hidden = !propertiesExpanded;
+  }
+
+  private updateCanvasContext(): void {
+    const selectionToolbar = this.host.querySelector<HTMLElement>(".selection-toolbar")!;
+    selectionToolbar.hidden = this.selectedIds.length === 0;
+    selectionToolbar.dataset.selectionMode = this.selectedIds.length > 1 ? "multiple" : "single";
+    selectionToolbar.querySelector<HTMLElement>(".selection-context-label")!.textContent = this.selectedIds.length > 1
+      ? `${this.selectedIds.length} 个元素`
+      : "单个元素";
+    selectionToolbar.querySelector<HTMLElement>(".selection-distribute-controls")!.hidden = this.selectedIds.length < 2;
   }
 
   private selectElement(id: string, additive: boolean, revealInTree = true): void {
