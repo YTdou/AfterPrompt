@@ -151,6 +151,7 @@ function kindForElement(element: Element, fallback: DocumentKind): DocumentKind 
 }
 
 type LayerDropPlacement = "before" | "inside" | "after";
+type NavigationView = "layers" | "pages" | "fragments";
 
 interface LayerDragState {
   pointerId: number;
@@ -234,23 +235,66 @@ const appTemplate = `
     <div id="notice-bar" class="notice-bar" hidden></div>
 
     <main class="workspace">
+      <nav class="activity-rail" aria-label="工作区导航">
+        <div role="tablist" aria-orientation="vertical" aria-label="左侧面板">
+          <button id="activity-layers" type="button" role="tab" tabindex="0" data-activity-view="layers" aria-controls="layers-context" aria-selected="true" title="图层与结构">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m3 6.5 7-3.5 7 3.5-7 3.5-7-3.5Z"/><path d="m3 10 7 3.5 7-3.5M3 13.5l7 3.5 7-3.5"/></svg>
+            <span class="visually-hidden">图层</span>
+          </button>
+          <button id="activity-pages" type="button" role="tab" tabindex="-1" data-activity-view="pages" aria-controls="pages-context" aria-selected="false" title="页面">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="4" y="3" width="12" height="14" rx="1"/><path d="M7 7h6M7 10h6M7 13h4"/></svg>
+            <span class="visually-hidden">页面</span>
+          </button>
+          <button id="activity-fragments" type="button" role="tab" tabindex="-1" data-activity-view="fragments" aria-controls="fragments-context" aria-selected="false" title="片段与资源">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4h5v5H4zM11 4h5v5h-5zM4 11h5v5H4zM11 11h5v5h-5z"/></svg>
+            <span class="visually-hidden">片段与资源</span>
+          </button>
+        </div>
+      </nav>
       <aside id="layers-panel" class="panel layers-panel">
-        <button class="panel-collapse-toggle" data-layout-toggle="layers" aria-controls="layers-panel" aria-label="折叠或展开图层与结构面板"></button>
-        <div class="panel-heading">
-          <div><span class="eyebrow">DOCUMENT</span><h2>图层与结构</h2></div>
-          <div class="compact-actions">
-            <button id="add-text" title="Add text" aria-label="添加文本">T+</button>
-            <button id="add-shape" title="Add shape" aria-label="添加形状">▣+</button>
+        <button class="panel-collapse-toggle" data-layout-toggle="layers" aria-controls="layers-panel" aria-label="折叠或展开左侧面板"></button>
+        <section id="layers-context" class="panel-context layers-context" role="tabpanel" aria-labelledby="activity-layers">
+          <div class="panel-heading">
+            <div><span class="eyebrow">DOCUMENT</span><h2>图层与结构</h2></div>
+            <div class="compact-actions">
+              <button id="add-text" title="Add text" aria-label="添加文本">T+</button>
+              <button id="add-shape" title="Add shape" aria-label="添加形状">▣+</button>
+            </div>
           </div>
-        </div>
-        <div class="layer-actions" aria-label="Layer actions">
-          <button data-layer-action="visibility" title="Show or hide">显隐</button>
-          <button data-layer-action="lock" title="Lock or unlock">锁定</button>
-          <button data-layer-action="down" title="Move backward" aria-label="下移图层">↓</button>
-          <button data-layer-action="up" title="Move forward" aria-label="上移图层">↑</button>
-        </div>
-        <div id="layers-tree" class="layers-tree"></div>
-        <div class="panel-footnote">画布选中会自动定位。拖动手柄可排序、缩进或提升一级；双击名称或按 F2 重命名。</div>
+          <div class="layer-actions" aria-label="Layer actions">
+            <button data-layer-action="visibility" title="Show or hide">显隐</button>
+            <button data-layer-action="lock" title="Lock or unlock">锁定</button>
+            <button data-layer-action="down" title="Move backward" aria-label="下移图层">↓</button>
+            <button data-layer-action="up" title="Move forward" aria-label="上移图层">↑</button>
+          </div>
+          <div id="layers-tree" class="layers-tree"></div>
+          <div class="panel-footnote">方向键浏览 · Enter 选择 · F2 重命名 · Alt + 方向键调整层级。</div>
+        </section>
+        <section id="pages-context" class="panel-context pages-context" role="tabpanel" aria-labelledby="activity-pages" hidden>
+          <div id="page-filmstrip" class="page-filmstrip" hidden>
+            <div class="page-filmstrip-actions">
+              <div><span class="eyebrow">PAGES</span><h2>页面</h2></div>
+              <button class="page-collapse-toggle" data-layout-toggle="pages" aria-controls="page-thumbnails" aria-label="折叠或展开页面列表"></button>
+              <div class="page-action-group">
+                <button id="duplicate-page" title="复制当前页">复制</button>
+                <button id="move-page-earlier" title="向前移动当前页">前移</button>
+                <button id="move-page-later" title="向后移动当前页">后移</button>
+              </div>
+              <button id="delete-page" class="danger" title="删除当前页">删除</button>
+            </div>
+            <div id="page-thumbnails" class="page-thumbnails" aria-label="页面缩略图"></div>
+            <div class="layout-resizer row-resizer page-resizer" data-layout-resizer="pages" role="separator" aria-orientation="horizontal" aria-label="调整页面缩略图高度" tabindex="0"></div>
+          </div>
+        </section>
+        <section id="fragments-context" class="panel-context fragments-context" role="tabpanel" aria-labelledby="activity-fragments" hidden>
+          <div class="panel-heading"><div><span class="eyebrow">REUSABLE CONTENT</span><h2>片段与资源</h2></div></div>
+          <div class="fragment-context-actions">
+            <button type="button" data-fragment-context-action="insert"><strong>插入片段或图片</strong><span>.vfrag、SVG、PNG、JPG</span></button>
+            <button type="button" data-fragment-context-action="clipboard"><strong>临时片段剪贴板</strong><span>查看最近复制的可复用内容</span></button>
+            <button type="button" data-fragment-context-action="library"><strong>本地片段库</strong><span>连接并管理用户拥有的目录</span></button>
+          </div>
+          <p class="panel-footnote">片段操作继续使用现有安全导入、兼容性检查和本地存储流程。</p>
+        </section>
         <div class="layout-resizer column-resizer" data-layout-resizer="layers" role="separator" aria-orientation="vertical" aria-label="调整图层与结构面板宽度" tabindex="0"></div>
       </aside>
 
@@ -299,18 +343,6 @@ const appTemplate = `
             <button id="zoom-in" title="Zoom in" aria-label="放大画布">＋</button>
             <button id="fit-canvas">适应窗口</button>
           </div>
-        </div>
-        <div id="page-filmstrip" class="page-filmstrip" hidden>
-          <div class="page-filmstrip-actions">
-            <span class="eyebrow">PAGES</span>
-            <button class="page-collapse-toggle" data-layout-toggle="pages" aria-controls="page-filmstrip" aria-label="折叠或展开页面栏"></button>
-            <button id="duplicate-page" title="复制当前页">复制页</button>
-            <button id="move-page-earlier" title="向前移动当前页">← 前移</button>
-            <button id="move-page-later" title="向后移动当前页">后移 →</button>
-            <button id="delete-page" class="danger" title="删除当前页">删除页</button>
-          </div>
-          <div id="page-thumbnails" class="page-thumbnails" aria-label="页面缩略图"></div>
-          <div class="layout-resizer row-resizer page-resizer" data-layout-resizer="pages" role="separator" aria-orientation="horizontal" aria-label="调整页面栏高度" tabindex="0"></div>
         </div>
         <div id="canvas-viewport" class="canvas-viewport" tabindex="0">
           <div class="canvas-grid"></div>
@@ -391,7 +423,7 @@ const appTemplate = `
         </div>
       </form>
     </dialog>
-    <div id="toast" class="toast" hidden></div>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   </div>
 `;
 
@@ -423,6 +455,8 @@ export class EditorApp {
   private fontRenderToken = 0;
   private readonly fontChangeTokens = new Map<string, number>();
   private readonly collapsedLayerIds = new Set<string>();
+  private activeNavigationView: NavigationView = "layers";
+  private layerFocusId: string | null = null;
   private pendingLayerRevealId: string | null = null;
   private layerDrag: LayerDragState | null = null;
   private layerAutoScrollFrame = 0;
@@ -494,6 +528,25 @@ export class EditorApp {
   }
 
   private bindEvents(): void {
+    const activityButtons = Array.from(this.host.querySelectorAll<HTMLButtonElement>("[data-activity-view]"));
+    activityButtons.forEach((button) => {
+      button.addEventListener("click", () => this.switchNavigationView(button.dataset.activityView as NavigationView));
+      button.addEventListener("keydown", (event) => {
+        if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        const enabled = activityButtons.filter((candidate) => !candidate.disabled);
+        const current = enabled.indexOf(button);
+        const next = event.key === "Home" ? 0 : event.key === "End" ? enabled.length - 1
+          : (current + (event.key === "ArrowDown" ? 1 : -1) + enabled.length) % enabled.length;
+        enabled[next]?.focus();
+      });
+    });
+    this.host.querySelectorAll<HTMLButtonElement>("[data-fragment-context-action]").forEach((button) => {
+      button.addEventListener("click", () => {
+        if (button.dataset.fragmentContextAction === "insert") this.fragments.chooseInsertFile();
+        else void this.fragments.openLibrary(button.dataset.fragmentContextAction === "clipboard" ? "clipboard" : "directory");
+      });
+    });
     this.get("#import-document-action").addEventListener("click", () => {
       this.closeIoMenus();
       this.get<HTMLInputElement>("#file-input").click();
@@ -645,9 +698,15 @@ export class EditorApp {
       }
       const row = (event.target as Element).closest<HTMLElement>("[data-layer-id]");
       if (!row?.dataset.layerId) return;
+      this.layerFocusId = row.dataset.layerId;
       const mouse = event as MouseEvent;
       this.selectElement(row.dataset.layerId, mouse.ctrlKey || mouse.metaKey || mouse.shiftKey, false);
     });
+    layersTree.addEventListener("focusin", (event) => {
+      const row = (event.target as Element).closest<HTMLElement>("[data-layer-id]");
+      if (row?.dataset.layerId) this.layerFocusId = row.dataset.layerId;
+    });
+    layersTree.addEventListener("keydown", (event) => this.handleLayerTreeKeyDown(event));
     layersTree.addEventListener("dblclick", (event) => {
       const name = (event.target as Element).closest<HTMLElement>("[data-layer-name]");
       if (!name?.dataset.layerName) return;
@@ -718,6 +777,24 @@ export class EditorApp {
 
   private closeIoMenus(): void {
     this.host.querySelectorAll<HTMLDetailsElement>("[data-io-menu]").forEach((menu) => { menu.open = false; });
+  }
+
+  private switchNavigationView(view: NavigationView, focusPanel = true): void {
+    const button = this.host.querySelector<HTMLButtonElement>(`[data-activity-view="${view}"]`);
+    if (!button || button.disabled) return;
+    this.activeNavigationView = view;
+    for (const candidate of ["layers", "pages", "fragments"] as const) {
+      const active = candidate === view;
+      const tab = this.get<HTMLButtonElement>(`[data-activity-view="${candidate}"]`);
+      tab.setAttribute("aria-selected", String(active));
+      tab.tabIndex = active ? 0 : -1;
+      this.get(`#${candidate}-context`).hidden = !active;
+    }
+    this.get("#layers-panel").dataset.activeContext = view;
+    if (focusPanel) {
+      const target = view === "layers" ? this.get("#layers-tree") : this.get(`#${view}-context`);
+      requestAnimationFrame(() => target.querySelector<HTMLElement>("button:not(:disabled),[tabindex='0']")?.focus());
+    }
   }
 
   private fragmentWorkspaceContext(): FragmentWorkspaceContext {
@@ -824,7 +901,10 @@ export class EditorApp {
     const filmstrip = this.get("#page-filmstrip");
     const thumbnails = this.get("#page-thumbnails");
     const hasPages = pages.length > 0;
-    this.get(".canvas-panel").classList.toggle("has-page-filmstrip", hasPages);
+    const pagesTab = this.get<HTMLButtonElement>('[data-activity-view="pages"]');
+    pagesTab.disabled = !hasPages;
+    pagesTab.title = hasPages ? "页面" : "当前文档没有多页结构";
+    if (!hasPages && this.activeNavigationView === "pages") this.switchNavigationView("layers", false);
     control.hidden = !hasPages;
     filmstrip.hidden = !hasPages;
     this.clearThumbnailRenderers();
@@ -850,7 +930,7 @@ export class EditorApp {
     thumbnails.innerHTML = pages.map((page) => {
       const sequence = this.model.buildSequence(page.index);
       return `
-      <button class="page-thumbnail${page.index === this.activePageIndex ? " is-active" : ""}" data-page-index="${page.index}" data-page-id="${escapeHtml(page.id)}" draggable="true" title="${escapeHtml(page.label)}">
+      <button class="page-thumbnail${page.index === this.activePageIndex ? " is-active" : ""}" data-page-index="${page.index}" data-page-id="${escapeHtml(page.id)}" draggable="true" title="${escapeHtml(page.label)}"${page.index === this.activePageIndex ? ' aria-current="page"' : ""}>
         <span class="page-thumbnail-number">${page.index + 1}</span>
         ${sequence.groups.length ? `<span class="page-thumbnail-builds">+${sequence.groups.length} builds</span>` : ""}
         <span class="page-thumbnail-preview" style="width:${previewWidth.toFixed(2)}px;height:${previewHeight.toFixed(2)}px">
@@ -1200,14 +1280,18 @@ export class EditorApp {
       if (!this.model.find(id)) this.collapsedLayerIds.delete(id);
     }
     const tree = this.model.treeForPage(this.activePageIndex);
+    const fallbackFocusId = this.layerFocusId && this.model.find(this.layerFocusId)
+      ? this.layerFocusId
+      : this.selectedIds.at(-1) ?? tree[0]?.id ?? null;
+    this.layerFocusId = fallbackFocusId;
     const renderNode = (node: ElementTreeNode, depth: number): string => {
       const selected = this.selectedIds.includes(node.id) ? " is-selected" : "";
       const icon = node.visible ? (node.locked ? "🔒" : "◇") : "◌";
       const collapsed = node.children.length > 0 && this.collapsedLayerIds.has(node.id);
-      return `<li data-layer-node="${escapeHtml(node.id)}">
-        <div class="layer-row${selected}" data-layer-id="${escapeHtml(node.id)}" style="--depth:${depth}" title="${escapeHtml(node.id)}" role="treeitem" aria-selected="${selected ? "true" : "false"}"${node.children.length ? ` aria-expanded="${collapsed ? "false" : "true"}"` : ""}>
-          <button type="button" class="layer-disclosure${collapsed ? " is-collapsed" : ""}" data-layer-toggle="${escapeHtml(node.id)}" aria-label="${collapsed ? "展开" : "折叠"} ${escapeHtml(node.name)}"${node.children.length ? "" : " disabled"}>⌄</button>
-          <button type="button" class="layer-drag-handle" data-layer-drag-handle="${escapeHtml(node.id)}" aria-label="拖动 ${escapeHtml(node.name)}" title="拖动以排序、缩进或提升一级"${depth === 0 ? " disabled" : ""}>⠿</button>
+      return `<li role="none" data-layer-node="${escapeHtml(node.id)}">
+        <div class="layer-row${selected}" data-layer-id="${escapeHtml(node.id)}" style="--depth:${depth}" title="${escapeHtml(node.id)}" role="treeitem" tabindex="${node.id === fallbackFocusId ? "0" : "-1"}" aria-selected="${selected ? "true" : "false"}"${node.children.length ? ` aria-expanded="${collapsed ? "false" : "true"}"` : ""}>
+          <button type="button" tabindex="-1" class="layer-disclosure${collapsed ? " is-collapsed" : ""}" data-layer-toggle="${escapeHtml(node.id)}" aria-label="${collapsed ? "展开" : "折叠"} ${escapeHtml(node.name)}"${node.children.length ? "" : " disabled"}>⌄</button>
+          <button type="button" tabindex="-1" class="layer-drag-handle" data-layer-drag-handle="${escapeHtml(node.id)}" aria-label="拖动 ${escapeHtml(node.name)}" title="拖动以排序、缩进或提升一级"${depth === 0 ? " disabled" : ""}>⠿</button>
           <span class="layer-icon">${icon}</span>
           <span class="layer-name" data-layer-name="${escapeHtml(node.id)}">${escapeHtml(node.name)}</span>
           <span class="layer-tag">${escapeHtml(node.tag)}</span>
@@ -1217,6 +1301,71 @@ export class EditorApp {
     };
     this.get("#layers-tree").innerHTML = `<ul role="tree">${tree.map((node) => renderNode(node, 0)).join("")}</ul>`;
     if (revealId) requestAnimationFrame(() => this.centerLayerRow(revealId, revealBehavior));
+  }
+
+  private handleLayerTreeKeyDown(event: KeyboardEvent): void {
+    const row = (event.target as Element).closest<HTMLElement>("[data-layer-id]");
+    const id = row?.dataset.layerId;
+    if (!row || !id) return;
+    const rows = Array.from(this.get("#layers-tree").querySelectorAll<HTMLElement>("[data-layer-id]"));
+    const index = rows.indexOf(row);
+    const focusRow = (target?: HTMLElement | null): void => {
+      if (!target?.dataset.layerId) return;
+      event.preventDefault();
+      this.layerFocusId = target.dataset.layerId;
+      rows.forEach((candidate) => { candidate.tabIndex = candidate === target ? 0 : -1; });
+      target.focus();
+      target.scrollIntoView({ block: "nearest" });
+    };
+    if (event.altKey && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+      event.preventDefault();
+      this.layerFocusId = id;
+      if (this.selectedIds.length !== 1 || this.selectedIds[0] !== id) this.selectElement(id, false, false);
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        this.layerAction(event.key === "ArrowUp" ? "down" : "up");
+        this.toast(event.key === "ArrowUp" ? "已通过键盘向前移动图层" : "已通过键盘向后移动图层");
+      } else if (event.key === "ArrowLeft") {
+        const parentRow = row.closest("li")?.parentElement?.closest("li")?.querySelector<HTMLElement>(":scope > [data-layer-id]");
+        if (parentRow?.dataset.layerId && this.moveLayerPreservingPosition(id, parentRow.dataset.layerId, "after")) this.toast("已提升图层一级");
+        else this.toast("当前图层已在最高可提升层级");
+      } else {
+        const previousRow = row.closest("li")?.previousElementSibling?.querySelector<HTMLElement>(":scope > [data-layer-id]");
+        if (previousRow?.dataset.layerId && this.moveLayerPreservingPosition(id, previousRow.dataset.layerId, "inside")) this.toast("已将图层缩进一级");
+        else this.toast("需要一个前置同级图层作为新父级");
+      }
+      requestAnimationFrame(() => this.get("#layers-tree").querySelector<HTMLElement>(`[data-layer-id="${CSS.escape(id)}"]`)?.focus());
+      return;
+    }
+    if (event.key === "ArrowUp") focusRow(rows[index - 1]);
+    else if (event.key === "ArrowDown") focusRow(rows[index + 1]);
+    else if (event.key === "Home") focusRow(rows[0]);
+    else if (event.key === "End") focusRow(rows.at(-1));
+    else if (event.key === "ArrowLeft") {
+      if (row.getAttribute("aria-expanded") === "true") {
+        event.preventDefault();
+        this.collapsedLayerIds.add(id);
+        this.renderLayers();
+        requestAnimationFrame(() => this.get("#layers-tree").querySelector<HTMLElement>(`[data-layer-id="${CSS.escape(id)}"]`)?.focus());
+      } else {
+        focusRow(row.closest("li")?.parentElement?.closest("li")?.querySelector<HTMLElement>(":scope > [data-layer-id]"));
+      }
+    } else if (event.key === "ArrowRight") {
+      if (row.getAttribute("aria-expanded") === "false") {
+        event.preventDefault();
+        this.collapsedLayerIds.delete(id);
+        this.renderLayers();
+        requestAnimationFrame(() => this.get("#layers-tree").querySelector<HTMLElement>(`[data-layer-id="${CSS.escape(id)}"]`)?.focus());
+      } else {
+        focusRow(row.closest("li")?.querySelector<HTMLElement>(":scope > ul > li > [data-layer-id]"));
+      }
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      this.selectElement(id, event.ctrlKey || event.metaKey || event.shiftKey, false);
+      requestAnimationFrame(() => this.get("#layers-tree").querySelector<HTMLElement>(`[data-layer-id="${CSS.escape(id)}"]`)?.focus());
+    } else if (event.key === "F2") {
+      event.preventDefault();
+      this.startLayerRename(id);
+    }
   }
 
   private centerLayerRow(id: string, behavior: ScrollBehavior): void {
@@ -1444,12 +1593,12 @@ export class EditorApp {
     }
   }
 
-  private moveLayerPreservingPosition(sourceId: string, targetId: string, placement: LayerDropPlacement): void {
+  private moveLayerPreservingPosition(sourceId: string, targetId: string, placement: LayerDropPlacement): boolean {
     const beforeSnapshot = this.createSnapshot();
     const beforeBounds = this.renderer.bounds(sourceId);
     if (!beforeBounds) {
       this.toast("无法测量当前图层位置，未执行移动");
-      return;
+      return false;
     }
     try {
       this.model.apply({ action: "reparentElement", elementId: sourceId, targetId, placement });
@@ -1486,9 +1635,11 @@ export class EditorApp {
       if (this.history.commit(this.createSnapshot(), "Move layer")) this.recordOperation("Move layer", "ui");
       this.renderDocument(true);
       this.revealLayer(sourceId);
+      return true;
     } catch (error) {
       this.restore(beforeSnapshot);
       this.toast(error instanceof Error ? error.message : String(error), true);
+      return false;
     }
   }
 

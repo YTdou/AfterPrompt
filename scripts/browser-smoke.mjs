@@ -898,6 +898,12 @@ async function run() {
     progress("checking Phase 4 presentation workflow");
     await loadExample(page, "deck");
     await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("page 1/3"));
+    assert((await page.locator("[data-activity-view]").count()) === 3, "The activity rail did not expose exactly Layers, Pages, and Fragments.");
+    await page.locator('[data-activity-view="pages"]').click();
+    assert(await page.locator("#pages-context").isVisible() && await page.locator("#layers-context").isHidden(), "Pages did not become the exclusive left-panel context.");
+    await page.locator('[data-activity-view="fragments"]').click();
+    assert(await page.locator("#fragments-context").isVisible(), "Fragments did not become the active left-panel context.");
+    await page.locator('[data-activity-view="pages"]').click();
     assert((await page.locator("#page-select option").count()) === 3, "The bundled deck did not expose three editable pages.");
     assert((await page.locator(".page-thumbnail").count()) === 3, "The page filmstrip did not render three thumbnails.");
     assert((await page.locator("#canvas-width").inputValue()) === "1280", "Deck width was not detected from deck-stage.");
@@ -949,12 +955,12 @@ async function run() {
     assert(canvasWidthAfterInspector >= canvasWidthAfterLayerExpansion + 38, `Shrinking inspector did not release canvas width (${canvasWidthAfterLayerExpansion} -> ${canvasWidthAfterInspector}).`);
 
     const canvasHeightBeforePages = await page.locator("#canvas-viewport").evaluate((element) => element.clientHeight);
-    const pagesHeightBefore = await page.locator("#page-filmstrip").evaluate((element) => element.clientHeight);
+    const pagesHeightBefore = await page.locator(".page-thumbnail").first().evaluate((element) => element.clientHeight);
     await dragBy(page, page.locator('[data-layout-resizer="pages"]'), 0, -24);
-    const pagesHeightAfter = await page.locator("#page-filmstrip").evaluate((element) => element.clientHeight);
+    const pagesHeightAfter = await page.locator(".page-thumbnail").first().evaluate((element) => element.clientHeight);
     const canvasHeightAfterPages = await page.locator("#canvas-viewport").evaluate((element) => element.clientHeight);
-    assert(pagesHeightAfter <= pagesHeightBefore - 16, `PAGES bar did not shrink (${pagesHeightBefore} -> ${pagesHeightAfter}).`);
-    assert(canvasHeightAfterPages >= canvasHeightBeforePages + 16, `Shrinking PAGES did not release canvas height (${canvasHeightBeforePages} -> ${canvasHeightAfterPages}).`);
+    assert(pagesHeightAfter <= pagesHeightBefore - 16, `Page thumbnails did not become denser (${pagesHeightBefore} -> ${pagesHeightAfter}).`);
+    assert(Math.abs(canvasHeightAfterPages - canvasHeightBeforePages) <= 2, `Page density resizing changed canvas height (${canvasHeightBeforePages} -> ${canvasHeightAfterPages}).`);
 
     const buildHeightBefore = await page.locator("#build-panel").evaluate((element) => element.clientHeight);
     const propertiesHeightBefore = await page.locator(".element-properties-panel").evaluate((element) => element.clientHeight);
@@ -979,7 +985,8 @@ async function run() {
     const heightBeforePagesCollapse = await page.locator("#canvas-viewport").evaluate((element) => element.clientHeight);
     await page.locator('[data-layout-toggle="pages"]').click();
     assert(await page.locator(".canvas-panel").evaluate((element) => element.classList.contains("is-pages-collapsed")), "PAGES bar did not enter collapsed state.");
-    assert(await page.locator("#canvas-viewport").evaluate((element) => element.clientHeight) >= heightBeforePagesCollapse + 45, "Collapsed PAGES did not return its height to the canvas.");
+    assert(await page.locator("#page-thumbnails").isHidden(), "Collapsed Pages context did not hide its thumbnail list.");
+    assert(Math.abs(await page.locator("#canvas-viewport").evaluate((element) => element.clientHeight) - heightBeforePagesCollapse) <= 2, "Collapsing the relocated Pages context changed canvas height.");
     await page.locator('[data-layout-toggle="pages"]').click();
     assert(await page.evaluate(() => Boolean(localStorage.getItem("last-mile-studio:layout:v1"))), "Layout preferences were not persisted locally.");
 
@@ -990,7 +997,8 @@ async function run() {
     assert(Math.abs(await page.locator("#inspector-panel").evaluate((element) => element.clientWidth) - persistedLayout.inspectorWidth) <= 2, "Reload did not restore the inspector width.");
     await loadExample(page, "deck");
     await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("page 1/3"));
-    assert(Math.abs(await page.locator("#page-filmstrip").evaluate((element) => element.clientHeight) - persistedLayout.pagesHeight) <= 2, "Reload did not restore the PAGES height.");
+    await page.locator('[data-activity-view="pages"]').click();
+    assert(Math.abs(await page.locator(".page-thumbnail").first().evaluate((element) => element.clientHeight) - persistedLayout.pagesHeight) <= 2, "Reload did not restore the page thumbnail density.");
     assert(Math.abs(await page.locator("#build-panel").evaluate((element) => element.clientHeight) - persistedLayout.buildHeight) <= 2, "Reload did not restore the Build panel height.");
 
     progress("checking Phase A Build state editing and Phase B orchestration");
@@ -1030,6 +1038,7 @@ async function run() {
     await page.waitForFunction(() => document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="demo-copy-1"]')?.getAttribute("data-build") === "1");
     await page.locator("#undo").click();
     await page.waitForFunction(() => document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="demo-copy-1"]')?.getAttribute("data-build") === "2");
+    await page.locator('[data-activity-view="layers"]').click();
     await page.locator('[data-layer-id="demo-kicker-1"]').click();
     await page.locator('[data-build-action="split-selected"]').click();
     await page.waitForFunction(() => document.querySelectorAll(".build-group[data-build-group]").length === 3);
@@ -1062,6 +1071,7 @@ async function run() {
     await page.locator("#redo").click();
     assert((await page.locator(".cm-content").innerText()).includes("Build 2 edited copy"), "Redo did not restore the Build-state text edit in source.");
 
+    await page.locator('[data-activity-view="pages"]').click();
     const thumbnailText = await page.locator('[data-thumbnail-host="1"]').evaluate((host) => host.shadowRoot?.textContent ?? "");
     assert(thumbnailText.includes("Refine the message"), "The second thumbnail is not a real DOM preview of page two.");
     const secondThumbnailPreview = await page.locator('[data-page-id="demo-page-2"] .page-thumbnail-preview').boundingBox();
@@ -1154,6 +1164,7 @@ async function run() {
     assert((await page.locator(".page-thumbnail").count()) === 5, "The second import did not preserve an edit made after the first round trip.");
 
     progress("checking document-root to group multiselection controls");
+    await page.locator('[data-activity-view="layers"]').click();
     if (await page.locator(".studio-shell").evaluate((element) => element.classList.contains("is-code-collapsed"))) {
       await page.locator("#toggle-code").click();
       await page.waitForFunction(() => !document.querySelector(".studio-shell")?.classList.contains("is-code-collapsed"));
