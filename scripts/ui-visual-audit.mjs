@@ -145,6 +145,7 @@ const scenarioSetups = {
   async deck(page) {
     await settle(page);
     await loadExample(page, "deck");
+    await page.locator('[data-activity-view="pages"]').click();
     await page.locator("#page-filmstrip").waitFor({ state: "visible" });
     await settle(page);
   },
@@ -152,8 +153,9 @@ const scenarioSetups = {
   async "deck-collapsed"(page) {
     await settle(page);
     await loadExample(page, "deck");
+    await page.locator('[data-activity-view="pages"]').click();
     await page.locator("#page-filmstrip").waitFor({ state: "visible" });
-    for (const region of ["layers", "inspector", "pages"]) {
+    for (const region of ["layers", "inspector"]) {
       await page.locator(`[data-layout-toggle="${region}"]`).click();
     }
     await settle(page);

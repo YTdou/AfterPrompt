@@ -26,8 +26,8 @@ const LIMITS = {
 } as const;
 
 const DEFAULT_STATE: LayoutState = {
-  layersWidth: 250,
-  inspectorWidth: 286,
+  layersWidth: 240,
+  inspectorWidth: 288,
   pagesHeight: 124,
   buildHeight: 300,
   layersCollapsed: false,
@@ -117,8 +117,15 @@ export class EditorLayoutController {
       ? "is-resizing-columns"
       : "is-resizing-rows");
 
+    const startY = event.clientY;
+    const initialPagesHeight = this.state.pagesHeight;
     const move = (moveEvent: PointerEvent): void => {
-      this.resizeFromPointer(region, moveEvent.clientX, moveEvent.clientY);
+      if (region === "pages") {
+        this.state.pagesCollapsed = false;
+        this.state.pagesHeight = clamp(initialPagesHeight + moveEvent.clientY - startY, LIMITS.pages.min, LIMITS.pages.max);
+      } else {
+        this.resizeFromPointer(region, moveEvent.clientX, moveEvent.clientY);
+      }
       this.apply(region);
     };
     const finish = (): void => {
@@ -136,15 +143,16 @@ export class EditorLayoutController {
   private resizeFromPointer(region: LayoutRegion, clientX: number, clientY: number): void {
     const workspace = this.get<HTMLElement>(".workspace");
     const workspaceRect = workspace.getBoundingClientRect();
+    const railWidth = this.get<HTMLElement>(".activity-rail").clientWidth;
     if (region === "layers") {
       this.state.layersCollapsed = false;
       const inspectorWidth = this.state.inspectorCollapsed ? COLLAPSED_RAIL : this.state.inspectorWidth;
-      const max = Math.min(LIMITS.layers.max, workspaceRect.width - inspectorWidth - MIN_CANVAS_WIDTH);
-      this.state.layersWidth = clamp(clientX - workspaceRect.left, LIMITS.layers.min, max);
+      const max = Math.min(LIMITS.layers.max, workspaceRect.width - railWidth - inspectorWidth - MIN_CANVAS_WIDTH);
+      this.state.layersWidth = clamp(clientX - workspaceRect.left - railWidth, LIMITS.layers.min, max);
     } else if (region === "inspector") {
       this.state.inspectorCollapsed = false;
       const layersWidth = this.state.layersCollapsed ? COLLAPSED_RAIL : this.state.layersWidth;
-      const max = Math.min(LIMITS.inspector.max, workspaceRect.width - layersWidth - MIN_CANVAS_WIDTH);
+      const max = Math.min(LIMITS.inspector.max, workspaceRect.width - railWidth - layersWidth - MIN_CANVAS_WIDTH);
       this.state.inspectorWidth = clamp(workspaceRect.right - clientX, LIMITS.inspector.min, max);
     } else if (region === "pages") {
       this.state.pagesCollapsed = false;
@@ -173,14 +181,16 @@ export class EditorLayoutController {
     if (region === "layers" && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
       this.state.layersCollapsed = false;
       const workspaceWidth = this.get<HTMLElement>(".workspace").clientWidth;
+      const railWidth = this.get<HTMLElement>(".activity-rail").clientWidth;
       const inspectorWidth = this.state.inspectorCollapsed ? COLLAPSED_RAIL : this.state.inspectorWidth;
-      const max = Math.min(LIMITS.layers.max, workspaceWidth - inspectorWidth - MIN_CANVAS_WIDTH);
+      const max = Math.min(LIMITS.layers.max, workspaceWidth - railWidth - inspectorWidth - MIN_CANVAS_WIDTH);
       this.state.layersWidth = clamp(this.state.layersWidth + delta, LIMITS.layers.min, max);
     } else if (region === "inspector" && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
       this.state.inspectorCollapsed = false;
       const workspaceWidth = this.get<HTMLElement>(".workspace").clientWidth;
+      const railWidth = this.get<HTMLElement>(".activity-rail").clientWidth;
       const layersWidth = this.state.layersCollapsed ? COLLAPSED_RAIL : this.state.layersWidth;
-      const max = Math.min(LIMITS.inspector.max, workspaceWidth - layersWidth - MIN_CANVAS_WIDTH);
+      const max = Math.min(LIMITS.inspector.max, workspaceWidth - railWidth - layersWidth - MIN_CANVAS_WIDTH);
       this.state.inspectorWidth = clamp(this.state.inspectorWidth - delta, LIMITS.inspector.min, max);
     } else if (region === "pages" && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
       this.state.pagesCollapsed = false;
@@ -201,17 +211,19 @@ export class EditorLayoutController {
     const workspace = this.get<HTMLElement>(".workspace");
     const canvasPanel = this.get<HTMLElement>(".canvas-panel");
     const inspector = this.get<HTMLElement>(".inspector-panel");
+    const pagesPanel = this.get<HTMLElement>("#page-filmstrip");
     const layersWidth = this.state.layersCollapsed ? COLLAPSED_RAIL : this.state.layersWidth;
     const inspectorWidth = this.state.inspectorCollapsed ? COLLAPSED_RAIL : this.state.inspectorWidth;
     const pagesHeight = this.state.pagesCollapsed ? COLLAPSED_RAIL : this.state.pagesHeight;
 
     workspace.style.setProperty("--layers-panel-width", `${layersWidth}px`);
     workspace.style.setProperty("--inspector-panel-width", `${inspectorWidth}px`);
-    canvasPanel.style.setProperty("--pages-panel-height", `${pagesHeight}px`);
+    pagesPanel.style.setProperty("--pages-panel-height", `${pagesHeight}px`);
     inspector.style.setProperty("--build-panel-height", `${this.state.buildHeight}px`);
     workspace.classList.toggle("is-layers-collapsed", this.state.layersCollapsed);
     workspace.classList.toggle("is-inspector-collapsed", this.state.inspectorCollapsed);
     canvasPanel.classList.toggle("is-pages-collapsed", this.state.pagesCollapsed);
+    pagesPanel.classList.toggle("is-collapsed", this.state.pagesCollapsed);
 
     this.updateToggle("layers", this.state.layersCollapsed, this.state.layersCollapsed ? "›" : "‹");
     this.updateToggle("inspector", this.state.inspectorCollapsed, this.state.inspectorCollapsed ? "‹" : "›");
