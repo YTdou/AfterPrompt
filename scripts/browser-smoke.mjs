@@ -553,12 +553,56 @@ async function run() {
     await page.keyboard.press("Escape");
     assert(!(await page.locator("#import-menu").getAttribute("open")), "Escape did not close the import menu.");
 
+    progress("checking rapid application clipboard ordering with empty and stale storage");
+    const rapidCopyPaste = async (layerId) => {
+      await page.locator(`[data-layer-id="${layerId}"]`).click();
+      const sourceText = (await shadowText(page, layerId))?.replace(/\s+/g, " ").trim() ?? "";
+      await page.keyboard.press("Control+C");
+      await page.keyboard.press("Control+V");
+      let pastedId = "";
+      try {
+        await page.waitForFunction(() => {
+          const selected = document.querySelector("#selection-status")?.textContent?.split(/\s+/)[0] ?? "";
+          return selected.startsWith("clipboard-");
+        }, undefined, { timeout: 1200 });
+        pastedId = (await page.locator("#selection-status").textContent())?.split(/\s+/)[0] ?? "";
+      } catch {
+        await chooseIoAction(page, "#import-menu", "#open-temporary-clipboard-action");
+        await page.locator('.fragment-card[data-fragment-id^="clipboard-"]').first().waitFor();
+        await page.locator("#fragment-library-close").click();
+      }
+      const pastedText = pastedId
+        ? (await shadowText(page, pastedId))?.replace(/\s+/g, " ").trim() ?? ""
+        : "";
+      if (pastedId) {
+        await page.locator("#undo").click();
+        await page.waitForFunction((id) => !document.querySelector("#canvas-host")?.shadowRoot?.querySelector(`[data-editor-id="${id}"]`), pastedId);
+      }
+      return { sourceText, pastedId, pastedText };
+    };
+    const emptyRapidPaste = await rapidCopyPaste("title-001");
+    const staleRapidPaste = await rapidCopyPaste("takeaway-001");
+    assert(
+      Boolean(emptyRapidPaste.pastedId) && Boolean(staleRapidPaste.pastedId) &&
+        emptyRapidPaste.pastedText === emptyRapidPaste.sourceText && staleRapidPaste.pastedText === staleRapidPaste.sourceText,
+      `Rapid application C/V did not preserve command order: ${JSON.stringify({ emptyRapidPaste, staleRapidPaste })}`,
+    );
+
     await page.locator('[data-layer-id="title-001"]').click();
+    const titleClipboardName = await page.evaluate(() => {
+      const title = document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="title-001"]');
+      return title?.getAttribute("data-editor-name")?.trim()
+        || title?.textContent?.replace(/\s+/g, " ").trim().slice(0, 42)
+        || "title-001";
+    });
     await page.keyboard.press("Control+C");
-    await page.waitForFunction(() => document.querySelector("#toast")?.textContent?.includes("临时片段剪贴板"));
+    await page.waitForFunction((expectedName) => {
+      const text = document.querySelector("#toast")?.textContent ?? "";
+      return text.includes("临时片段剪贴板") && text.includes(expectedName);
+    }, titleClipboardName);
     await chooseIoAction(page, "#import-menu", "#open-temporary-clipboard-action");
     await page.locator("#fragment-library-dialog").waitFor({ state: "visible" });
-    const clipboardCard = page.locator('.fragment-card[data-fragment-id^="clipboard-"]').first();
+    const clipboardCard = page.locator('.fragment-card[data-fragment-id^="clipboard-"]').filter({ hasText: titleClipboardName }).first();
     await clipboardCard.waitFor();
     assert((await page.locator("#fragment-storage-status").textContent())?.includes("临时片段剪贴板"), "The clipboard manager did not open in temporary mode.");
     assert(await page.locator('#fragment-save-target option[value="clipboard"]').count() === 0, "The explicit IndexedDB save target is still present.");
@@ -1183,6 +1227,7 @@ async function run() {
       panelCollapseReclaimsCanvas: true,
       persistentLayoutPreferences: true,
       consolidatedImportExportMenus: true,
+      rapidClipboardCommandOrdering: true,
       clipboardKeyboardPasteOffset: true,
       visualFragmentPackage: true,
       visualFragmentLibraryPreview: true,

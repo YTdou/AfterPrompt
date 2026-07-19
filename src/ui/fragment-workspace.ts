@@ -216,6 +216,7 @@ export class FragmentWorkspace {
   private importMode: "insert" | "library" = "insert";
   private clipboardRecordKey = "";
   private pasteSequence = 0;
+  private clipboardCommandQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly host: HTMLElement, private readonly callbacks: FragmentWorkspaceCallbacks) {
     host.insertAdjacentHTML("beforeend", fragmentUi);
@@ -277,8 +278,22 @@ export class FragmentWorkspace {
     this.get<HTMLInputElement>("#fragment-import-input").click();
   }
 
-  async copySelectionToClipboard(): Promise<void> {
+  copySelectionToClipboard(): Promise<void> {
     const context = this.callbacks.getContext();
+    return this.enqueueClipboardCommand(() => this.copySelectionToClipboardNow(context));
+  }
+
+  pasteLatestClipboard(): Promise<void> {
+    return this.enqueueClipboardCommand(() => this.pasteLatestClipboardNow());
+  }
+
+  private enqueueClipboardCommand(command: () => Promise<void>): Promise<void> {
+    const queued = this.clipboardCommandQueue.then(command);
+    this.clipboardCommandQueue = queued.catch(() => undefined);
+    return queued;
+  }
+
+  private async copySelectionToClipboardNow(context: FragmentWorkspaceContext): Promise<void> {
     if (!context.selectionItems.length) {
       this.callbacks.toast("请先选择要复制的元素或元素组", true);
       return;
@@ -312,7 +327,7 @@ export class FragmentWorkspace {
     }
   }
 
-  async pasteLatestClipboard(): Promise<void> {
+  private async pasteLatestClipboardNow(): Promise<void> {
     try {
       const record = await this.browserLibrary.latestRecord();
       if (!record) {
