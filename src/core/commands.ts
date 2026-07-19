@@ -1,5 +1,6 @@
 import { assignFreshIds, createUniqueEditorId, getElementByEditorId, isEditableElement } from "./ids";
 import { insertIntoComponentSlot, refreshClonedFragmentInstances, unlinkComponentInstance, updateComponentProperties } from "./fragments/component";
+import { detectPresentationPages } from "./presentation-projection";
 import type {
   Bounds,
   CanvasSize,
@@ -14,6 +15,10 @@ import type {
 } from "./types";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
+const HTML_CONTAINER_TAGS = new Set([
+  "body", "div", "section", "main", "article", "aside", "header", "footer", "nav",
+  "figure", "figcaption", "ul", "ol", "li", "table", "thead", "tbody", "tfoot", "tr", "td", "th",
+]);
 function elementKind(element: Element, fallback: DocumentKind): DocumentKind {
   return element.namespaceURI === SVG_NS ? "svg" : fallback;
 }
@@ -184,7 +189,11 @@ function setImageSource(element: Element, source: string): void {
 
 export function applyElementChanges(element: Element, kind: DocumentKind, changes: ElementChanges): void {
   if (changes.text !== undefined) element.textContent = changes.text;
-  if (changes.name !== undefined) element.setAttribute("data-editor-name", changes.name);
+  if (changes.name !== undefined) {
+    const name = changes.name.trim();
+    if (name) element.setAttribute("data-editor-name", name);
+    else element.removeAttribute("data-editor-name");
+  }
   if (changes.className !== undefined) element.setAttribute("class", changes.className);
   if (changes.visible !== undefined) setElementVisible(element, kind, changes.visible);
   if (changes.locked !== undefined) setElementLocked(element, changes.locked);
@@ -201,9 +210,17 @@ export function applyElementChanges(element: Element, kind: DocumentKind, change
   if (changes.backgroundColor !== undefined) style.backgroundColor = changes.backgroundColor;
   if (changes.fill !== undefined) kind === "svg" ? element.setAttribute("fill", changes.fill) : (style.backgroundColor = changes.fill);
   if (changes.stroke !== undefined) kind === "svg" ? element.setAttribute("stroke", changes.stroke) : (style.borderColor = changes.stroke);
-  if (changes.strokeWidth !== undefined) kind === "svg"
-    ? element.setAttribute("stroke-width", String(changes.strokeWidth))
-    : (style.borderWidth = cssValue(changes.strokeWidth, "px"));
+  if (changes.strokeWidth !== undefined) {
+    if (kind === "svg") {
+      element.setAttribute("stroke-width", String(changes.strokeWidth));
+    } else {
+      const width = typeof changes.strokeWidth === "number" ? changes.strokeWidth : Number.parseFloat(changes.strokeWidth);
+      style.borderWidth = cssValue(changes.strokeWidth, "px");
+      if (Number.isFinite(width) && width > 0 && (!style.borderStyle || ["none", "hidden"].includes(style.borderStyle))) {
+        style.borderStyle = "solid";
+      }
+    }
+  }
   if (changes.opacity !== undefined) style.opacity = String(Math.min(1, Math.max(0, changes.opacity)));
   if (changes.borderRadius !== undefined) style.borderRadius = cssValue(changes.borderRadius, "px");
   if (changes.boxShadow !== undefined) style.boxShadow = changes.boxShadow;
@@ -312,6 +329,90 @@ export function reorderElement(element: Element, direction: "up" | "down" | "fro
   else if (direction === "down" && element.previousElementSibling) element.previousElementSibling.before(element);
 }
 
+function editableParent(element: Element): Element | null {
+  return element.parentElement?.closest("[data-editor-id]") ?? null;
+}
+
+function canContainEditableChildren(element: Element, kind: DocumentKind): boolean {
+  const editorType = element.getAttribute("data-editor-type");
+  if (editorType === "container" || editorType === "group") return true;
+  if (element.namespaceURI === SVG_NS || kind === "svg") return ["svg", "g", "symbol", "a"].includes(element.localName);
+  return HTML_CONTAINER_TAGS.has(element.localName) || element.localName.includes("-");
+}
+
+function resolveReparentElement(
+  document: Document,
+  kind: DocumentKind,
+  elementId: string,
+  targetId: string,
+  placement: "before" | "inside" | "after",
+): { element: Element; target: Element; destinationParent: Element; parentId: string } {
+  const element = getElementByEditorId(document, elementId);
+  const target = getElementByEditorId(document, targetId);
+  if (!element) throw new Error(`Element not found: ${elementId}`);
+  if (!target) throw new Error(`Layer target not found: ${targetId}`);
+  if (element === document.body || element === document.documentElement || detectPresentationPages(document, kind).pages.includes(element)) {
+    throw new Error("The document or page root cannot be moved.");
+  }
+  if (element === target || element.contains(target)) throw new Error("An element cannot be moved into itself or its descendants.");
+
+  const sourceParent = editableParent(element);
+  if (!sourceParent) throw new Error(`Element has no editable parent: ${elementId}`);
+  if (sourceParent.getAttribute("data-editor-locked") === "true") throw new Error(`Source parent is locked: ${sourceParent.getAttribute("data-editor-id") ?? sourceParent.localName}`);
+
+  let destinationParent: Element | null = null;
+  if (placement === "inside") {
+    if (editableParent(target) !== sourceParent) throw new Error("A layer can only be indented into one of its current siblings.");
+    if (!canContainEditableChildren(target, kind)) throw new Error(`Target cannot contain editable children: ${targetId}`);
+    destinationParent = target;
+  } else {
+    destinationParent = editableParent(target);
+    const sameParentMove = destinationParent === sourceParent;
+    const oneLevelOutdent = target === sourceParent && editableParent(sourceParent) === destinationParent;
+    if (!sameParentMove && !oneLevelOutdent) {
+      throw new Error("A layer move can change hierarchy by at most one level; use multiple moves for another branch.");
+    }
+  }
+  if (!destinationParent) throw new Error(`Layer target has no editable parent: ${targetId}`);
+  if (destinationParent.getAttribute("data-editor-locked") === "true") {
+    throw new Error(`Destination parent is locked: ${destinationParent.getAttribute("data-editor-id") ?? destinationParent.localName}`);
+  }
+  return {
+    element,
+    target,
+    destinationParent,
+    parentId: destinationParent.getAttribute("data-editor-id") ?? "",
+  };
+}
+
+export function validateReparentElement(
+  document: Document,
+  kind: DocumentKind,
+  elementId: string,
+  targetId: string,
+  placement: "before" | "inside" | "after",
+): { parentId: string; placement: "before" | "inside" | "after" } {
+  const resolved = resolveReparentElement(document, kind, elementId, targetId, placement);
+  return { parentId: resolved.parentId, placement };
+}
+
+export function reparentElement(
+  document: Document,
+  kind: DocumentKind,
+  elementId: string,
+  targetId: string,
+  placement: "before" | "inside" | "after",
+): { parentId: string; placement: "before" | "inside" | "after" } {
+  const { element, target, destinationParent } = resolveReparentElement(document, kind, elementId, targetId, placement);
+
+  if (placement === "inside") target.append(element);
+  else if (placement === "before") target.before(element);
+  else target.after(element);
+
+  const parentId = editableParent(element)?.getAttribute("data-editor-id") ?? destinationParent.getAttribute("data-editor-id") ?? "";
+  return { parentId, placement };
+}
+
 type ElementEditorCommand = Exclude<EditorCommand,
   | { action: "setElementBuild" }
   | { action: "moveBuildGroup" }
@@ -341,6 +442,10 @@ export function applyEditorCommand(document: Document, kind: DocumentKind, comma
   if (command.action === "unlinkComponentInstance") {
     unlinkComponentInstance(document, command.elementId);
     return { action: command.action, elementId: command.elementId };
+  }
+  if (command.action === "reparentElement") {
+    const result = reparentElement(document, kind, command.elementId, command.targetId, command.placement);
+    return { action: command.action, elementId: command.elementId, ...result };
   }
 
   const element = getElementByEditorId(document, command.elementId);

@@ -22,7 +22,6 @@ import type {
   VisualFragmentType,
 } from "../core/fragments/types";
 import { downloadBlob, downloadText, type ProjectAssets } from "../core/project";
-import type { NewElementSpec } from "../core/types";
 
 export interface FragmentWorkspaceContext {
   model: SourceDocument;
@@ -262,14 +261,11 @@ export class FragmentWorkspace {
       this.get(selector).addEventListener(selector === "#fragment-search" ? "input" : "change", () => void this.renderLibrary());
     }
     this.get("#fragment-library-results").addEventListener("click", (event) => void this.handleLibraryAction(event));
-    this.host.addEventListener("change", (event) => this.handleInstancePropertyChange(event));
-    this.host.addEventListener("click", (event) => void this.handleInstanceAction(event));
   }
 
   refreshSelection(): void {
     const context = this.callbacks.getContext();
     this.get<HTMLButtonElement>("#fragment-library-save-selection").disabled = context.selectedIds.length === 0;
-    this.renderInstanceInspector();
   }
 
   openSelectionExport(): void {
@@ -1034,112 +1030,4 @@ export class FragmentWorkspace {
     }
   }
 
-  private renderInstanceInspector(): void {
-    this.host.querySelector("#fragment-instance-inspector")?.remove();
-    const context = this.callbacks.getContext();
-    if (context.selectedIds.length !== 1) return;
-    const selected = context.model.find(context.selectedIds[0]!);
-    const root = selected?.hasAttribute("data-vfrag-root") ? selected : selected?.closest("[data-vfrag-root]");
-    const inspector = this.host.querySelector("#inspector-content");
-    const rootId = root?.getAttribute("data-editor-id");
-    if (!root || !rootId || !inspector) return;
-    let properties: VisualFragmentProperty[] = [];
-    let slots: VisualFragmentSlot[] = [];
-    try { properties = JSON.parse(root.getAttribute("data-vfrag-property-schema") ?? "[]") as VisualFragmentProperty[]; } catch { /* shown as no properties */ }
-    try { slots = JSON.parse(root.getAttribute("data-vfrag-slot-schema") ?? "[]") as VisualFragmentSlot[]; } catch { /* shown as no slots */ }
-    const readValue = (property: VisualFragmentProperty): string | boolean => {
-      const target = allElements(root).find((element) => element.getAttribute("data-vfrag-node-key") === property.target);
-      if (!target) return "";
-      if (property.binding.kind === "text") return target.textContent ?? "";
-      if (property.binding.kind === "attribute") return property.type === "boolean" ? target.hasAttribute(property.binding.name) : target.getAttribute(property.binding.name) ?? "";
-      return (target as HTMLElement | SVGElement).style.getPropertyValue(property.binding.name);
-    };
-    const fields = properties.map((property) => {
-      const value = readValue(property);
-      if (property.type === "boolean") return `<label class="checkbox"><input type="checkbox" data-fragment-property="${escapeHtml(property.name)}" data-fragment-root-id="${escapeHtml(rootId)}"${value ? " checked" : ""} />${escapeHtml(property.label)}</label>`;
-      if (property.type === "enum") return `<label class="field"><span>${escapeHtml(property.label)}</span><select data-fragment-property="${escapeHtml(property.name)}" data-fragment-root-id="${escapeHtml(rootId)}">${property.options?.map((option) => `<option${option === value ? " selected" : ""}>${escapeHtml(option)}</option>`).join("")}</select></label>`;
-      const type = property.type === "number" || property.type === "size" ? "number" : property.type === "color" ? "color" : "text";
-      return `<label class="field"><span>${escapeHtml(property.label)}</span><input type="${type}" data-fragment-property="${escapeHtml(property.name)}" data-fragment-root-id="${escapeHtml(rootId)}" value="${escapeHtml(String(value))}" /></label>`;
-    }).join("");
-    const slotControls = slots.map((slot) => {
-      const supported = slot.allowedElementTypes.length ? slot.allowedElementTypes : ["text", "image", "rect", "circle", "group", "container"];
-      return `<div class="fragment-slot-control" data-fragment-slot-control>
-        <strong>${escapeHtml(slot.label)}</strong>
-        <select data-fragment-slot-type>${supported.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`).join("")}</select>
-        <input data-fragment-slot-value placeholder="文字、图片 URL 或颜色" />
-        <button data-fragment-instance-action="insert-slot" data-fragment-slot="${escapeHtml(slot.name)}" data-fragment-root-id="${escapeHtml(rootId)}">插入</button>
-      </div>`;
-    }).join("");
-    inspector.insertAdjacentHTML("afterbegin", `<section id="fragment-instance-inspector" class="inspector-section fragment-instance-inspector">
-      <div class="section-title-row"><h3>组件实例</h3><span>${escapeHtml(root.getAttribute("data-vfrag-linked") === "true" ? "关联" : "独立")}</span></div>
-      <small>${escapeHtml(root.getAttribute("data-vfrag-definition-id") ?? "")} @ ${escapeHtml(root.getAttribute("data-vfrag-definition-version") ?? "")}</small>
-      ${fields || "<p>此片段没有暴露组件属性。</p>"}
-      ${slotControls ? `<div class="fragment-slot-controls"><h4>内容插槽</h4>${slotControls}</div>` : ""}
-      <div class="fragment-instance-actions"><button data-fragment-instance-action="sync" data-fragment-root-id="${escapeHtml(rootId)}">同步最新版</button><button data-fragment-instance-action="unlink" data-fragment-root-id="${escapeHtml(rootId)}"${root.getAttribute("data-vfrag-linked") === "true" ? "" : " disabled"}>解除关联</button></div>
-    </section>`);
-  }
-
-  private handleInstancePropertyChange(event: Event): void {
-    const input = (event.target as Element).closest<HTMLInputElement | HTMLSelectElement>("[data-fragment-property][data-fragment-root-id]");
-    if (!input?.dataset.fragmentProperty || !input.dataset.fragmentRootId) return;
-    const value = input instanceof HTMLInputElement && input.type === "checkbox" ? input.checked
-      : input instanceof HTMLInputElement && input.type === "number" ? Number(input.value)
-        : input.value;
-    const context = this.callbacks.getContext();
-    this.callbacks.commit(`Update component property ${input.dataset.fragmentProperty}`, () => {
-      context.model.apply({ action: "updateComponentProperties", elementId: input.dataset.fragmentRootId!, properties: { [input.dataset.fragmentProperty!]: value } });
-      return [input.dataset.fragmentRootId!];
-    });
-  }
-
-  private async handleInstanceAction(event: Event): Promise<void> {
-    const button = (event.target as Element).closest<HTMLButtonElement>("[data-fragment-instance-action][data-fragment-root-id]");
-    if (!button?.dataset.fragmentRootId) return;
-    const context = this.callbacks.getContext();
-    const root = context.model.find(button.dataset.fragmentRootId);
-    if (!root) return;
-    if (button.dataset.fragmentInstanceAction === "insert-slot") {
-      const control = button.closest<HTMLElement>("[data-fragment-slot-control]");
-      const slot = button.dataset.fragmentSlot;
-      const requestedType = control?.querySelector<HTMLSelectElement>("[data-fragment-slot-type]")?.value;
-      const value = control?.querySelector<HTMLInputElement>("[data-fragment-slot-value]")?.value ?? "";
-      if (!slot || !requestedType) return;
-      const textTags = new Set(["text", "span", "p", "label", "button", "h1", "h2", "h3", "h4", "h5", "h6", "li", "tspan"]);
-      const type: NewElementSpec["type"] = textTags.has(requestedType) ? "text"
-        : ["image", "img"].includes(requestedType) ? "image"
-          : requestedType === "rect" ? "rect"
-            : requestedType === "circle" ? "circle"
-              : requestedType === "group" || requestedType === "g" ? "group" : "container";
-      const element: NewElementSpec = {
-        type,
-        ...(requestedType !== type ? { tag: requestedType } : {}),
-        ...(type === "text" ? { text: value || "New content" } : {}),
-        ...(type === "image" ? { src: value, width: 160, height: 90 } : {}),
-        ...(type === "rect" || type === "circle" ? { fill: value || "#5b8cff", width: 120, height: 80 } : {}),
-        x: 0,
-        y: 0,
-      };
-      this.callbacks.commit(`Insert into component slot ${slot}`, () => {
-        const result = context.model.apply({ action: "insertIntoComponentSlot", elementId: button.dataset.fragmentRootId!, slot, element });
-        return result.createdId ? [result.createdId] : [button.dataset.fragmentRootId!];
-      });
-      return;
-    }
-    if (button.dataset.fragmentInstanceAction === "unlink") {
-      this.callbacks.commit("Unlink component instance", () => {
-        context.model.apply({ action: "unlinkComponentInstance", elementId: button.dataset.fragmentRootId! });
-        return [button.dataset.fragmentRootId!];
-      });
-      return;
-    }
-    const definitionId = root.getAttribute("data-vfrag-definition-id");
-    if (!definitionId) return;
-    try {
-      const fragment = await this.library.get(definitionId);
-      if (!fragment) throw new Error(`本地库中没有组件定义：${definitionId}`);
-      this.syncInstances(fragment);
-    } catch (error) {
-      this.callbacks.toast(error instanceof Error ? error.message : String(error), true);
-    }
-  }
 }

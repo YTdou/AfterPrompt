@@ -74,12 +74,16 @@ async function run() {
   try {
     const editor = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
     await editor.goto(baseUrl, { waitUntil: "networkidle" });
-    await editor.locator("#file-input").setInputFiles("problem/0713_0913.html");
+    const fixturePath = "problem/old/0713_0913.html";
+    await editor.locator("#file-input").setInputFiles(fixturePath);
     await editor.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("page 1/23"), null, { timeout: 40_000 });
     await editor.evaluate(() => document.fonts.ready);
     const typographyState = await editor.locator("#canvas-host").evaluate((host) => ({
       attribute: host.getAttribute("data-lms-deterministic-font"),
-      hasRule: Array.from(host.shadowRoot.querySelectorAll("style")).some((style) => style.textContent.includes("LMS Inter")),
+      hasRule: [
+        ...Array.from(host.shadowRoot.querySelectorAll("style"), (style) => style.textContent ?? ""),
+        ...Array.from(host.shadowRoot.adoptedStyleSheets ?? [], (sheet) => Array.from(sheet.cssRules, (rule) => rule.cssText).join("\n")),
+      ].some((css) => css.includes("LMS Inter")),
       rootFont: getComputedStyle(host.shadowRoot.querySelector("body")).fontFamily,
     }));
     assert(typographyState.attribute === "inter" && typographyState.hasRule, `Editor deterministic typography was not installed: ${JSON.stringify(typographyState)}`);
@@ -93,7 +97,7 @@ async function run() {
     await editor.close();
 
     const exported = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
-    await exported.goto(`file://${process.cwd()}/problem/0713_0913.html`, { waitUntil: "load", timeout: 40_000 });
+    await exported.goto(`file://${process.cwd()}/${fixturePath}`, { waitUntil: "load", timeout: 40_000 });
     await exported.evaluate(() => document.fonts.ready);
     const exportSnapshots = [];
     for (let index = 0; index < 23; index += 1) {

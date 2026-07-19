@@ -56,6 +56,51 @@ describe("SourceDocument", () => {
     expect(model.serialize()).toContain("data-editor-id=\"title-001\"");
   });
 
+  it("trims explicit layer names and clears an empty display name", () => {
+    const model = SourceDocument.parse(slideSource, "ai-slide.html");
+    model.apply({ action: "updateElement", elementId: "title-001", changes: { name: "  Main title  " } });
+    expect(model.find("title-001")?.getAttribute("data-editor-name")).toBe("Main title");
+    model.apply({ action: "updateElement", elementId: "title-001", changes: { name: "   " } });
+    expect(model.find("title-001")?.hasAttribute("data-editor-name")).toBe(false);
+  });
+
+  it("supports only same-parent sorting, one-level indent, and one-level outdent", () => {
+    const model = SourceDocument.parse(`<!doctype html><html><body>
+      <section data-editor-id="page-root">
+        <div data-editor-id="group-a"><span data-editor-id="a-child">A</span></div>
+        <div data-editor-id="group-b"><span data-editor-id="b-child">B</span></div>
+        <div data-editor-id="group-c">C</div>
+        <span data-editor-id="leaf-root">Leaf</span>
+      </section>
+    </body></html>`, "layers.html");
+
+    model.apply({ action: "reparentElement", elementId: "group-c", targetId: "group-a", placement: "before" });
+    expect(Array.from(model.find("page-root")!.children, (child) => child.getAttribute("data-editor-id"))).toEqual(["group-c", "group-a", "group-b", "leaf-root"]);
+
+    const indent = model.apply({ action: "reparentElement", elementId: "group-c", targetId: "group-a", placement: "inside" });
+    expect(indent).toMatchObject({ parentId: "group-a", placement: "inside" });
+    expect(model.find("group-c")?.parentElement).toBe(model.find("group-a"));
+
+    const outdent = model.apply({ action: "reparentElement", elementId: "group-c", targetId: "group-a", placement: "after" });
+    expect(outdent).toMatchObject({ parentId: "page-root", placement: "after" });
+    expect(Array.from(model.find("page-root")!.children, (child) => child.getAttribute("data-editor-id"))).toEqual(["group-a", "group-c", "group-b", "leaf-root"]);
+
+    expect(() => model.apply({ action: "reparentElement", elementId: "a-child", targetId: "group-b", placement: "inside" })).toThrow(/current siblings/i);
+    expect(() => model.apply({ action: "reparentElement", elementId: "group-a", targetId: "a-child", placement: "inside" })).toThrow(/itself or its descendants/i);
+    expect(() => model.apply({ action: "reparentElement", elementId: "group-c", targetId: "leaf-root", placement: "inside" })).toThrow(/cannot contain/i);
+  });
+
+  it("protects roots and locked source or destination parents during layer moves", () => {
+    const model = SourceDocument.parse(`<!doctype html><html><body><deck-stage>
+      <section data-editor-id="page-one"><div data-editor-id="locked-parent" data-editor-locked="true"><span data-editor-id="locked-child">Locked</span></div></section>
+      <section data-editor-id="page-two"><div data-editor-id="other">Other</div></section>
+    </deck-stage></body></html>`, "locked-layers.html");
+
+    expect(() => model.apply({ action: "reparentElement", elementId: "page-one", targetId: "page-two", placement: "before" })).toThrow(/page root/i);
+    expect(() => model.apply({ action: "reparentElement", elementId: "locked-child", targetId: "locked-parent", placement: "after" })).toThrow(/source parent is locked/i);
+    expect(() => model.apply({ action: "reparentElement", elementId: "other", targetId: "locked-parent", placement: "inside" })).toThrow(/current siblings|destination parent is locked/i);
+  });
+
   it("reserves authored IDs before filling earlier gaps and repairs explicit duplicates deterministically", () => {
     const model = SourceDocument.parse(`<!doctype html><html><body>
       <div class="generated-first"><span data-editor-id="span-001">First</span></div>
