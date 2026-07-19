@@ -151,6 +151,7 @@ export type EditorCommand =
   | { action: "setVisibility"; elementId: string; visible: boolean }
   | { action: "setLocked"; elementId: string; locked: boolean }
   | { action: "reorderElement"; elementId: string; direction: "up" | "down" | "front" | "back" }
+  | { action: "reparentElement"; elementId: string; targetId: string; placement: "before" | "inside" | "after" }
   | { action: "setElementBuild"; elementIds: string[]; step: number | null }
   | { action: "moveBuildGroup"; pageId: string; fromStep: number; toStep: number }
   | { action: "mergeBuildGroups"; pageId: string; sourceStep: number; targetStep: number }
@@ -160,6 +161,8 @@ export interface CommandResult {
   action: EditorCommand["action"];
   elementId: string;
   createdId?: string;
+  parentId?: string;
+  placement?: "before" | "inside" | "after";
 }
 
 export interface DocumentSnapshot {

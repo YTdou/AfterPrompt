@@ -27,8 +27,9 @@ function canUseNativeSize(element: Element, kind: DocumentKind): boolean {
 }
 
 export class TransformController {
-  readonly moveable: Moveable;
+  moveable: Moveable;
   private selectedIds: string[] = [];
+  private moveableIsGroup = false;
   private kind: DocumentKind = "html";
   private dragGesture: { startX: number; startY: number; activated: boolean } | null = null;
   private readonly dragThresholdPx = 4;
@@ -43,14 +44,25 @@ export class TransformController {
     private readonly renderer: CanvasRenderer,
     private readonly callbacks: TransformCallbacks,
   ) {
-    this.moveable = new Moveable(this.container, {
-      target: null,
+    this.moveable = this.createMoveable();
+    this.installEvents();
+    this.container.addEventListener("mousedown", this.beginMoveableTargetDrag, { capture: true });
+    this.container.addEventListener("pointerdown", this.beginGenericSvgResize, { capture: true });
+  }
+
+  private createMoveable(
+    target: HTMLElement | SVGElement | Array<HTMLElement | SVGElement> | null = null,
+  ): Moveable {
+    const singleTarget = target && !Array.isArray(target) ? target : null;
+    const isGroup = Array.isArray(target) && target.length > 1;
+    return new Moveable(this.container, {
+      target,
       draggable: true,
       edgeDraggable: true,
-      dragArea: false,
+      dragArea: isGroup || Boolean(singleTarget?.hasAttribute("data-vfrag-root")),
       passDragArea: false,
-      resizable: true,
-      rotatable: true,
+      resizable: !isGroup,
+      rotatable: !isGroup,
       scalable: false,
       keepRatio: false,
       origin: false,
@@ -62,9 +74,16 @@ export class TransformController {
       throttleResize: 0,
       throttleRotate: 0,
     });
+  }
+
+  private replaceMoveable(target: HTMLElement | SVGElement | Array<HTMLElement | SVGElement> | null): void {
+    const zoom = this.moveable.zoom;
+    const keepRatio = this.moveable.keepRatio;
+    this.moveable.destroy();
+    this.moveable = this.createMoveable(target);
+    this.moveable.zoom = zoom;
+    this.moveable.keepRatio = keepRatio;
     this.installEvents();
-    this.container.addEventListener("mousedown", this.beginMoveableTargetDrag, { capture: true });
-    this.container.addEventListener("pointerdown", this.beginGenericSvgResize, { capture: true });
   }
 
   setDocumentKind(kind: DocumentKind): void {
@@ -78,22 +97,35 @@ export class TransformController {
       .filter((element): element is HTMLElement | SVGElement => Boolean(element))
       .filter((element) => element.getAttribute("data-editor-locked") !== "true");
     if (targets.length === 0) {
-      this.moveable.setState({ target: null }, () => this.moveable.updateRect());
+      if (this.moveableIsGroup) this.replaceMoveable(null);
+      else this.moveable.setState({ target: null });
+      this.moveableIsGroup = false;
       return;
     }
     const singleTarget = targets.length === 1 ? targets[0]! : null;
-    this.moveable.setState({
-      target: singleTarget ?? targets,
-      resizable: Boolean(singleTarget),
-      scalable: false,
-      rotatable: Boolean(singleTarget),
-      // A fragment root usually contains editable descendants that otherwise
-      // win hit testing before Moveable can start a drag. While the root is
-      // selected, give it an explicit drag surface; descendants remain
-      // reachable through the layer tree and child-navigation controls.
-      dragArea: Boolean(singleTarget?.hasAttribute("data-vfrag-root")),
-      passDragArea: false,
-    }, () => this.moveable.updateRect());
+    const nextIsGroup = targets.length > 1;
+    const applySelection = (): void => {
+      this.moveable.setState({
+        target: singleTarget ?? targets,
+        resizable: Boolean(singleTarget),
+        scalable: false,
+        rotatable: Boolean(singleTarget),
+        // A fragment root usually contains editable descendants that otherwise
+        // win hit testing before Moveable can start a drag. While the root is
+        // selected, give it an explicit drag surface; descendants remain
+        // reachable through the layer tree and child-navigation controls.
+        // MoveableGroup uses its drag area as the group's synthetic target.
+        dragArea: !singleTarget || singleTarget.hasAttribute("data-vfrag-root"),
+        passDragArea: false,
+      });
+    };
+    // Moveable 0.53 does not fully unmount the previous manager when its target
+    // changes directly between a single element and a group. Construct the
+    // replacement with its final target so Moveable selects the correct manager
+    // on the first render instead of exercising that transition via setState().
+    if (this.moveableIsGroup !== nextIsGroup) this.replaceMoveable(singleTarget ?? targets);
+    else applySelection();
+    this.moveableIsGroup = nextIsGroup;
   }
 
   setZoom(zoom: number): void {

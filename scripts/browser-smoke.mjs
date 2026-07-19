@@ -70,6 +70,27 @@ async function dragBy(page, locator, deltaX, deltaY) {
   await page.mouse.up();
 }
 
+async function dragLayerTo(page, sourceId, targetId, placement) {
+  const source = page.locator(`[data-layer-drag-handle="${sourceId}"]`);
+  const target = page.locator(`[data-layer-id="${targetId}"]`);
+  await source.scrollIntoViewIfNeeded();
+  await target.scrollIntoViewIfNeeded();
+  const sourceBox = await source.boundingBox();
+  const targetBox = await target.boundingBox();
+  assert(sourceBox && targetBox, `Layer drag bounds are missing for ${sourceId} -> ${targetId}.`);
+  const start = { x: sourceBox.x + sourceBox.width / 2, y: sourceBox.y + sourceBox.height / 2 };
+  const ratio = placement === "before" ? 0.12 : placement === "after" ? 0.88 : 0.5;
+  const end = { x: targetBox.x + targetBox.width / 2, y: targetBox.y + targetBox.height * ratio };
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(start.x + 8, start.y + 2, { steps: 2 });
+  await page.mouse.move(end.x, end.y, { steps: 8 });
+  await page.waitForTimeout(80);
+  const feedbackClass = await target.getAttribute("class");
+  await page.mouse.up();
+  return feedbackClass ?? "";
+}
+
 async function openFragmentMore(card) {
   const details = card.locator(".fragment-card-actions details");
   if (!(await details.getAttribute("open"))) await details.locator("summary").click();
@@ -169,6 +190,113 @@ async function run() {
     assert(viewportHeightCollapsed >= viewportHeightExpanded + 180, `Default collapsed source bar did not release canvas height (${viewportHeightExpanded} -> ${viewportHeightCollapsed}).`);
     assert((await page.locator("#toggle-code").textContent()) === "收起源码", "Expanded source bar does not expose the expected collapse action.");
     assert(await page.locator("#apply-code").isVisible(), "Source editing actions did not return after expansion.");
+
+    progress("checking bidirectional layer reveal, rename, collapse, and one-level structure drag");
+    const fillerLayersBefore = Array.from({ length: 14 }, (_, index) => `<div data-editor-id="filler-${index}" style="display:none">Filler ${index}</div>`).join("");
+    const fillerLayersAfter = Array.from({ length: 16 }, (_, index) => `<div data-editor-id="filler-${index + 14}" style="display:none">Filler ${index + 14}</div>`).join("");
+    const layerSource = `<!doctype html><html><body data-editor-canvas-width="1280" data-editor-canvas-height="720" style="position:relative;margin:0">
+      <section data-editor-id="stage" style="position:relative;width:1280px;height:720px">
+        <div data-editor-id="group-a" style="position:absolute;left:80px;top:80px;width:300px;height:220px;background:#eef3ff">
+          <div data-editor-id="move-me" style="position:absolute;left:20px;top:30px;width:100px;height:60px;background:#315efb;color:white">Move me</div>
+        </div>
+        <div data-editor-id="group-b" style="position:absolute;left:500px;top:80px;width:300px;height:220px;background:#f4f0ff"></div>
+        <div data-editor-id="loose" style="position:absolute;left:700px;top:500px;width:120px;height:70px;background:#ffb85c">Loose</div>
+        ${fillerLayersBefore}
+        <div data-editor-id="group-c" style="position:absolute;left:900px;top:80px;width:260px;height:180px;background:#eefbf4">
+          <div data-editor-id="center-me" style="position:absolute;left:20px;top:20px;width:110px;height:55px;background:#36a269;color:white">Center me</div>
+        </div>
+        ${fillerLayersAfter}
+      </section>
+    </body></html>`;
+    await page.locator(".cm-content").fill(layerSource);
+    await page.locator("#apply-code").click();
+    await page.locator('[data-layer-id="filler-29"]').waitFor();
+    assert(await page.locator('[data-layer-action="parent"],[data-layer-action="duplicate"],[data-layer-action="delete"]').count() === 0, "Redundant parent, duplicate, or delete layer buttons remain visible.");
+
+    await page.locator('[data-layer-toggle="group-c"]').click();
+    assert((await page.locator('[data-layer-id="group-c"]').getAttribute("aria-expanded")) === "false", "Layer branch did not collapse.");
+    await page.locator("#layers-tree").evaluate((tree) => { tree.scrollTop = tree.scrollHeight; });
+    await page.locator('#canvas-host [data-editor-id="center-me"]').click();
+    await page.waitForFunction(() => document.querySelector("#selection-status")?.textContent?.startsWith("center-me"));
+    await page.waitForTimeout(800);
+    const revealState = await page.evaluate(() => {
+      const tree = document.querySelector("#layers-tree");
+      const row = document.querySelector('[data-layer-id="center-me"]');
+      const parent = document.querySelector('[data-layer-id="group-c"]');
+      if (!(tree instanceof HTMLElement) || !(row instanceof HTMLElement) || !(parent instanceof HTMLElement)) return null;
+      const treeRect = tree.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      return {
+        expanded: parent.getAttribute("aria-expanded"),
+        selected: row.classList.contains("is-selected"),
+        centerDelta: Math.abs((rowRect.top + rowRect.bottom) / 2 - (treeRect.top + treeRect.bottom) / 2),
+        scrollTop: tree.scrollTop,
+      };
+    });
+    assert(revealState?.expanded === "true" && revealState.selected && revealState.centerDelta < 36,
+      `Canvas selection did not expand and center its layer row (${JSON.stringify(revealState)}).`);
+
+    await page.keyboard.press("F2");
+    const layerNameInput = page.locator('[data-layer-name="center-me"] .layer-name-input');
+    await layerNameInput.waitFor();
+    await layerNameInput.fill("Renamed layer");
+    await layerNameInput.press("Enter");
+    await page.waitForFunction(() => document.querySelector('[data-layer-name="center-me"]')?.textContent === "Renamed layer");
+    await page.locator("#undo").click();
+    await page.waitForFunction(() => document.querySelector('[data-layer-name="center-me"]')?.textContent === "Center me");
+    await page.locator("#redo").click();
+    await page.waitForFunction(() => document.querySelector('[data-layer-name="center-me"]')?.textContent === "Renamed layer");
+
+    const moveBefore = await page.locator('#canvas-host [data-editor-id="move-me"]').boundingBox();
+    assert(moveBefore, "Layer move source has no visual bounds.");
+    const outdentFeedback = await dragLayerTo(page, "move-me", "group-a", "after");
+    assert(outdentFeedback.includes("is-drop-after"), `Outdent did not show the after insertion line (${outdentFeedback}).`);
+    await page.waitForFunction(() => {
+      const moved = document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="move-me"]');
+      return moved?.parentElement?.closest("[data-editor-id]")?.getAttribute("data-editor-id") === "stage";
+    });
+    const moveAfter = await page.locator('#canvas-host [data-editor-id="move-me"]').boundingBox();
+    assert(moveAfter && Math.abs(moveAfter.x - moveBefore.x) <= 2 && Math.abs(moveAfter.y - moveBefore.y) <= 2 &&
+      Math.abs(moveAfter.width - moveBefore.width) <= 2 && Math.abs(moveAfter.height - moveBefore.height) <= 2,
+    `One-level outdent changed visual geometry (${JSON.stringify(moveBefore)} -> ${JSON.stringify(moveAfter)}).`);
+    await page.locator("#undo").click();
+    await page.waitForFunction(() => {
+      const moved = document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="move-me"]');
+      return moved?.parentElement?.closest("[data-editor-id]")?.getAttribute("data-editor-id") === "group-a";
+    });
+
+    const looseBefore = await page.locator('#canvas-host [data-editor-id="loose"]').boundingBox();
+    assert(looseBefore, "Indent source has no visual bounds.");
+    const indentFeedback = await dragLayerTo(page, "loose", "group-b", "inside");
+    assert(indentFeedback.includes("is-drop-inside"), `Indent did not show the container highlight (${indentFeedback}).`);
+    await page.waitForFunction(() => {
+      const moved = document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="loose"]');
+      return moved?.parentElement?.closest("[data-editor-id]")?.getAttribute("data-editor-id") === "group-b";
+    });
+    const looseAfter = await page.locator('#canvas-host [data-editor-id="loose"]').boundingBox();
+    assert(looseAfter && Math.abs(looseAfter.x - looseBefore.x) <= 2 && Math.abs(looseAfter.y - looseBefore.y) <= 2 &&
+      Math.abs(looseAfter.width - looseBefore.width) <= 2 && Math.abs(looseAfter.height - looseBefore.height) <= 2,
+    `One-level indent changed visual geometry (${JSON.stringify(looseBefore)} -> ${JSON.stringify(looseAfter)}).`);
+    await page.locator("#undo").click();
+    await page.waitForFunction(() => {
+      const moved = document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="loose"]');
+      return moved?.parentElement?.closest("[data-editor-id]")?.getAttribute("data-editor-id") === "stage";
+    });
+    await page.locator("#redo").click();
+    await page.waitForFunction(() => {
+      const moved = document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="loose"]');
+      return moved?.parentElement?.closest("[data-editor-id]")?.getAttribute("data-editor-id") === "group-b";
+    });
+
+    const invalidFeedback = await dragLayerTo(page, "move-me", "group-b", "inside");
+    assert(invalidFeedback.includes("is-drop-invalid"), `A cross-branch move did not show invalid feedback (${invalidFeedback}).`);
+    await page.waitForFunction(() => {
+      const moved = document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="move-me"]');
+      return moved?.parentElement?.closest("[data-editor-id]")?.getAttribute("data-editor-id") === "group-a";
+    });
+
+    await loadExample(page, "html");
+    await page.locator('[data-layer-id="title-001"]').waitFor();
 
     progress("checking direct canvas text editing");
     await page.locator('#canvas-host [data-editor-id="title-001"]').dblclick();
@@ -274,6 +402,54 @@ async function run() {
       const host = document.querySelector("#canvas-host");
       return host?.shadowRoot?.querySelector('[data-editor-id="title-001"]')?.textContent === "Energy-Proportional LLM Inference";
     });
+
+    progress("checking friendly typography, stroke, and shadow controls");
+    const fontSelect = page.locator('[data-prop="fontCatalog"]');
+    const fontChoices = await fontSelect.locator("option").allTextContents();
+    for (const requiredFont of ["Times New Roman", "微软雅黑", "宋体", "楷体"]) {
+      assert(fontChoices.some((choice) => choice.includes(requiredFont)), `Font catalog is missing ${requiredFont}: ${JSON.stringify(fontChoices)}`);
+    }
+    assert(await page.locator('input[data-prop="fontFamily"], input[data-prop="letterSpacing"]').count() === 0, "Font family or letter spacing is still a free-text field.");
+    const letterSpacing = page.locator('select[data-prop="letterSpacing"]');
+    assert((await letterSpacing.locator('option[value="0"]').textContent()) === "0 px", "CSS normal letter spacing was not normalized to a numeric 0 px option.");
+    await letterSpacing.selectOption("1");
+    await page.waitForFunction(() => {
+      const title = document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="title-001"]');
+      return title && getComputedStyle(title).letterSpacing === "1px";
+    });
+
+    await fontSelect.selectOption("times-new-roman");
+    await page.waitForFunction(() => {
+      const status = document.querySelector("[data-font-status]")?.textContent ?? "";
+      return status.includes("实际使用") || status.includes("本机未安装");
+    });
+    const fontStatus = await page.locator("[data-font-status]").textContent();
+    assert(fontStatus?.includes("实际使用") || fontStatus?.includes("本机未安装"), `Font availability status is not explicit: ${fontStatus}`);
+    assert(await page.locator('[data-prop="fontCatalog"] option:checked').evaluate((option) => option.textContent?.includes("本机") || option.textContent?.includes("替代")), "Selected font option does not expose the actual local or fallback font.");
+
+    const strokeWidth = page.locator('[data-prop="strokeWidth"]');
+    await strokeWidth.fill("3");
+    await strokeWidth.press("Tab");
+    await page.waitForFunction(() => {
+      const title = document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="title-001"]');
+      if (!title) return false;
+      const style = getComputedStyle(title);
+      return style.borderTopWidth === "3px" && style.borderTopStyle === "solid";
+    });
+
+    await page.locator('[data-shadow-preset="floating"]').click();
+    await page.waitForFunction(() => {
+      const title = document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="title-001"]');
+      return title && getComputedStyle(title).boxShadow !== "none";
+    });
+    const shadowX = page.locator('[data-shadow-part="x"]');
+    await shadowX.fill("6");
+    await shadowX.press("Tab");
+    await page.waitForFunction(() => {
+      const title = document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="title-001"]');
+      return title && getComputedStyle(title).boxShadow.includes("6px");
+    });
+    assert((await page.locator('[data-shadow-output="x"]').textContent()) === "6 px", "Shadow slider does not expose its numeric value.");
 
     progress("checking inspector parent and child navigation");
     await page.locator('[data-layer-id="accent-block-001"]').click();
@@ -543,21 +719,7 @@ async function run() {
       const root = document.querySelector("#canvas-host")?.shadowRoot?.querySelector(`[data-editor-id="${rootId}"]`);
       return Math.abs(Number(root?.getAttribute("data-editor-translate-x") ?? 0)) > 1;
     }, componentRootId);
-    await page.locator('[data-fragment-property="title"]').fill("Reusable browser title");
-    await page.locator('[data-fragment-property="title"]').press("Tab");
-    await page.waitForFunction(({ definitionId, expected }) => {
-      const host = document.querySelector("#canvas-host");
-      const root = Array.from(host?.shadowRoot?.querySelectorAll("[data-vfrag-definition-id]") ?? [])
-        .find((element) => element.getAttribute("data-vfrag-definition-id") === definitionId);
-      return root?.querySelector('[data-vfrag-node-key="title-001"]')?.textContent === expected;
-    }, { definitionId: fragmentId, expected: "Reusable browser title" });
-    const componentSourceDownloadPromise = page.waitForEvent("download");
-    await exportDocument(page);
-    const componentSourceDownload = await componentSourceDownloadPromise;
-    const componentSourcePath = await componentSourceDownload.path();
-    assert(componentSourcePath, "Component source export did not produce a download path.");
-    const componentSource = await readFile(componentSourcePath, "utf8");
-    assert(componentSource.includes("data-vfrag-property-overrides") && componentSource.includes("Reusable browser title"), "Component property override did not synchronize to exported source code.");
+    assert(await page.locator("#fragment-instance-inspector").count() === 0, "Component instance inspector should not be rendered.");
 
     await chooseIoAction(page, "#import-menu", "#open-local-library-action");
     const originalCard = page.locator(`.fragment-card[data-fragment-id="${fragmentId}"][data-fragment-version="1.0.0"]`);
@@ -572,29 +734,13 @@ async function run() {
     await openFragmentMore(updatedCard);
     await updatedCard.locator('[data-fragment-action="sync"]').click();
     await page.locator("#fragment-library-close").click();
-    await page.waitForFunction(({ definitionId, expected }) => {
-      const host = document.querySelector("#canvas-host");
-      const root = Array.from(host?.shadowRoot?.querySelectorAll("[data-vfrag-definition-id]") ?? [])
-        .find((element) => element.getAttribute("data-vfrag-definition-id") === definitionId);
-      return root?.getAttribute("data-vfrag-definition-version") === "1.0.1" &&
-        root.querySelector('[data-vfrag-node-key="title-001"]')?.textContent === expected;
-    }, { definitionId: fragmentId, expected: "Reusable browser title" });
-    const slotControl = page.locator("[data-fragment-slot-control]").first();
-    await slotControl.locator("[data-fragment-slot-value]").fill(" · inserted slot");
-    await slotControl.locator('[data-fragment-instance-action="insert-slot"]').click();
     await page.waitForFunction((definitionId) => {
       const host = document.querySelector("#canvas-host");
       const root = Array.from(host?.shadowRoot?.querySelectorAll("[data-vfrag-definition-id]") ?? [])
         .find((element) => element.getAttribute("data-vfrag-definition-id") === definitionId);
-      return root?.querySelector('[data-vfrag-node-key="title-001"]')?.textContent?.includes("inserted slot");
+      return root?.getAttribute("data-vfrag-definition-version") === "1.0.1";
     }, fragmentId);
-    await page.locator('[data-fragment-instance-action="unlink"]').click();
-    await page.waitForFunction((definitionId) => {
-      const host = document.querySelector("#canvas-host");
-      const root = Array.from(host?.shadowRoot?.querySelectorAll("[data-vfrag-definition-id]") ?? [])
-        .find((element) => element.getAttribute("data-vfrag-definition-id") === definitionId);
-      return root?.getAttribute("data-vfrag-linked") === "false";
-    }, fragmentId);
+    assert(await page.locator("#fragment-instance-inspector").count() === 0, "Component instance inspector reappeared after definition sync.");
 
     progress("checking direct SVG insertion and directory-backed PNG/JPEG imports");
     const svgBytes = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80"><g id="raw-layer"><rect width="40" height="20" fill="#315efb"/><text x="4" y="50">Raw SVG</text></g></svg>');
@@ -673,6 +819,9 @@ async function run() {
     assert(await page.locator('[data-layer-id="svg-title"]').count() === 1, "SVG layer tree did not load.");
     await page.locator('[data-layer-id="svg-title"]').click();
     assert((await shadowText(page, "svg-title")) === "Editable SVG energy curve", "SVG selection did not map to the native SVG node.");
+    await page.locator('[data-prop="strokeWidth"]').fill("4");
+    await page.locator('[data-prop="strokeWidth"]').press("Tab");
+    await page.waitForFunction(() => document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="svg-title"]')?.getAttribute("stroke-width") === "4");
 
     await page.locator('[data-layer-id="arrow-mark"]').click();
     const scaleHandle = page.locator(".moveable-control-box .moveable-se");
@@ -960,6 +1109,43 @@ async function run() {
     await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("page 1/5"));
     assert((await page.locator(".page-thumbnail").count()) === 5, "The second import did not preserve an edit made after the first round trip.");
 
+    progress("checking document-root to group multiselection controls");
+    if (await page.locator(".studio-shell").evaluate((element) => element.classList.contains("is-code-collapsed"))) {
+      await page.locator("#toggle-code").click();
+      await page.waitForFunction(() => !document.querySelector(".studio-shell")?.classList.contains("is-code-collapsed"));
+    }
+    await page.locator(".cm-content").fill('<!doctype html><html><body><div style="width: 160px; height: 80px;">Minimal</div></body></html>');
+    await page.locator("#apply-code").click();
+    await page.locator('[data-layer-id="document-root"]').waitFor();
+    await page.locator('[data-layer-id="div-001"]').waitFor();
+    await page.locator('[data-layer-id="document-root"]').click();
+    await page.waitForTimeout(100);
+    const singleControlBoxCounts = [await page.locator(".moveable-control-box:visible").count()];
+    const multiselectErrorStart = errors.length;
+    await page.locator('[data-layer-id="div-001"]').click({ modifiers: ["Control"] });
+    await page.waitForTimeout(100);
+    const groupControlBoxCounts = [await page.locator(".moveable-control-box:visible").count()];
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await page.locator('[data-layer-id="div-001"]').click({ modifiers: ["Control"] });
+      await page.waitForFunction(() => document.querySelector("#selection-status")?.textContent?.startsWith("document-root"));
+      await page.waitForTimeout(100);
+      singleControlBoxCounts.push(await page.locator(".moveable-control-box:visible").count());
+      await page.locator('[data-layer-id="div-001"]').click({ modifiers: ["Control"] });
+      await page.waitForFunction(() => document.querySelector("#selection-status")?.textContent === "2 elements selected");
+      await page.waitForTimeout(100);
+      groupControlBoxCounts.push(await page.locator(".moveable-control-box:visible").count());
+    }
+    const multiselectErrors = errors.slice(multiselectErrorStart);
+    const selectedStatus = await page.locator("#selection-status").textContent();
+    const groupDragAreaBox = await page.locator(".moveable-area:visible").boundingBox();
+    assert(
+      multiselectErrors.length === 0 && selectedStatus === "2 elements selected" &&
+        groupControlBoxCounts[0] > 0 && groupControlBoxCounts.every((count) => count === groupControlBoxCounts[0]) &&
+        singleControlBoxCounts[0] > 0 && singleControlBoxCounts.every((count) => count === singleControlBoxCounts[0]) &&
+        Boolean(groupDragAreaBox?.width && groupDragAreaBox.height),
+      `Document-root multiselection did not produce stable group controls (status=${selectedStatus}, single control boxes=${singleControlBoxCounts.join(" -> ")}, group control boxes=${groupControlBoxCounts.join(" -> ")}, drag area=${groupDragAreaBox ? `${groupDragAreaBox.width}x${groupDragAreaBox.height}` : "missing"}, errors=${multiselectErrors.join(" | ") || "none"}).`,
+    );
+
     assert(errors.length === 0, `Browser runtime errors:\n${errors.join("\n")}`);
     process.stdout.write(`${JSON.stringify({
       ok: true,
@@ -969,10 +1155,20 @@ async function run() {
       inspectorToCanvas: true,
       canvasToCode: true,
       undo: true,
+      layerCanvasReverseReveal: true,
+      layerCollapseAndAutoExpand: true,
+      layerInlineRename: true,
+      layerOneLevelDrag: true,
+      layerVisualPositionPreserved: true,
+      layerCrossBranchRejected: true,
       svgSelection: true,
       inlineTextEditing: true,
       inlineTextKeyboardIsolation: true,
       inlineTextApplyCancel: true,
+      fontCatalogAndFallbackStatus: true,
+      numericLetterSpacing: true,
+      visibleHtmlAndSvgStrokeWidth: true,
+      visualShadowControls: true,
       inspectorChildNavigation: true,
       polygonScaling: true,
       staticDeckPages: 4,
@@ -995,8 +1191,7 @@ async function run() {
       visualFragmentPreviewPng: true,
       visualFragmentCompatibilityReport: true,
       visualFragmentLinkedInstance: true,
-      visualFragmentPropertyOverride: true,
-      visualFragmentSlotInsertion: true,
+      visualFragmentInstanceInspectorHidden: true,
       visualFragmentDefinitionSync: true,
       visualFragmentLocalFirstUi: true,
       visualFragmentTemporaryClipboard: true,
@@ -1009,6 +1204,7 @@ async function run() {
       buildOrchestration: true,
       buildUndoRedoContext: true,
       buildFirstPreviewAndExport: true,
+      documentRootGroupMultiselection: true,
     }, null, 2)}\n`);
   } finally {
     await browser.close();

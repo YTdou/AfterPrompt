@@ -6,7 +6,9 @@ coverage/
 exports/
 /reference/
 /.agents/
+.agents/
 /.codex/
+.codex/
 /problem/
 *.log
 .DS_Store

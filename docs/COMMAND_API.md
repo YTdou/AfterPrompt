@@ -149,6 +149,27 @@ SVG `rect`、`image`、`circle` 和 `ellipse` 使用原生几何属性；其他 
 
 `direction` 支持 `up`、`down`、`front`、`back`，只改变同一父节点内的兄弟顺序。
 
+结构化图层移动使用：
+
+```json
+{
+  "action": "reparentElement",
+  "elementId": "detail-card",
+  "targetId": "summary-group",
+  "placement": "inside"
+}
+```
+
+`placement` 支持：
+
+- `before`：插入目标之前；
+- `inside`：成为目标的最后一个子级；
+- `after`：插入目标之后。
+
+该命令只接受三个可审计的元操作：同一父级内排序、缩进到当前同级节点、提升到当前父级旁边。它拒绝一次跳入其他分支、跨页面移动、移动页面或文档根、循环归属、非法容器，以及修改被锁定的源/目标父级。复杂的跨父级调整必须拆成多条命令。
+
+`reparentElement` 表达规范 DOM/SVG 结构变化；图层面板会在同一个 Undo/Redo 事务内基于真实渲染结果追加位置补偿。直接通过 CLI/Codex 调用该命令时，如需保持画布绝对位置，应在结构变化后根据渲染结果显式调用 `moveElementBy`。
+
 锁定元素拒绝除 `setLocked` 之外的命令，以避免 Codex 和用户界面绕过同一保护语义。
 
 ## HTML Slides Build

@@ -31,6 +31,11 @@ export interface InteractiveHtmlResult {
   warnings: string[];
 }
 
+export interface StandaloneSvgResult {
+  svg: string;
+  warnings: string[];
+}
+
 export interface StandaloneSlidesOptions {
   initialPageIndex?: number;
 }
@@ -230,6 +235,24 @@ export function buildInteractiveHtml(model: SourceDocument, assets: ProjectAsset
   }
   upsertPresentationContract(document, projectPresentation(document, "html"));
   return { html: serializeDocument(document, "html"), warnings: Array.from(warnings) };
+}
+
+export function buildStandaloneSvg(model: SourceDocument, assets: ProjectAssets, sourcePath: string): StandaloneSvgResult {
+  if (model.kind !== "svg") throw new Error("Standalone SVG export is available for SVG documents only.");
+  const parser = new DOMParser();
+  const document = parser.parseFromString(model.serialize(), "image/svg+xml");
+  const warnings = new Set(sanitizeDocument(document, "svg"));
+  for (const style of Array.from(document.querySelectorAll("style"))) {
+    style.textContent = rewriteCssAssets(style.textContent ?? "", sourcePath, assets, warnings);
+  }
+  for (const element of Array.from(document.querySelectorAll("*"))) {
+    for (const attribute of ["src", "poster", "href", "xlink:href"]) {
+      rewriteAttributeAsset(element, attribute, sourcePath, assets, warnings);
+    }
+    const inlineStyle = element.getAttribute("style");
+    if (inlineStyle?.includes("url(")) element.setAttribute("style", rewriteCssAssets(inlineStyle, sourcePath, assets, warnings));
+  }
+  return { svg: serializeDocument(document, "svg"), warnings: Array.from(warnings) };
 }
 
 export function buildStandaloneSlides(model: SourceDocument, assets: ProjectAssets, sourcePath: string, options: StandaloneSlidesOptions = {}): StandaloneSlidesResult {

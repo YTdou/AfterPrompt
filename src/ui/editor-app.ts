@@ -11,12 +11,23 @@ import {
   getTransformValues,
   moveElementBy,
   readDeclaredBounds,
+  setElementTranslation,
   setElementLocked,
   setElementVisible,
+  validateReparentElement,
 } from "../core/commands";
 import { snapshotsEqual, SourceDocument } from "../core/document-model";
 import { History } from "../core/history";
-import { buildInteractiveHtml, buildStandaloneSlides } from "../core/presentation";
+import { buildInteractiveHtml, buildStandaloneSlides, buildStandaloneSvg } from "../core/presentation";
+import {
+  FONT_CATALOG,
+  ensureManagedFontFace,
+  fontEntryById,
+  fontEntryForFamily,
+  loadManagedFontAsset,
+  resolveFontAvailability,
+  type FontCatalogEntry,
+} from "../core/font-catalog";
 import {
   createSavedProject,
   downloadBlob,
@@ -27,6 +38,14 @@ import {
   ProjectAssets,
 } from "../core/project";
 import { sanitizeCss } from "../core/sanitizer";
+import {
+  DEFAULT_SHADOW,
+  SHADOW_PRESETS,
+  matchingShadowPreset,
+  parseBoxShadow,
+  serializeBoxShadow,
+  type ShadowValue,
+} from "../core/shadow";
 import type { Bounds, BuildViewMode, DocumentKind, DocumentPage, DocumentSnapshot, ElementTreeNode, OperationLogEntry, PageBuildSequence } from "../core/types";
 import { SourceCodeEditor } from "./code-editor";
 import { FragmentWorkspace, type FragmentWorkspaceContext } from "./fragment-workspace";
@@ -67,6 +86,53 @@ export function colorValue(value: string): string {
   return `#${bytes.map((channel) => channel!.toString(16).padStart(2, "0")).join("")}`;
 }
 
+const LETTER_SPACING_OPTIONS = [-2, -1, 0, 0.5, 1, 2, 4, 8] as const;
+
+function fontCatalogMarkup(currentFamily: string): { html: string; selectedId: string | null } {
+  const selected = fontEntryForFamily(currentFamily);
+  const groups = Array.from(new Set(FONT_CATALOG.map((entry) => entry.group)));
+  const custom = selected ? "" : `<option value="__current__" selected>当前：${escapeHtml(currentFamily)}</option>`;
+  const html = groups.map((group) => `<optgroup label="${escapeHtml(group)}">${FONT_CATALOG
+    .filter((entry) => entry.group === group)
+    .map((entry) => `<option value="${escapeHtml(entry.id)}"${entry.id === selected?.id ? " selected" : ""}>${escapeHtml(entry.label)}</option>`)
+    .join("")}</optgroup>`).join("");
+  return { html: `${custom}${html}`, selectedId: selected?.id ?? null };
+}
+
+function letterSpacingMarkup(value: string): string {
+  const spacing = value === "normal" ? 0 : numeric(value, 0);
+  const known = LETTER_SPACING_OPTIONS.some((option) => option === spacing);
+  const current = known ? "" : `<option value="${spacing}" selected>当前：${spacing} px</option>`;
+  return `${current}${LETTER_SPACING_OPTIONS.map((option) =>
+    `<option value="${option}"${option === spacing ? " selected" : ""}>${option} px</option>`).join("")}`;
+}
+
+function shadowEditorMarkup(computedShadow: string): string {
+  const none = computedShadow === "none" || !computedShadow.trim();
+  const parsed = parseBoxShadow(computedShadow);
+  const complex = !none && !parsed;
+  const value = parsed ?? DEFAULT_SHADOW;
+  const activePreset = none ? "none" : matchingShadowPreset(parsed);
+  const presets = SHADOW_PRESETS.map((preset) => {
+    const preview = serializeBoxShadow(preset.value);
+    return `<button type="button" class="shadow-preset${preset.id === activePreset ? " is-active" : ""}" data-shadow-preset="${preset.id}" style="--shadow-sample:${escapeHtml(preview)}"><span></span><small>${escapeHtml(preset.label)}</small></button>`;
+  }).join("");
+  const control = (part: keyof Pick<ShadowValue, "x" | "y" | "blur" | "spread">, label: string, min: number, max: number) =>
+    `<label class="shadow-control"><span>${label}</span><input type="range" min="${min}" max="${max}" step="1" value="${value[part]}" data-shadow-part="${part}" /><output data-shadow-output="${part}">${value[part]} px</output></label>`;
+  return `<div class="shadow-editor" data-shadow-editor>
+    <div class="shadow-presets">${presets}</div>
+    ${complex ? `<p class="shadow-notice">当前为多层或 inset 阴影；在选择预设前保持原值。</p>` : ""}
+    <div class="shadow-controls">
+      ${control("x", "水平", -32, 32)}
+      ${control("y", "垂直", -32, 32)}
+      ${control("blur", "模糊", 0, 64)}
+      ${control("spread", "扩散", -32, 32)}
+      <label class="shadow-color"><span>颜色</span><input type="color" value="${value.color}" data-shadow-part="color" /><output>${value.color}</output></label>
+      <label class="shadow-control"><span>透明度</span><input type="range" min="0" max="1" step="0.05" value="${value.opacity}" data-shadow-part="opacity" /><output data-shadow-output="opacity">${Math.round(value.opacity * 100)}%</output></label>
+    </div>
+  </div>`;
+}
+
 function fileStem(fileName: string): string {
   return fileName.replace(/\.(?:html?|svg|json)$/i, "") || "document";
 }
@@ -82,6 +148,23 @@ function readFileAsDataUrl(file: File): Promise<string> {
 
 function kindForElement(element: Element, fallback: DocumentKind): DocumentKind {
   return element.namespaceURI === "http://www.w3.org/2000/svg" ? "svg" : fallback;
+}
+
+type LayerDropPlacement = "before" | "inside" | "after";
+
+interface LayerDragState {
+  pointerId: number;
+  sourceId: string;
+  handle: HTMLElement;
+  startX: number;
+  startY: number;
+  clientX: number;
+  clientY: number;
+  active: boolean;
+  targetId?: string;
+  placement?: LayerDropPlacement;
+  valid: boolean;
+  reason?: string;
 }
 
 function exampleAssets(): ProjectAssets {
@@ -161,16 +244,13 @@ const appTemplate = `
           </div>
         </div>
         <div class="layer-actions" aria-label="Layer actions">
-          <button data-layer-action="parent" title="Select parent">父级</button>
-          <button data-layer-action="duplicate" title="Duplicate">复制</button>
           <button data-layer-action="visibility" title="Show or hide">显隐</button>
           <button data-layer-action="lock" title="Lock or unlock">锁定</button>
           <button data-layer-action="down" title="Move backward">↓</button>
           <button data-layer-action="up" title="Move forward">↑</button>
-          <button data-layer-action="delete" class="danger" title="Delete">删除</button>
         </div>
         <div id="layers-tree" class="layers-tree"></div>
-        <div class="panel-footnote">单击或拖拽优先操作子级；Alt 点击或拖拽操作当前父级；Ctrl / Shift 点击可多选。</div>
+        <div class="panel-footnote">画布选中会自动定位。拖动手柄可排序、缩进或提升一级；双击名称或按 F2 重命名。</div>
         <div class="layout-resizer column-resizer" data-layout-resizer="layers" role="separator" aria-orientation="vertical" aria-label="调整图层与结构面板宽度" tabindex="0"></div>
       </aside>
 
@@ -341,6 +421,12 @@ export class EditorApp {
   private buildWarningSignature = "";
   private fragmentCursor = { x: 640, y: 360 };
   private fontRenderToken = 0;
+  private readonly fontChangeTokens = new Map<string, number>();
+  private readonly collapsedLayerIds = new Set<string>();
+  private pendingLayerRevealId: string | null = null;
+  private layerDrag: LayerDragState | null = null;
+  private layerAutoScrollFrame = 0;
+  private layerAutoScrollSpeed = 0;
   private thumbnailObserver: IntersectionObserver | null = null;
   private readonly thumbnailRenderers = new Map<number, CanvasRenderer>();
 
@@ -545,11 +631,33 @@ export class EditorApp {
     });
     buildPanel.addEventListener("drop", (event) => this.handleBuildDrop(event as DragEvent));
 
-    this.get("#layers-tree").addEventListener("click", (event) => {
-      const button = (event.target as Element).closest<HTMLButtonElement>("[data-layer-id]");
-      if (!button?.dataset.layerId) return;
+    const layersTree = this.get("#layers-tree");
+    layersTree.addEventListener("click", (event) => {
+      const toggle = (event.target as Element).closest<HTMLElement>("[data-layer-toggle]");
+      if (toggle?.dataset.layerToggle) {
+        event.preventDefault();
+        event.stopPropagation();
+        const id = toggle.dataset.layerToggle;
+        if (this.collapsedLayerIds.has(id)) this.collapsedLayerIds.delete(id);
+        else this.collapsedLayerIds.add(id);
+        this.renderLayers();
+        return;
+      }
+      const row = (event.target as Element).closest<HTMLElement>("[data-layer-id]");
+      if (!row?.dataset.layerId) return;
       const mouse = event as MouseEvent;
-      this.selectElement(button.dataset.layerId, mouse.ctrlKey || mouse.metaKey || mouse.shiftKey);
+      this.selectElement(row.dataset.layerId, mouse.ctrlKey || mouse.metaKey || mouse.shiftKey, false);
+    });
+    layersTree.addEventListener("dblclick", (event) => {
+      const name = (event.target as Element).closest<HTMLElement>("[data-layer-name]");
+      if (!name?.dataset.layerName) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.startLayerRename(name.dataset.layerName);
+    });
+    layersTree.addEventListener("pointerdown", (event) => this.beginLayerDrag(event as PointerEvent));
+    this.host.querySelector<HTMLElement>('[data-layout-toggle="layers"]')?.addEventListener("click", () => {
+      requestAnimationFrame(() => this.revealLayer(this.pendingLayerRevealId ?? this.selectedIds.at(-1) ?? null, "auto"));
     });
     this.host.querySelectorAll<HTMLElement>("[data-layer-action]").forEach((button) => {
       button.addEventListener("click", () => this.layerAction(button.dataset.layerAction ?? ""));
@@ -557,12 +665,20 @@ export class EditorApp {
     this.get("#add-text").addEventListener("click", () => this.addNewElement("text"));
     this.get("#add-shape").addEventListener("click", () => this.addNewElement("shape"));
 
-    this.get("#inspector-content").addEventListener("change", (event) => this.handleInspectorChange(event));
+    this.get("#inspector-content").addEventListener("input", (event) => {
+      if ((event.target as Element).closest("[data-shadow-part]")) this.previewShadowFromInspector();
+    });
+    this.get("#inspector-content").addEventListener("change", (event) => {
+      if ((event.target as Element).closest("[data-shadow-part]")) this.commitShadowFromInspector();
+      else this.handleInspectorChange(event);
+    });
     this.get("#inspector-content").addEventListener("click", (event) => {
       const action = (event.target as Element).closest<HTMLElement>("[data-inspector-action]")?.dataset.inspectorAction;
       if (action === "replace-image") this.get<HTMLInputElement>("#image-input").click();
       else if (action === "select-parent") this.layerAction("parent");
       else if (action === "select-child") this.layerAction("child");
+      const shadowPreset = (event.target as Element).closest<HTMLElement>("[data-shadow-preset]")?.dataset.shadowPreset;
+      if (shadowPreset) this.applyShadowPreset(shadowPreset);
     });
     this.get("#image-input").addEventListener("change", (event) => void this.replaceImage(event));
 
@@ -1070,21 +1186,310 @@ export class EditorApp {
     }, 4000);
   }
 
-  private renderLayers(): void {
+  private renderLayers(revealId?: string, revealBehavior: ScrollBehavior = "smooth"): void {
+    if (revealId) {
+      let ancestor = this.model.find(revealId)?.parentElement?.closest("[data-editor-id]") ?? null;
+      while (ancestor) {
+        const ancestorId = ancestor.getAttribute("data-editor-id");
+        if (ancestorId) this.collapsedLayerIds.delete(ancestorId);
+        ancestor = ancestor.parentElement?.closest("[data-editor-id]") ?? null;
+      }
+      this.pendingLayerRevealId = revealId;
+    }
+    for (const id of [...this.collapsedLayerIds]) {
+      if (!this.model.find(id)) this.collapsedLayerIds.delete(id);
+    }
     const tree = this.model.treeForPage(this.activePageIndex);
     const renderNode = (node: ElementTreeNode, depth: number): string => {
       const selected = this.selectedIds.includes(node.id) ? " is-selected" : "";
       const icon = node.visible ? (node.locked ? "🔒" : "◇") : "◌";
-      return `<li>
-        <button class="layer-row${selected}" data-layer-id="${escapeHtml(node.id)}" style="--depth:${depth}" title="${escapeHtml(node.id)}">
+      const collapsed = node.children.length > 0 && this.collapsedLayerIds.has(node.id);
+      return `<li data-layer-node="${escapeHtml(node.id)}">
+        <div class="layer-row${selected}" data-layer-id="${escapeHtml(node.id)}" style="--depth:${depth}" title="${escapeHtml(node.id)}" role="treeitem" aria-selected="${selected ? "true" : "false"}"${node.children.length ? ` aria-expanded="${collapsed ? "false" : "true"}"` : ""}>
+          <button type="button" class="layer-disclosure${collapsed ? " is-collapsed" : ""}" data-layer-toggle="${escapeHtml(node.id)}" aria-label="${collapsed ? "展开" : "折叠"} ${escapeHtml(node.name)}"${node.children.length ? "" : " disabled"}>⌄</button>
+          <button type="button" class="layer-drag-handle" data-layer-drag-handle="${escapeHtml(node.id)}" aria-label="拖动 ${escapeHtml(node.name)}" title="拖动以排序、缩进或提升一级"${depth === 0 ? " disabled" : ""}>⠿</button>
           <span class="layer-icon">${icon}</span>
-          <span class="layer-name">${escapeHtml(node.name)}</span>
+          <span class="layer-name" data-layer-name="${escapeHtml(node.id)}">${escapeHtml(node.name)}</span>
           <span class="layer-tag">${escapeHtml(node.tag)}</span>
-        </button>
-        ${node.children.length ? `<ul>${node.children.map((child) => renderNode(child, depth + 1)).join("")}</ul>` : ""}
+        </div>
+        ${node.children.length && !collapsed ? `<ul role="group">${node.children.map((child) => renderNode(child, depth + 1)).join("")}</ul>` : ""}
       </li>`;
     };
-    this.get("#layers-tree").innerHTML = `<ul>${tree.map((node) => renderNode(node, 0)).join("")}</ul>`;
+    this.get("#layers-tree").innerHTML = `<ul role="tree">${tree.map((node) => renderNode(node, 0)).join("")}</ul>`;
+    if (revealId) requestAnimationFrame(() => this.centerLayerRow(revealId, revealBehavior));
+  }
+
+  private centerLayerRow(id: string, behavior: ScrollBehavior): void {
+    const tree = this.get("#layers-tree");
+    if (tree.clientHeight <= 0) return;
+    const row = Array.from(tree.querySelectorAll<HTMLElement>("[data-layer-id]"))
+      .find((candidate) => candidate.dataset.layerId === id);
+    if (!row) return;
+    const treeRect = tree.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    const top = tree.scrollTop + rowRect.top - treeRect.top - (tree.clientHeight - rowRect.height) / 2;
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    tree.scrollTo({ top: Math.max(0, top), behavior: reducedMotion ? "auto" : behavior });
+    this.pendingLayerRevealId = null;
+  }
+
+  private revealLayer(id: string | null, behavior: ScrollBehavior = "smooth"): void {
+    if (!id || !this.model.find(id)) return;
+    this.renderLayers(id, behavior);
+  }
+
+  private startLayerRename(id: string): void {
+    const element = this.model.find(id);
+    if (!element) return;
+    if (element.getAttribute("data-editor-locked") === "true") {
+      this.toast("元素已锁定，请先解锁再重命名");
+      return;
+    }
+    if (this.selectedIds.length !== 1 || this.selectedIds[0] !== id) this.selectElement(id, false, false);
+    const name = Array.from(this.get("#layers-tree").querySelectorAll<HTMLElement>("[data-layer-name]"))
+      .find((candidate) => candidate.dataset.layerName === id);
+    if (!name || name.querySelector("input")) return;
+    const explicitName = element.getAttribute("data-editor-name") ?? "";
+    const initialValue = explicitName || name.textContent || "";
+    const input = document.createElement("input");
+    input.className = "layer-name-input";
+    input.value = initialValue;
+    input.setAttribute("aria-label", `重命名 ${id}`);
+    name.replaceChildren(input);
+    let finished = false;
+    let cancelled = false;
+    const finish = (): void => {
+      if (finished) return;
+      finished = true;
+      const next = input.value.trim();
+      if (cancelled || next === initialValue.trim()) {
+        this.renderLayers(id, "auto");
+        return;
+      }
+      const committed = this.commitMutation("Rename layer", () => this.model.apply({ action: "updateElement", elementId: id, changes: { name: next } }), [id]);
+      if (committed) this.revealLayer(id, "auto");
+    };
+    input.addEventListener("click", (event) => event.stopPropagation());
+    input.addEventListener("dblclick", (event) => event.stopPropagation());
+    input.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+      if (event.key === "Enter") {
+        event.preventDefault();
+        input.blur();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        cancelled = true;
+        input.blur();
+      }
+    });
+    input.addEventListener("blur", finish, { once: true });
+    input.focus();
+    input.select();
+  }
+
+  private beginLayerDrag(event: PointerEvent): void {
+    const handle = (event.target as Element).closest<HTMLElement>("[data-layer-drag-handle]");
+    const sourceId = handle?.dataset.layerDragHandle;
+    if (!handle || !sourceId || handle.matches(":disabled") || event.button !== 0 || !event.isPrimary) return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.layerDrag = {
+      pointerId: event.pointerId,
+      sourceId,
+      handle,
+      startX: event.clientX,
+      startY: event.clientY,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      active: false,
+      valid: false,
+    };
+    handle.setPointerCapture(event.pointerId);
+    const move = (moveEvent: PointerEvent): void => {
+      const drag = this.layerDrag;
+      if (!drag || moveEvent.pointerId !== drag.pointerId) return;
+      drag.clientX = moveEvent.clientX;
+      drag.clientY = moveEvent.clientY;
+      if (!drag.active && Math.hypot(moveEvent.clientX - drag.startX, moveEvent.clientY - drag.startY) >= 5) {
+        drag.active = true;
+        this.get("#layers-tree").classList.add("is-layer-dragging");
+      }
+      if (drag.active) this.updateLayerDrop(moveEvent.clientX, moveEvent.clientY);
+    };
+    const end = (endEvent: PointerEvent): void => {
+      const drag = this.layerDrag;
+      if (!drag || endEvent.pointerId !== drag.pointerId) return;
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", end);
+      handle.removeEventListener("pointercancel", cancel);
+      if (handle.hasPointerCapture(endEvent.pointerId)) handle.releasePointerCapture(endEvent.pointerId);
+      this.stopLayerAutoScroll();
+      this.clearLayerDropFeedback();
+      this.layerDrag = null;
+      if (!drag.active) return;
+      if (!drag.valid || !drag.targetId || !drag.placement) {
+        this.toast(drag.reason ?? "该位置不允许执行图层移动");
+        return;
+      }
+      this.moveLayerPreservingPosition(drag.sourceId, drag.targetId, drag.placement);
+    };
+    const cancel = (cancelEvent: PointerEvent): void => {
+      if (cancelEvent.pointerId !== this.layerDrag?.pointerId) return;
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", end);
+      handle.removeEventListener("pointercancel", cancel);
+      this.stopLayerAutoScroll();
+      this.clearLayerDropFeedback();
+      this.layerDrag = null;
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", end);
+    handle.addEventListener("pointercancel", cancel);
+  }
+
+  private updateLayerDrop(clientX: number, clientY: number, updateAutoScroll = true): void {
+    const drag = this.layerDrag;
+    const tree = this.get("#layers-tree");
+    if (!drag?.active) return;
+    if (updateAutoScroll) this.updateLayerAutoScroll(clientY);
+    this.clearLayerDropFeedback(false);
+    const row = document.elementsFromPoint(clientX, clientY)
+      .map((element) => element.closest<HTMLElement>("[data-layer-id]"))
+      .find((candidate): candidate is HTMLElement => Boolean(candidate && tree.contains(candidate)));
+    if (!row?.dataset.layerId) {
+      drag.valid = false;
+      drag.targetId = undefined;
+      drag.placement = undefined;
+      drag.reason = "请拖到明确的图层行落点";
+      return;
+    }
+    const rect = row.getBoundingClientRect();
+    const ratio = rect.height ? (clientY - rect.top) / rect.height : 0.5;
+    const placement: LayerDropPlacement = ratio < 0.25 ? "before" : ratio > 0.75 ? "after" : "inside";
+    drag.targetId = row.dataset.layerId;
+    drag.placement = placement;
+    try {
+      validateReparentElement(this.model.document, this.model.kind, drag.sourceId, drag.targetId, placement);
+      drag.valid = true;
+      drag.reason = undefined;
+      row.classList.add(`is-drop-${placement}`);
+      row.dataset.layerDropLabel = placement === "inside" ? "作为子级" : placement === "before" ? "插入到前面" : "插入到后面";
+    } catch (error) {
+      drag.valid = false;
+      drag.reason = error instanceof Error ? error.message : String(error);
+      row.classList.add("is-drop-invalid");
+      row.dataset.layerDropLabel = "不可放置";
+    }
+  }
+
+  private clearLayerDropFeedback(removeDragging = true): void {
+    const tree = this.get("#layers-tree");
+    tree.querySelectorAll<HTMLElement>(".is-drop-before,.is-drop-inside,.is-drop-after,.is-drop-invalid").forEach((row) => {
+      row.classList.remove("is-drop-before", "is-drop-inside", "is-drop-after", "is-drop-invalid");
+      delete row.dataset.layerDropLabel;
+    });
+    if (removeDragging) tree.classList.remove("is-layer-dragging");
+  }
+
+  private updateLayerAutoScroll(clientY: number): void {
+    const tree = this.get("#layers-tree");
+    const rect = tree.getBoundingClientRect();
+    const edge = 38;
+    this.layerAutoScrollSpeed = clientY < rect.top + edge
+      ? -Math.max(3, (rect.top + edge - clientY) / 3)
+      : clientY > rect.bottom - edge
+        ? Math.max(3, (clientY - (rect.bottom - edge)) / 3)
+        : 0;
+    if (this.layerAutoScrollSpeed && !this.layerAutoScrollFrame) {
+      const tick = (): void => {
+        const drag = this.layerDrag;
+        if (!drag?.active || !this.layerAutoScrollSpeed) {
+          this.layerAutoScrollFrame = 0;
+          return;
+        }
+        tree.scrollTop += this.layerAutoScrollSpeed;
+        this.updateLayerDrop(drag.clientX, drag.clientY, false);
+        this.layerAutoScrollFrame = requestAnimationFrame(tick);
+      };
+      this.layerAutoScrollFrame = requestAnimationFrame(tick);
+    }
+  }
+
+  private stopLayerAutoScroll(): void {
+    this.layerAutoScrollSpeed = 0;
+    if (this.layerAutoScrollFrame) cancelAnimationFrame(this.layerAutoScrollFrame);
+    this.layerAutoScrollFrame = 0;
+  }
+
+  private layerTranslationBasis(id: string): { xx: number; xy: number; yx: number; yy: number } | null {
+    const preview = this.renderer.element(id);
+    const base = this.renderer.bounds(id);
+    if (!preview || !base) return null;
+    const kind = kindForElement(preview, this.model.kind);
+    const transform = getTransformValues(preview);
+    const styled = preview as HTMLElement | SVGElement;
+    const transition = styled.style.transition;
+    styled.style.transition = "none";
+    try {
+      setElementTranslation(preview, kind, transform.x + 1, transform.y);
+      const x = this.renderer.bounds(id);
+      setElementTranslation(preview, kind, transform.x, transform.y + 1);
+      const y = this.renderer.bounds(id);
+      setElementTranslation(preview, kind, transform.x, transform.y);
+      if (!x || !y) return null;
+      return { xx: x.x - base.x, xy: x.y - base.y, yx: y.x - base.x, yy: y.y - base.y };
+    } finally {
+      setElementTranslation(preview, kind, transform.x, transform.y);
+      styled.style.transition = transition;
+    }
+  }
+
+  private moveLayerPreservingPosition(sourceId: string, targetId: string, placement: LayerDropPlacement): void {
+    const beforeSnapshot = this.createSnapshot();
+    const beforeBounds = this.renderer.bounds(sourceId);
+    if (!beforeBounds) {
+      this.toast("无法测量当前图层位置，未执行移动");
+      return;
+    }
+    try {
+      this.model.apply({ action: "reparentElement", elementId: sourceId, targetId, placement });
+      this.selectedIds = [sourceId];
+      this.renderDocument(false);
+      const movedBounds = this.renderer.bounds(sourceId);
+      if (!movedBounds) throw new Error("换层级后无法测量图层，已回滚");
+      const tolerance = 1;
+      if (Math.abs(movedBounds.width - beforeBounds.width) > tolerance || Math.abs(movedBounds.height - beforeBounds.height) > tolerance) {
+        throw new Error("新父级改变了图层尺寸，无法可靠保持画布外观，已回滚");
+      }
+      const desiredX = beforeBounds.x - movedBounds.x;
+      const desiredY = beforeBounds.y - movedBounds.y;
+      if (Math.abs(desiredX) > tolerance || Math.abs(desiredY) > tolerance) {
+        const basis = this.layerTranslationBasis(sourceId);
+        if (!basis) throw new Error("无法解析新父级坐标系，已回滚");
+        const determinant = basis.xx * basis.yy - basis.yx * basis.xy;
+        if (!Number.isFinite(determinant) || Math.abs(determinant) < 1e-6) throw new Error("新父级坐标系不可逆，已回滚");
+        const dx = (desiredX * basis.yy - basis.yx * desiredY) / determinant;
+        const dy = (basis.xx * desiredY - desiredX * basis.xy) / determinant;
+        if (![dx, dy].every(Number.isFinite) || Math.max(Math.abs(dx), Math.abs(dy)) > 1_000_000) {
+          throw new Error("位置补偿超出安全范围，已回滚");
+        }
+        const element = this.model.find(sourceId);
+        if (!element) throw new Error("移动的图层已不存在，已回滚");
+        moveElementBy(element, kindForElement(element, this.model.kind), dx, dy);
+        this.renderDocument(false);
+      }
+      const finalBounds = this.renderer.bounds(sourceId);
+      if (!finalBounds || Math.abs(finalBounds.x - beforeBounds.x) > tolerance || Math.abs(finalBounds.y - beforeBounds.y) > tolerance ||
+          Math.abs(finalBounds.width - beforeBounds.width) > tolerance || Math.abs(finalBounds.height - beforeBounds.height) > tolerance) {
+        throw new Error("位置补偿未通过 1 px 画布复验，已回滚");
+      }
+      if (this.history.commit(this.createSnapshot(), "Move layer")) this.recordOperation("Move layer", "ui");
+      this.renderDocument(true);
+      this.revealLayer(sourceId);
+    } catch (error) {
+      this.restore(beforeSnapshot);
+      this.toast(error instanceof Error ? error.message : String(error), true);
+    }
   }
 
   private renderInspector(): void {
@@ -1110,6 +1515,7 @@ export class EditorApp {
     const fill = selectedKind === "svg" ? (modelElement.getAttribute("fill") ?? computed.fill) : computed.backgroundColor;
     const stroke = selectedKind === "svg" ? (modelElement.getAttribute("stroke") ?? "#000000") : computed.borderColor;
     const text = isText ? (modelElement.textContent ?? "") : "";
+    const fontCatalog = fontCatalogMarkup(computed.fontFamily);
     const parentId = modelElement.parentElement?.closest("[data-editor-id]")?.getAttribute("data-editor-id") ?? "";
     const childId = modelElement.querySelector("[data-editor-id]")?.getAttribute("data-editor-id") ?? "";
     host.innerHTML = `
@@ -1139,13 +1545,14 @@ export class EditorApp {
         <h3>文本</h3>
         <label class="field stack"><span>内容</span><textarea data-prop="text" rows="4">${escapeHtml(text)}</textarea></label>
         <div class="field-grid two">
-          <label class="field"><span>字体</span><input data-prop="fontFamily" value="${escapeHtml(computed.fontFamily)}" /></label>
+          <label class="field"><span>字体</span><select data-prop="fontCatalog">${fontCatalog.html}</select></label>
           <label class="field"><span>字号</span><input data-prop="fontSize" type="number" min="1" value="${numeric(computed.fontSize, 16)}" /></label>
           <label class="field"><span>字重</span><input data-prop="fontWeight" value="${escapeHtml(computed.fontWeight)}" /></label>
           <label class="field"><span>行高</span><input data-prop="lineHeight" value="${escapeHtml(computed.lineHeight)}" /></label>
-          <label class="field"><span>字间距</span><input data-prop="letterSpacing" value="${escapeHtml(computed.letterSpacing)}" /></label>
+          <label class="field"><span>字间距</span><select data-prop="letterSpacing">${letterSpacingMarkup(computed.letterSpacing)}</select></label>
           <label class="field"><span>对齐</span><select data-prop="textAlign"><option>left</option><option>center</option><option>right</option><option>justify</option></select></label>
         </div>
+        <p class="font-status${fontCatalog.selectedId ? "" : " is-warning"}" data-font-status>${fontCatalog.selectedId ? "正在确认本机字体…" : "自定义字体栈 · 可用性未验证"}</p>
         <label class="field color-field"><span>文字颜色</span><input data-prop="color" type="color" value="${colorValue(computed.color)}" /><input data-prop="color" value="${escapeHtml(computed.color)}" /></label>
       </section>` : ""}
       ${isImage ? `<section class="inspector-section">
@@ -1164,7 +1571,7 @@ export class EditorApp {
           <label class="field"><span>圆角</span><input data-prop="borderRadius" value="${escapeHtml(computed.borderRadius)}" /></label>
           <label class="field"><span>滤镜</span><input data-prop="filter" value="${escapeHtml(computed.filter === "none" ? "" : computed.filter)}" /></label>
         </div>
-        <label class="field stack"><span>阴影</span><input data-prop="boxShadow" value="${escapeHtml(computed.boxShadow === "none" ? "" : computed.boxShadow)}" /></label>
+        <div class="field stack"><span>阴影</span>${shadowEditorMarkup(computed.boxShadow)}</div>
       </section>
       <section class="inspector-section">
         <h3>Inline style</h3>
@@ -1177,9 +1584,13 @@ export class EditorApp {
     if (alignSelect) alignSelect.value = computed.textAlign;
     const objectFit = host.querySelector<HTMLSelectElement>('[data-prop="objectFit"]');
     if (objectFit) objectFit.value = computed.objectFit || "contain";
+    if (fontCatalog.selectedId) {
+      const entry = fontEntryById(fontCatalog.selectedId);
+      if (entry) void this.refreshFontStatus(id, entry);
+    }
   }
 
-  private selectElement(id: string, additive: boolean): void {
+  private selectElement(id: string, additive: boolean, revealInTree = true): void {
     if (!this.model.find(id) || !this.model.elementBelongsToPage(id, this.activePageIndex)) return;
     if (additive) {
       this.selectedIds = this.selectedIds.includes(id) ? this.selectedIds.filter((selected) => selected !== id) : [...this.selectedIds, id];
@@ -1188,7 +1599,7 @@ export class EditorApp {
     }
     this.history.replaceCurrent(this.createSnapshot());
     this.transform.setSelection(this.selectedIds);
-    this.renderLayers();
+    this.renderLayers(revealInTree && this.selectedIds.includes(id) ? id : undefined);
     this.renderInspector();
     this.renderBuildPanel(this.model.buildSequence(this.activePageIndex));
     this.fragments.refreshSelection();
@@ -1215,7 +1626,10 @@ export class EditorApp {
         targetId = hit?.parentElement?.closest("[data-editor-id]")?.getAttribute("data-editor-id") ?? id;
       }
     }
-    if (!options.additive && this.selectedIds.length === 1 && this.selectedIds[0] === targetId) return;
+    if (!options.additive && this.selectedIds.length === 1 && this.selectedIds[0] === targetId) {
+      this.revealLayer(targetId);
+      return;
+    }
     this.selectElement(targetId, options.additive);
   }
 
@@ -1258,6 +1672,7 @@ export class EditorApp {
     this.buildViewMode = snapshot.buildViewMode ?? "playback";
     this.selectedIds = snapshot.selectedIds.filter((id) => Boolean(this.model.find(id)));
     this.renderDocument(true);
+    this.revealLayer(this.selectedIds.at(-1) ?? null, "auto");
   }
 
   private undo(): void {
@@ -1291,6 +1706,8 @@ export class EditorApp {
       this.sourcePath = sourcePath;
       this.operationLog = operations.map((entry) => ({ ...entry, elementIds: [...entry.elementIds] }));
       this.selectedIds = [];
+      this.collapsedLayerIds.clear();
+      this.pendingLayerRevealId = null;
       this.activePageIndex = 0;
       this.buildStepsByPage.clear();
       this.buildViewMode = "playback";
@@ -1306,7 +1723,7 @@ export class EditorApp {
   }
 
   private renderAfterFontsSettle(model: SourceDocument): void {
-    if (model.kind !== "html" || !document.fonts) return;
+    if (!document.fonts) return;
     const token = ++this.fontRenderToken;
     void Promise.race([
       document.fonts.ready,
@@ -1419,12 +1836,127 @@ export class EditorApp {
     });
   }
 
+  private async refreshFontStatus(elementId: string, entry: FontCatalogEntry): Promise<void> {
+    const availability = await resolveFontAvailability(entry);
+    if (this.selectedIds.length !== 1 || this.selectedIds[0] !== elementId) return;
+    const select = this.host.querySelector<HTMLSelectElement>('[data-prop="fontCatalog"]');
+    const status = this.host.querySelector<HTMLElement>("[data-font-status]");
+    if (!select || select.value !== entry.id || !status) return;
+    const option = Array.from(select.options).find((candidate) => candidate.value === entry.id);
+    const fellBack = availability.kind === "bundled" && Boolean(entry.localNames?.length);
+    if (option) option.textContent = fellBack
+      ? `${availability.actualLabel}（替代 ${entry.label}）`
+      : availability.kind === "local" ? `${entry.label}（本机）` : entry.label;
+    status.classList.toggle("is-warning", fellBack);
+    status.textContent = fellBack
+      ? `本机未安装 ${entry.label}，实际使用已内嵌的 ${availability.actualLabel}。`
+      : availability.kind === "local"
+        ? `实际使用：${availability.actualLabel}（本机字体）`
+        : `实际使用：${availability.actualLabel}`;
+  }
+
+  private async applyFontCatalogEntry(elementId: string, entry: FontCatalogEntry): Promise<void> {
+    const requestToken = (this.fontChangeTokens.get(elementId) ?? 0) + 1;
+    this.fontChangeTokens.set(elementId, requestToken);
+    const model = this.model;
+    const sourcePath = this.sourcePath;
+    const status = this.host.querySelector<HTMLElement>("[data-font-status]");
+    if (status) status.textContent = `正在载入 ${entry.label}…`;
+    try {
+      const asset = await loadManagedFontAsset(entry, sourcePath);
+      if (this.fontChangeTokens.get(elementId) !== requestToken || this.model !== model) return;
+      const element = this.model.find(elementId);
+      if (!element) return;
+      if (element.getAttribute("data-editor-locked") === "true") {
+        this.toast("元素已锁定，请先解锁再修改属性");
+        this.renderInspector();
+        return;
+      }
+      const committed = this.commitMutation(`Update font ${entry.label}`, () => {
+        if (asset) this.assets.set(asset);
+        ensureManagedFontFace(this.model, entry);
+        applyElementChanges(element, kindForElement(element, this.model.kind), { fontFamily: entry.cssFamily });
+      });
+      if (committed) this.renderAfterFontsSettle(this.model);
+    } catch (error) {
+      this.toast(error instanceof Error ? error.message : String(error), true);
+      this.renderInspector();
+    }
+  }
+
+  private shadowValueFromInspector(): ShadowValue | null {
+    const editor = this.host.querySelector<HTMLElement>("[data-shadow-editor]");
+    if (!editor) return null;
+    const number = (part: string, fallback: number) => numeric(editor.querySelector<HTMLInputElement>(`[data-shadow-part="${part}"]`)?.value ?? "", fallback);
+    return {
+      x: number("x", DEFAULT_SHADOW.x),
+      y: number("y", DEFAULT_SHADOW.y),
+      blur: number("blur", DEFAULT_SHADOW.blur),
+      spread: number("spread", DEFAULT_SHADOW.spread),
+      color: editor.querySelector<HTMLInputElement>('[data-shadow-part="color"]')?.value ?? DEFAULT_SHADOW.color,
+      opacity: number("opacity", DEFAULT_SHADOW.opacity),
+    };
+  }
+
+  private updateShadowOutputs(value: ShadowValue): void {
+    const editor = this.host.querySelector<HTMLElement>("[data-shadow-editor]");
+    if (!editor) return;
+    for (const part of ["x", "y", "blur", "spread"] as const) {
+      const output = editor.querySelector<HTMLOutputElement>(`[data-shadow-output="${part}"]`);
+      if (output) output.value = `${value[part]} px`;
+    }
+    const opacity = editor.querySelector<HTMLOutputElement>('[data-shadow-output="opacity"]');
+    if (opacity) opacity.value = `${Math.round(value.opacity * 100)}%`;
+    const color = editor.querySelector<HTMLOutputElement>(".shadow-color output");
+    if (color) color.value = value.color;
+  }
+
+  private previewShadowFromInspector(): void {
+    const id = this.selectedIds[0];
+    const value = this.shadowValueFromInspector();
+    const preview = id ? this.renderer.element(id) : null;
+    if (!value || !preview) return;
+    (preview as HTMLElement | SVGElement).style.boxShadow = serializeBoxShadow(value);
+    this.updateShadowOutputs(value);
+    this.host.querySelectorAll("[data-shadow-preset]").forEach((button) => button.classList.remove("is-active"));
+  }
+
+  private commitShadowFromInspector(): void {
+    const id = this.selectedIds[0];
+    const value = this.shadowValueFromInspector();
+    const element = id ? this.model.find(id) : null;
+    if (!id || !value || !element) return;
+    if (element.getAttribute("data-editor-locked") === "true") {
+      this.toast("元素已锁定，请先解锁再修改属性");
+      this.renderInspector();
+      return;
+    }
+    this.commitMutation("Update shadow", () => applyElementChanges(element, kindForElement(element, this.model.kind), { boxShadow: serializeBoxShadow(value) }));
+  }
+
+  private applyShadowPreset(presetId: string): void {
+    const id = this.selectedIds[0];
+    const element = id ? this.model.find(id) : null;
+    const preset = SHADOW_PRESETS.find((candidate) => candidate.id === presetId);
+    if (!element || !preset) return;
+    if (element.getAttribute("data-editor-locked") === "true") {
+      this.toast("元素已锁定，请先解锁再修改属性");
+      return;
+    }
+    this.commitMutation(`Set shadow ${preset.label}`, () => applyElementChanges(element, kindForElement(element, this.model.kind), { boxShadow: serializeBoxShadow(preset.value) }));
+  }
+
   private handleInspectorChange(event: Event): void {
     const input = (event.target as Element).closest<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("[data-prop]");
     const id = this.selectedIds[0];
     if (!input?.dataset.prop || !id) return;
     const prop = input.dataset.prop;
     const value = input.value;
+    if (prop === "fontCatalog") {
+      const entry = fontEntryById(value);
+      if (entry) void this.applyFontCatalogEntry(id, entry);
+      return;
+    }
     const element = this.model.find(id);
     if (!element) return;
     if (element.getAttribute("data-editor-locked") === "true") {
@@ -1434,12 +1966,18 @@ export class EditorApp {
     }
     const bounds = this.renderer.bounds(id) ?? { x: 0, y: 0, width: 0, height: 0 };
     const targetKind = kindForElement(element, this.model.kind);
+    const renderedBorderStyle = targetKind === "html" ? getComputedStyle(this.renderer.element(id)!).borderStyle : "";
     this.commitMutation(`Update ${prop}`, () => {
       if (prop === "x") moveElementBy(element, targetKind, numeric(value) - bounds.x, 0);
       else if (prop === "y") moveElementBy(element, targetKind, 0, numeric(value) - bounds.y);
       else if (prop === "width" || prop === "height") this.model.apply({ action: "updateElement", elementId: id, changes: { [prop]: Math.max(1, numeric(value, 1)) } });
       else if (prop === "rotation") this.model.apply({ action: "rotateElement", elementId: id, angle: numeric(value) });
-      else if (prop === "fontSize" || prop === "opacity" || prop === "strokeWidth") applyElementChanges(element, targetKind, { [prop]: numeric(value) });
+      else if (prop === "fontSize" || prop === "opacity" || prop === "strokeWidth" || prop === "letterSpacing") {
+        if (prop === "strokeWidth" && targetKind === "html" && !["none", "hidden", ""].includes(renderedBorderStyle)) {
+          (element as HTMLElement).style.borderStyle = renderedBorderStyle;
+        }
+        applyElementChanges(element, targetKind, { [prop]: numeric(value) });
+      }
       else if (prop === "inlineStyle") {
         const warnings: string[] = [];
         element.setAttribute("style", sanitizeCss(value, warnings));
@@ -1604,6 +2142,11 @@ export class EditorApp {
       this.closeIoMenus();
       return;
     }
+    if (event.key === "F2" && this.selectedIds.length === 1) {
+      event.preventDefault();
+      this.startLayerRename(this.selectedIds[0]!);
+      return;
+    }
     if (event.altKey && (event.key === "[" || event.key === "]")) {
       event.preventDefault();
       this.changeBuild(event.key === "[" ? -1 : 1);
@@ -1727,9 +2270,15 @@ export class EditorApp {
 
   private exportDocument(): void {
     if (this.model.kind === "svg") {
-      const name = this.model.sourceName.match(/\.svg$/i) ? this.model.sourceName : `${fileStem(this.model.sourceName)}.svg`;
-      downloadText(this.model.serialize(), name, "image/svg+xml");
-      this.toast(`已导出 ${name}`);
+      try {
+        const result = buildStandaloneSvg(this.model, this.assets, this.sourcePath);
+        const name = this.model.sourceName.match(/\.svg$/i) ? this.model.sourceName : `${fileStem(this.model.sourceName)}.svg`;
+        downloadText(result.svg, name, "image/svg+xml");
+        if (result.warnings.length) this.showNotice(result.warnings.join(" "));
+        this.toast(`已导出 ${name}`);
+      } catch (error) {
+        this.toast(error instanceof Error ? error.message : String(error), true);
+      }
       return;
     }
     try {
