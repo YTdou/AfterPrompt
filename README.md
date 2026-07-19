@@ -267,7 +267,8 @@ npm run cli -- fragment-pack photo.jpg --name photo --output /tmp/photo.vfrag
 - [tests/document-model.test.ts](tests/document-model.test.ts)：解析、净化、稳定 ID、HTML/SVG 命令与错误恢复；
 - [tests/presentation.test.ts](tests/presentation.test.ts)：页面操作、资源内嵌、Build-first 状态机、可逆 HTML 往返和播放安全边界；
 - [tests/fragments.test.ts](tests/fragments.test.ts)：Schema、包往返、冲突修复、组件属性/插槽、实例同步和本地库；
-- [scripts/browser-smoke.mjs](scripts/browser-smoke.mjs)：真实浏览器中的基础编辑、页面管理、Build A/B、HotCarbon 真实样本，以及完整 Visual Fragment 保存—插入—修改—升级链路。
+- [scripts/browser-smoke.mjs](scripts/browser-smoke.mjs)：真实浏览器中的基础编辑、页面管理、Build A/B、HotCarbon 真实样本，以及完整 Visual Fragment 保存—插入—修改—升级链路；
+- [scripts/oom-regression-smoke.mjs](scripts/oom-regression-smoke.mjs)：使用受版本控制的确定性 18 页大型夹具，验证惰性缩略图、共享样式表、规范 DOM—画布—`.vfrag` 结构一致性、历史操作、导出尺寸和浏览器堆指标，不依赖被忽略的 `problem/` 本地文件。
 
 ## 项目结构
 

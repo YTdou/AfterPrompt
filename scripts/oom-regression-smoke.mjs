@@ -5,9 +5,9 @@ import process from "node:process";
 import JSZip from "jszip";
 import { JSDOM } from "jsdom";
 import { chromium } from "playwright-core";
+import { buildOomRegressionFixture } from "./oom-regression-fixture.mjs";
 
 const baseUrl = process.env.STUDIO_BASE_URL ?? "http://127.0.0.1:4188";
-const samplePath = process.env.OOM_SAMPLE_PATH ?? "problem/0716_1849.html";
 const executablePath = process.env.CHROME_PATH ?? [
   "/usr/bin/google-chrome",
   "/usr/bin/google-chrome-stable",
@@ -19,6 +19,20 @@ let server;
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+function structure(root) {
+  if (!root) return [];
+  return [root, ...root.querySelectorAll("[data-editor-id]")].map((element) => ({
+    tag: element.localName,
+    id: element.getAttribute("data-editor-id"),
+    parentId: element === root ? null : element.parentElement?.closest("[data-editor-id]")?.getAttribute("data-editor-id") ?? null,
+  }));
+}
+
+function sourceStructure(source, elementId) {
+  const document = new JSDOM(source).window.document;
+  return structure(document.querySelector(`[data-editor-id="${elementId}"]`));
 }
 
 async function chooseIoAction(page, menuId, actionSelector) {
@@ -38,7 +52,12 @@ async function reachable() {
 async function ensureServer() {
   if (await reachable()) return;
   const url = new URL(baseUrl);
-  server = spawn("npm", ["run", "dev", "--", "--host", url.hostname, "--port", url.port, "--strictPort", "--force"], {
+  const npmExecPath = process.env.npm_execpath;
+  const command = npmExecPath ? process.execPath : "npm";
+  const args = npmExecPath
+    ? [npmExecPath, "run", "dev", "--", "--host", url.hostname, "--port", url.port, "--strictPort", "--force"]
+    : ["run", "dev", "--", "--host", url.hostname, "--port", url.port, "--strictPort", "--force"];
+  server = spawn(command, args, {
     cwd: process.cwd(),
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -59,6 +78,7 @@ async function saveAndExportFragment(page, elementId, name) {
     const root = host.shadowRoot?.querySelector(`[data-editor-id="${id}"]`);
     if (!root) return [];
     return [root, ...root.querySelectorAll("[data-editor-id]")].map((element) => ({
+      tag: element.localName,
       id: element.getAttribute("data-editor-id"),
       parentId: element === root ? null : element.parentElement?.closest("[data-editor-id]")?.getAttribute("data-editor-id") ?? null,
     }));
@@ -80,15 +100,7 @@ async function saveAndExportFragment(page, elementId, name) {
   const content = await zip.file(manifest.entry).async("string");
   const styles = await zip.file(manifest.styles).async("string");
   const parsed = new JSDOM(content).window.document;
-  const root = parsed.body.firstElementChild;
-  const packagedStructure = renderedStructure.map(({ id }) => {
-    const element = root?.querySelector(`[data-editor-id="${id}"]`);
-    return {
-      id,
-      found: Boolean(element),
-      parentId: id === elementId ? null : element?.parentElement?.closest("[data-editor-id]")?.getAttribute("data-editor-id") ?? null,
-    };
-  });
+  const packagedStructure = structure(parsed.querySelector(`[data-editor-id="${elementId}"]`));
   return {
     bytes: bytes.byteLength,
     contentBytes: Buffer.byteLength(content),
@@ -101,6 +113,9 @@ async function saveAndExportFragment(page, elementId, name) {
 
 async function run() {
   assert(executablePath, "Chrome/Chromium was not found.");
+  const fixture = buildOomRegressionFixture();
+  const originalBytes = Buffer.byteLength(fixture.source);
+  assert(originalBytes > 8 * 1024 * 1024, `Deterministic OOM fixture is too small: ${originalBytes}.`);
   await ensureServer();
   const browser = await chromium.launch({
     executablePath,
@@ -110,6 +125,10 @@ async function run() {
   const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
   page.setDefaultTimeout(60_000);
   const errors = [];
+  const failures = [];
+  const check = (condition, message) => {
+    if (!condition) failures.push(message);
+  };
   page.on("pageerror", (error) => errors.push(error.stack ?? error.message));
   page.on("console", (message) => {
     if (message.type() === "error" && !message.text().includes("Failed to load resource")) errors.push(message.text());
@@ -119,8 +138,12 @@ async function run() {
 
   try {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator("#file-input").setInputFiles(samplePath);
-    await page.waitForFunction(() => document.querySelector("#page-count")?.textContent?.trim().endsWith("/ 18"));
+    await page.locator("#file-input").setInputFiles({
+      name: fixture.sourceName,
+      mimeType: "text/html",
+      buffer: Buffer.from(fixture.source),
+    });
+    await page.waitForFunction((pageCount) => document.querySelector("#page-count")?.textContent?.trim().endsWith(`/ ${pageCount}`), fixture.pageCount);
     await page.waitForTimeout(1_000);
 
     const rendering = await page.evaluate(() => {
@@ -137,38 +160,45 @@ async function run() {
         mainStyleElements: main?.querySelectorAll(":scope > style").length ?? 0,
       };
     });
-    assert(rendering.pages === 18, `Expected 18 editable pages, got ${rendering.pages}.`);
-    assert(rendering.renderedThumbnails < rendering.pages, `All ${rendering.pages} thumbnails were eagerly rendered.`);
-    assert(rendering.mainSheets > 0 && rendering.sharedSheet, "Canvas and thumbnails did not share constructable stylesheets.");
+    assert(rendering.pages === fixture.pageCount, `Expected ${fixture.pageCount} editable pages, got ${rendering.pages}.`);
+    check(rendering.renderedThumbnails < rendering.pages, `All ${rendering.pages} thumbnails were eagerly rendered.`);
+    check(rendering.mainSheets > 0 && rendering.sharedSheet, "Canvas and thumbnails did not share constructable stylesheets.");
 
     await page.locator("#page-select").selectOption("14");
-    await page.locator('[data-layer-id="div-348"]').waitFor();
-    const div348 = await saveAndExportFragment(page, "div-348", "OOM Div 348");
-    assert(div348.renderedStructure.length === 8, `div-348 rendered node count changed: ${div348.renderedStructure.length}.`);
-    assert(div348.packagedStructure.every((node) => node.found), "div-348 package lost one or more authored layers.");
-    assert(div348.packagedStructure.every((node, index) => node.parentId === div348.renderedStructure[index].parentId),
-      "div-348 package changed an authored parent-child relationship.");
-    assert(div348.styleBytes < 12 * 1024 * 1024, `div-348 styles still exceed 12 MiB: ${div348.styleBytes}.`);
+    await page.locator(`[data-layer-id="${fixture.ids.fragmentRoot}"]`).waitFor();
+    const fragment = await saveAndExportFragment(page, fixture.ids.fragmentRoot, "OOM Structure Fixture");
+    const canonicalFragmentStructure = sourceStructure(fixture.source, fixture.ids.fragmentRoot);
+    check(JSON.stringify(fragment.renderedStructure) === JSON.stringify(canonicalFragmentStructure),
+      "The rendered fragment structure differs from the canonical fixture structure.");
+    check(JSON.stringify(fragment.packagedStructure) === JSON.stringify(canonicalFragmentStructure),
+      "The packaged fragment structure differs from the canonical fixture structure.");
+    check(fragment.styleBytes < 12 * 1024 * 1024, `Fragment styles still exceed 12 MiB: ${fragment.styleBytes}.`);
 
     await page.locator("#page-select").selectOption("17");
-    await page.locator('[data-layer-id="div-298"]').waitFor();
-    const div298 = await saveAndExportFragment(page, "div-298", "OOM Div 298");
-    assert(div298.content.includes("Same α · same predicted latency map"), "div-298 package lost its authored content.");
-    assert(div298.packagedStructure.every((node) => node.found), "div-298 package lost its authored root.");
+    await page.locator(`[data-layer-id="${fixture.ids.copyRoot}"]`).waitFor();
+    const copy = await saveAndExportFragment(page, fixture.ids.copyRoot, "OOM Copy Fixture");
+    const canonicalCopyStructure = sourceStructure(fixture.source, fixture.ids.copyRoot);
+    check(copy.content.includes("Same α · same predicted latency map"), "The copy fragment package lost its authored content.");
+    check(JSON.stringify(copy.renderedStructure) === JSON.stringify(canonicalCopyStructure),
+      "The rendered copy structure differs from the canonical fixture structure.");
+    check(JSON.stringify(copy.packagedStructure) === JSON.stringify(canonicalCopyStructure),
+      "The packaged copy structure differs from the canonical fixture structure.");
 
     await page.locator("#page-select").selectOption("14");
-    await page.locator('[data-layer-id="b-059"]').click();
+    await page.locator(`[data-layer-id="${fixture.ids.editableText}"]`).click();
     for (let index = 0; index < 20; index += 1) {
       const editor = page.locator('textarea[data-prop="text"]');
       await editor.fill(`A800 × Llama ${index}`);
       await editor.press("Tab");
-      await page.waitForFunction((expected) => document.querySelector("#canvas-host")?.shadowRoot
-        ?.querySelector('[data-editor-id="b-059"]')?.textContent === expected, `A800 × Llama ${index}`);
+      await page.waitForFunction(({ id, expected }) => document.querySelector("#canvas-host")?.shadowRoot
+        ?.querySelector(`[data-editor-id="${id}"]`)?.textContent === expected,
+      { id: fixture.ids.editableText, expected: `A800 × Llama ${index}` });
     }
     for (let index = 0; index < 10; index += 1) await page.locator("#undo").click();
     for (let index = 0; index < 10; index += 1) await page.locator("#redo").click();
-    await page.waitForFunction(() => document.querySelector("#canvas-host")?.shadowRoot
-      ?.querySelector('[data-editor-id="b-059"]')?.textContent === "A800 × Llama 19");
+    await page.waitForFunction(({ id, expected }) => document.querySelector("#canvas-host")?.shadowRoot
+      ?.querySelector(`[data-editor-id="${id}"]`)?.textContent === expected,
+    { id: fixture.ids.editableText, expected: "A800 × Llama 19" });
 
     await cdp.send("HeapProfiler.collectGarbage");
     const metrics = await cdp.send("Performance.getMetrics");
@@ -178,20 +208,23 @@ async function run() {
     const exportedPath = await (await downloadPromise).path();
     assert(exportedPath, "Optimized HTML export produced no file.");
     const exportedBytes = (await readFile(exportedPath)).byteLength;
-    assert(exportedBytes < 8 * 1024 * 1024, `In-memory document remains too large: ${exportedBytes}.`);
-    assert(errors.length === 0, `Browser errors occurred:\n${errors.join("\n")}`);
+    check(exportedBytes < 8 * 1024 * 1024, `In-memory document remains too large: ${exportedBytes}.`);
+    check(errors.length === 0, `Browser errors occurred:\n${errors.join("\n")}`);
 
-    process.stdout.write(`${JSON.stringify({
-      ok: true,
-      originalBytes: (await readFile(samplePath)).byteLength,
+    const result = {
+      ok: failures.length === 0,
+      failures,
+      originalBytes,
       exportedBytes,
       rendering,
-      div348: { ...div348, content: undefined },
-      div298: { ...div298, content: undefined },
+      fragment: { ...fragment, content: undefined },
+      copy: { ...copy, content: undefined },
       jsHeapUsedMiB: Number((metric.JSHeapUsedSize / 1024 / 1024).toFixed(2)),
       nodes: metric.Nodes,
       documents: metric.Documents,
-    }, null, 2)}\n`);
+    };
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    assert(failures.length === 0, `Regression checks failed:\n- ${failures.join("\n- ")}`);
   } finally {
     await browser.close();
     if (server) server.kill("SIGTERM");
