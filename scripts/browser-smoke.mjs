@@ -548,10 +548,18 @@ async function run() {
     assert(await page.locator("#import-menu > summary").count() === 1, "The top bar does not expose exactly one import entry.");
     assert(await page.locator("#export-menu > summary").count() === 1, "The top bar does not expose exactly one export entry.");
     assert(await page.locator("#save-fragment, #import-local-fragment, #open-fragment-library, #fragment-toolbar-storage, #export-html").count() === 0, "Legacy top-level import/export or IndexedDB controls are still mounted.");
-    await page.locator("#import-menu > summary").click();
+    const importSummary = page.locator("#import-menu > summary");
+    await importSummary.focus();
+    await page.keyboard.press("ArrowDown");
+    assert(await page.locator("#import-document-action").evaluate((element) => element === document.activeElement), "ArrowDown did not enter the import menu at its first action.");
+    await page.keyboard.press("End");
+    assert(await page.locator('[data-load-example="svg"]').evaluate((element) => element === document.activeElement), "End did not focus the final import action.");
+    await page.keyboard.press("Home");
+    assert(await page.locator("#import-document-action").evaluate((element) => element === document.activeElement), "Home did not return to the first import action.");
     assert(await page.locator("#import-menu .io-menu-panel button").count() === 9, "The import menu lost one or more grouped actions.");
     await page.keyboard.press("Escape");
     assert(!(await page.locator("#import-menu").getAttribute("open")), "Escape did not close the import menu.");
+    assert(await importSummary.evaluate((element) => element === document.activeElement), "Closing the import menu did not restore focus to its trigger.");
 
     progress("checking rapid application clipboard ordering with empty and stale storage");
     const rapidCopyPaste = async (layerId) => {

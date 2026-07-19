@@ -191,6 +191,7 @@ const appTemplate = `
         <details id="import-menu" class="io-menu" data-io-menu>
           <summary class="button primary">导入 <span aria-hidden="true">⌄</span></summary>
           <div class="io-menu-panel" role="menu" aria-label="导入选项">
+            <div class="io-menu-key-hint" aria-hidden="true">↑↓ 浏览 · Home / End 跳转 · Esc 关闭</div>
             <section>
               <span class="io-menu-heading">打开</span>
               <button id="import-document-action" type="button" role="menuitem"><strong>文档文件</strong><small>HTML、SVG 或可编辑项目</small></button>
@@ -220,6 +221,7 @@ const appTemplate = `
         <details id="export-menu" class="io-menu io-menu-end" data-io-menu>
           <summary class="button primary">导出 <span aria-hidden="true">⌄</span></summary>
           <div class="io-menu-panel" role="menu" aria-label="导出选项">
+            <div class="io-menu-key-hint" aria-hidden="true">↑↓ 浏览 · Home / End 跳转 · Esc 关闭</div>
             <section>
               <span class="io-menu-heading">当前内容</span>
               <button id="export-document-action" type="button" role="menuitem"><strong id="export-document-label">导出 HTML</strong><small>可直接打开并重新导入</small></button>
@@ -398,9 +400,9 @@ const appTemplate = `
     <section id="code-drawer" class="code-drawer is-collapsed">
       <div class="code-toolbar">
         <div>
-          <span class="eyebrow">SOURCE</span>
-          <strong id="code-file-name">untitled.html</strong>
-          <span id="code-error" class="code-error"></span>
+          <span class="source-identity"><span class="eyebrow">SOURCE</span><strong id="code-file-name">untitled.html</strong></span>
+          <span class="source-draft-note">草稿 · 仅“应用代码”后更新画布</span>
+          <span id="code-error" class="code-error" role="alert"></span>
         </div>
         <div class="toolbar">
           <button id="locate-code">定位选中元素</button>
@@ -417,10 +419,11 @@ const appTemplate = `
     <input id="directory-input" type="file" webkitdirectory multiple hidden />
     <input id="image-input" type="file" accept="image/*" hidden />
 
-    <dialog id="paste-dialog" class="paste-dialog">
+    <dialog id="paste-dialog" class="paste-dialog studio-dialog" aria-labelledby="paste-dialog-title">
       <form method="dialog">
-        <div class="dialog-heading"><h2>粘贴 HTML 或 SVG</h2><button value="cancel" aria-label="Close">×</button></div>
-        <textarea id="paste-editor" spellcheck="false" placeholder="Paste HTML or SVG source here..."></textarea>
+        <div class="dialog-heading"><div><span class="eyebrow">REPLACE DOCUMENT</span><h2 id="paste-dialog-title">粘贴 HTML 或 SVG</h2></div><button value="cancel" aria-label="关闭粘贴源码对话框">×</button></div>
+        <p id="paste-dialog-note" class="dialog-purpose-note">载入成功后替换当前文档；解析失败时保留上一个有效画布。</p>
+        <textarea id="paste-editor" name="source" autocomplete="off" aria-describedby="paste-dialog-note" aria-label="HTML 或 SVG 源码" spellcheck="false" placeholder="在此粘贴 HTML 或 SVG 源码"></textarea>
         <div class="dialog-actions"><button value="cancel">取消</button><button id="apply-paste" value="default" class="button primary">载入画布</button></div>
       </form>
     </dialog>
@@ -431,9 +434,9 @@ const appTemplate = `
       </div>
       <iframe id="presentation-frame" title="演示预览" sandbox="allow-scripts allow-same-origin" allowfullscreen></iframe>
     </dialog>
-    <dialog id="preview-choice-dialog" class="preview-choice-dialog">
+    <dialog id="preview-choice-dialog" class="preview-choice-dialog studio-dialog" aria-labelledby="preview-choice-title">
       <form method="dialog">
-        <div class="dialog-heading"><h2>选择预览起点</h2><button value="cancel" aria-label="关闭预览选择">×</button></div>
+        <div class="dialog-heading"><div><span class="eyebrow">PRESENTATION</span><h2 id="preview-choice-title">选择预览起点</h2></div><button value="cancel" aria-label="关闭预览选择">×</button></div>
         <p>从第一页播放整套演示稿，或直接从正在编辑的页面开始。</p>
         <div class="preview-choice-actions">
           <button value="cancel">取消</button>
@@ -653,6 +656,32 @@ export class EditorApp {
         this.host.querySelectorAll<HTMLDetailsElement>("[data-io-menu]").forEach((candidate) => {
           if (candidate !== menu) candidate.open = false;
         });
+      });
+      const summary = menu.querySelector<HTMLElement>(":scope > summary");
+      const panel = menu.querySelector<HTMLElement>(":scope > .io-menu-panel");
+      const items = () => Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)'));
+      summary?.addEventListener("keydown", (event) => {
+        if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+        event.preventDefault();
+        menu.open = true;
+        const available = items();
+        (event.key === "ArrowDown" ? available[0] : available.at(-1))?.focus();
+      });
+      panel?.addEventListener("keydown", (event) => {
+        const available = items();
+        const current = available.indexOf(document.activeElement as HTMLButtonElement);
+        if (event.key === "Escape") {
+          event.preventDefault();
+          menu.open = false;
+          summary?.focus();
+          return;
+        }
+        const next = event.key === "Home" ? 0 : event.key === "End" ? available.length - 1
+          : event.key === "ArrowDown" ? (current + 1) % available.length
+            : event.key === "ArrowUp" ? (current - 1 + available.length) % available.length : -1;
+        if (next < 0) return;
+        event.preventDefault();
+        available[next]?.focus();
       });
     });
     this.host.addEventListener("pointerdown", (event) => {
