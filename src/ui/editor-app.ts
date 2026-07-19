@@ -207,8 +207,8 @@ const appTemplate = `
           </div>
         </details>
         <span class="toolbar-separator"></span>
-        <button id="undo" class="icon-button" title="Undo (Ctrl/Cmd+Z)">↶</button>
-        <button id="redo" class="icon-button" title="Redo (Ctrl/Cmd+Shift+Z)">↷</button>
+        <button id="undo" class="icon-button" title="Undo (Ctrl/Cmd+Z)" aria-label="撤销">↶</button>
+        <button id="redo" class="icon-button" title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="重做">↷</button>
       </div>
       <div class="toolbar toolbar-export">
         <button id="preview-presentation" class="button">演示预览</button>
@@ -239,15 +239,15 @@ const appTemplate = `
         <div class="panel-heading">
           <div><span class="eyebrow">DOCUMENT</span><h2>图层与结构</h2></div>
           <div class="compact-actions">
-            <button id="add-text" title="Add text">T+</button>
-            <button id="add-shape" title="Add shape">▣+</button>
+            <button id="add-text" title="Add text" aria-label="添加文本">T+</button>
+            <button id="add-shape" title="Add shape" aria-label="添加形状">▣+</button>
           </div>
         </div>
         <div class="layer-actions" aria-label="Layer actions">
           <button data-layer-action="visibility" title="Show or hide">显隐</button>
           <button data-layer-action="lock" title="Lock or unlock">锁定</button>
-          <button data-layer-action="down" title="Move backward">↓</button>
-          <button data-layer-action="up" title="Move forward">↑</button>
+          <button data-layer-action="down" title="Move backward" aria-label="下移图层">↓</button>
+          <button data-layer-action="up" title="Move forward" aria-label="上移图层">↑</button>
         </div>
         <div id="layers-tree" class="layers-tree"></div>
         <div class="panel-footnote">画布选中会自动定位。拖动手柄可排序、缩进或提升一级；双击名称或按 F2 重命名。</div>
@@ -294,9 +294,9 @@ const appTemplate = `
             <label>H <input id="canvas-height" type="number" min="1" step="1" /></label>
           </div>
           <div class="toolbar zoom-control">
-            <button id="zoom-out" title="Zoom out">−</button>
+            <button id="zoom-out" title="Zoom out" aria-label="缩小画布">−</button>
             <button id="zoom-display" title="Reset zoom">100%</button>
-            <button id="zoom-in" title="Zoom in">＋</button>
+            <button id="zoom-in" title="Zoom in" aria-label="放大画布">＋</button>
             <button id="fit-canvas">适应窗口</button>
           </div>
         </div>
@@ -972,8 +972,8 @@ export class EditorApp {
           <header data-build-focus="${group.step}" data-build-group-drag="${group.step}" draggable="true">
             <strong>Build ${index + 1}</strong><span>${group.elementIds.length} elements · data-build=${group.step}</span>
             <span class="build-group-actions">
-              <button data-build-action="move-up" data-build-step="${group.step}" ${index === 0 ? "disabled" : ""} title="Move group earlier">↑</button>
-              <button data-build-action="move-down" data-build-step="${group.step}" ${index === sequence.groups.length - 1 ? "disabled" : ""} title="Move group later">↓</button>
+              <button data-build-action="move-up" data-build-step="${group.step}" ${index === 0 ? "disabled" : ""} title="Move group earlier" aria-label="前移 Build 组">↑</button>
+              <button data-build-action="move-down" data-build-step="${group.step}" ${index === sequence.groups.length - 1 ? "disabled" : ""} title="Move group later" aria-label="后移 Build 组">↓</button>
               <button data-build-action="merge-previous" data-build-step="${group.step}" ${index === 0 ? "disabled" : ""} title="Merge into previous group">合并</button>
             </span>
           </header>
@@ -1553,7 +1553,7 @@ export class EditorApp {
           <label class="field"><span>对齐</span><select data-prop="textAlign"><option>left</option><option>center</option><option>right</option><option>justify</option></select></label>
         </div>
         <p class="font-status${fontCatalog.selectedId ? "" : " is-warning"}" data-font-status>${fontCatalog.selectedId ? "正在确认本机字体…" : "自定义字体栈 · 可用性未验证"}</p>
-        <label class="field color-field"><span>文字颜色</span><input data-prop="color" type="color" value="${colorValue(computed.color)}" /><input data-prop="color" value="${escapeHtml(computed.color)}" /></label>
+        <label class="field color-field"><span>文字颜色</span><input data-prop="color" type="color" value="${colorValue(computed.color)}" aria-label="选择文字颜色" /><input data-prop="color" value="${escapeHtml(computed.color)}" aria-label="文字颜色值" /></label>
       </section>` : ""}
       ${isImage ? `<section class="inspector-section">
         <h3>图像</h3>
@@ -1563,8 +1563,8 @@ export class EditorApp {
       </section>` : ""}
       <section class="inspector-section">
         <h3>外观</h3>
-        <label class="field color-field"><span>${selectedKind === "svg" ? "填充" : "背景"}</span><input data-prop="fill" type="color" value="${colorValue(fill)}" /><input data-prop="fill" value="${escapeHtml(fill)}" /></label>
-        <label class="field color-field"><span>描边</span><input data-prop="stroke" type="color" value="${colorValue(stroke)}" /><input data-prop="stroke" value="${escapeHtml(stroke)}" /></label>
+        <label class="field color-field"><span>${selectedKind === "svg" ? "填充" : "背景"}</span><input data-prop="fill" type="color" value="${colorValue(fill)}" aria-label="选择填充或背景颜色" /><input data-prop="fill" value="${escapeHtml(fill)}" aria-label="填充或背景颜色值" /></label>
+        <label class="field color-field"><span>描边</span><input data-prop="stroke" type="color" value="${colorValue(stroke)}" aria-label="选择描边颜色" /><input data-prop="stroke" value="${escapeHtml(stroke)}" aria-label="描边颜色值" /></label>
         <div class="field-grid two">
           <label class="field"><span>描边宽度</span><input data-prop="strokeWidth" type="number" min="0" step="1" value="${numeric(selectedKind === "svg" ? modelElement.getAttribute("stroke-width") ?? "0" : computed.borderWidth, 0)}" /></label>
           <label class="field"><span>透明度</span><input data-prop="opacity" type="number" min="0" max="1" step="0.05" value="${numeric(computed.opacity, 1)}" /></label>
@@ -1575,7 +1575,7 @@ export class EditorApp {
       </section>
       <section class="inspector-section">
         <h3>Inline style</h3>
-        <label class="field stack"><textarea data-prop="inlineStyle" rows="4" spellcheck="false">${escapeHtml(modelElement.getAttribute("style") ?? "")}</textarea></label>
+        <label class="field stack"><textarea data-prop="inlineStyle" rows="4" spellcheck="false" aria-label="Inline style">${escapeHtml(modelElement.getAttribute("style") ?? "")}</textarea></label>
       </section>
     `;
     const ratio = host.querySelector<HTMLInputElement>("#keep-ratio");

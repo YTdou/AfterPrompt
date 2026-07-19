@@ -187,6 +187,8 @@ const scenarioSetups = {
     await settle(page);
     await loadExample(page, "deck");
     await page.locator("#preview-presentation").click();
+    await page.locator("#preview-choice-dialog[open]").waitFor({ state: "visible" });
+    await page.locator("#preview-from-start").click();
     await page.locator("#presentation-dialog[open]").waitFor({ state: "visible" });
     await settle(page);
   },

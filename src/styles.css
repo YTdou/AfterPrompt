@@ -1,20 +1,51 @@
 :root {
   font-family: "DM Sans", Inter, ui-sans-serif, system-ui, sans-serif;
-  color: #e8edf7;
-  background: #0b0d12;
+  color: var(--text-primary);
+  background: var(--surface-canvas-shell);
+  color-scheme: dark;
   font-synthesis: none;
-  --surface-0: #0b0d12;
-  --surface-1: #11141b;
-  --surface-2: #171b24;
-  --surface-3: #202633;
-  --line: #292f3c;
-  --line-soft: #1d222c;
-  --muted: #8c96a8;
-  --muted-2: #5f6878;
+  --surface-canvas-shell: #0b0d12;
+  --surface-panel: #11141b;
+  --surface-raised: #171b24;
+  --surface-active: #202633;
+  --border-subtle: #292f3c;
+  --border-strong: #3a4353;
+  --text-primary: #e8edf7;
+  --text-secondary: #b8c2d2;
+  --text-muted: #8c96a8;
+  --text-subdued: #8792a5;
   --accent: #5b8cff;
   --accent-strong: #78a2ff;
-  --danger: #ff6e78;
   --success: #5fd7a0;
+  --warning: #e7cb83;
+  --danger: #ff6e78;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --radius-control: 4px;
+  --radius-group: 6px;
+  --radius-dialog: 8px;
+  --control-height-compact: 28px;
+  --control-height-standard: 30px;
+  --motion-fast: 120ms;
+  --motion-standard: 160ms;
+  --motion-emphasis: 180ms;
+  --shadow-popover: 0 8px 24px rgb(0 0 0 / 0.32);
+  --shadow-dialog: 0 18px 48px rgb(0 0 0 / 0.42);
+
+  /* Compatibility aliases for existing phase-bounded selectors. */
+  --surface-0: var(--surface-canvas-shell);
+  --surface-1: var(--surface-panel);
+  --surface-2: var(--surface-raised);
+  --surface-3: var(--surface-active);
+  --line: var(--border-subtle);
+  --line-soft: #1d222c;
+  --muted: var(--text-muted);
+  --muted-2: var(--text-subdued);
+  --text: var(--text-primary);
 }
 
 * {
@@ -33,20 +64,24 @@ body,
 button,
 input,
 select,
-textarea {
+textarea,
+summary {
   font: inherit;
 }
 
 button {
   color: inherit;
+  touch-action: manipulation;
 }
 
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
-textarea:focus-visible {
+textarea:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline-offset: 2px;
 }
 
 .studio-shell {
@@ -73,8 +108,7 @@ textarea:focus-visible {
   min-width: 0;
   padding: 0 14px;
   border-bottom: 1px solid var(--line);
-  background: rgba(17, 20, 27, 0.96);
-  box-shadow: 0 1px 12px rgba(0, 0, 0, 0.25);
+  background: var(--surface-panel);
   z-index: 20;
 }
 
@@ -91,13 +125,13 @@ textarea:focus-visible {
   place-items: center;
   width: 30px;
   height: 30px;
-  border-radius: 8px;
-  color: #071025;
-  background: linear-gradient(145deg, #8ab3ff, #4c7cff);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 5px 16px rgba(66, 115, 255, 0.28);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: -0.04em;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-group);
+  color: var(--text-primary);
+  background: var(--surface-raised);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
 .brand > span:last-child {
@@ -108,16 +142,17 @@ textarea:focus-visible {
 }
 
 .brand strong {
-  font-size: 14px;
+  font-size: 16px;
+  line-height: 20px;
   letter-spacing: -0.02em;
 }
 
 .brand small {
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.08em;
 }
 
 .toolbar {
@@ -178,11 +213,10 @@ textarea:focus-visible {
   max-height: calc(100vh - 82px);
   overflow: auto;
   padding: 7px;
-  border: 1px solid #3a4353;
-  border-radius: 11px;
-  background: rgba(17, 20, 27, 0.98);
-  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-group);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-popover);
 }
 
 .io-menu-end .io-menu-panel {
@@ -203,7 +237,7 @@ textarea:focus-visible {
 .io-menu-heading {
   padding: 2px 8px 5px;
   color: var(--muted-2);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.12em;
@@ -227,13 +261,13 @@ textarea:focus-visible {
 }
 
 .io-menu-panel button strong {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 
 .io-menu-panel button small {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.35;
 }
 
@@ -241,14 +275,16 @@ button,
 .button,
 .tool-select {
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   background: var(--surface-2);
-  color: #dce3ef;
-  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 16px;
+  transition: border-color var(--motion-fast) ease, background-color var(--motion-fast) ease, color var(--motion-fast) ease;
 }
 
 button {
-  min-height: 28px;
+  min-height: var(--control-height-compact);
   padding: 4px 9px;
   cursor: pointer;
 }
@@ -259,12 +295,13 @@ button:hover:not(:disabled) {
 }
 
 button:active:not(:disabled) {
-  transform: translateY(1px);
+  border-color: var(--border-strong);
+  background: var(--surface-active);
 }
 
 button:disabled {
   cursor: not-allowed;
-  opacity: 0.38;
+  opacity: 0.5;
 }
 
 .button.primary {
@@ -2354,5 +2391,262 @@ button:disabled {
 
   .fragment-report-content {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Phase 1: shared visual foundations. Layout and command placement remain unchanged. */
+input:not([type="range"]):not([type="checkbox"]),
+select,
+textarea {
+  min-height: var(--control-height-standard);
+  border-color: var(--border-subtle);
+  border-radius: var(--radius-control);
+  color: var(--text-primary);
+  background-color: var(--surface-canvas-shell);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+input[type="color"] {
+  min-height: var(--control-height-standard);
+}
+
+.panel,
+.topbar,
+.code-drawer,
+.code-toolbar {
+  background-color: var(--surface-panel);
+}
+
+.canvas-toolbar,
+.page-filmstrip,
+.build-panel,
+.element-properties-heading,
+.build-resizer {
+  background-color: var(--surface-raised);
+}
+
+.panel,
+.topbar,
+.code-drawer,
+.canvas-toolbar,
+.page-filmstrip,
+.canvas-status,
+.build-panel,
+.element-properties-heading,
+.code-toolbar {
+  border-color: var(--border-subtle);
+}
+
+.eyebrow {
+  color: var(--text-subdued);
+  font-size: 11px;
+  line-height: 14px;
+  letter-spacing: 0.08em;
+}
+
+.panel-heading h2 {
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 18px;
+  font-weight: 600;
+}
+
+.panel-footnote,
+.canvas-hint,
+.canvas-status,
+#page-count,
+#build-status,
+.build-selection-summary,
+.build-group > header > span,
+.build-element code,
+.build-warnings,
+.font-status,
+.shadow-notice,
+.empty-state small,
+.multi-selection small,
+.code-error {
+  color: var(--text-subdued);
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.layer-tag,
+.page-thumbnail-number,
+.page-thumbnail-builds,
+.page-thumbnail-label,
+.shadow-preset small,
+.shadow-control output,
+.shadow-color output {
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.layer-actions button,
+.page-filmstrip-actions button,
+.canvas-toolbar button,
+.build-selection-row select,
+.build-selection-row button,
+.build-group-actions button,
+.build-element span,
+.identity-navigation button,
+.wide-button,
+.code-toolbar button {
+  min-height: var(--control-height-compact);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.layer-row {
+  grid-template-columns: 28px 28px 17px minmax(0, 1fr) auto;
+  min-height: 32px;
+  border-radius: var(--radius-control);
+}
+
+.layer-disclosure,
+.layer-drag-handle {
+  width: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  border-radius: var(--radius-control);
+  font-size: 12px;
+}
+
+.layer-row.is-drop-before::after,
+.layer-row.is-drop-inside::after,
+.layer-row.is-drop-after::after,
+.layer-row.is-drop-invalid::after {
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.page-collapse-toggle,
+.page-filmstrip-actions button {
+  min-height: 28px !important;
+}
+
+.page-control select,
+#build-view-mode,
+.canvas-size-control select,
+.canvas-size-control input {
+  height: var(--control-height-standard);
+  min-height: var(--control-height-standard);
+  font-size: 12px;
+}
+
+.canvas-toolbar button {
+  min-height: var(--control-height-compact);
+  padding-inline: 6px;
+}
+
+.tool-label,
+.canvas-size-control {
+  color: var(--text-subdued);
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.element-properties-heading strong,
+.build-panel-heading strong,
+.inspector-section h3,
+.build-group > header > strong,
+.identity-card strong {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.build-selection-row select,
+.build-selection-row button,
+.build-group-actions button {
+  min-height: var(--control-height-compact);
+}
+
+.build-group-actions button,
+#previous-page,
+#next-page,
+#previous-build,
+#next-build,
+#zoom-out,
+#zoom-in {
+  min-width: var(--control-height-compact);
+}
+
+.build-element {
+  min-height: var(--control-height-compact);
+}
+
+.build-element span {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.build-drop-zone {
+  min-height: 28px;
+  padding: 6px;
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.identity-navigation button,
+.checkbox,
+.field > span,
+.field input,
+.field select,
+.field textarea,
+.wide-button,
+.shadow-control,
+.shadow-color {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.field input,
+.field select {
+  height: var(--control-height-standard);
+}
+
+.panel-collapse-toggle,
+.page-collapse-toggle,
+.icon-button {
+  width: 30px;
+  min-width: 30px;
+  min-height: 30px;
+}
+
+.workspace.is-layers-collapsed .layers-panel > .panel-collapse-toggle,
+.workspace.is-inspector-collapsed .inspector-panel > .panel-collapse-toggle {
+  right: 2px;
+  left: 2px;
+  width: 28px;
+  min-width: 28px;
+  min-height: 28px;
+}
+
+.layout-resizer::after {
+  transition-duration: var(--motion-fast);
+}
+
+.layer-row:hover,
+.canvas-toolbar button:hover,
+button:hover:not(:disabled) {
+  background-color: var(--surface-active);
+}
+
+.layer-row.is-selected {
+  border-color: var(--accent);
+  background-color: rgb(91 140 255 / 0.18);
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-shell,
+  .studio-shell *,
+  .studio-shell *::before,
+  .studio-shell *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
