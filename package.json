@@ -20,7 +20,9 @@
     "test:production": "node scripts/production-browser-smoke.mjs",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "cli": "node --import tsx src/cli/index.ts"
+    "cli": "node --import tsx src/cli/index.ts",
+    "ui:audit": "node scripts/ui-visual-audit.mjs",
+    "ui:gate": "bash scripts/ui-gate.sh"
   },
   "dependencies": {
     "@codemirror/lang-html": "^6.4.11",
