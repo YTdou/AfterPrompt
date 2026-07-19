@@ -4,6 +4,7 @@ coverage/
 .vite/
 .release/
 exports/
+/artifacts/
 /reference/
 /.agents/
 .agents/
