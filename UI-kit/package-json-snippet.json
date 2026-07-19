@@ -1,0 +1,6 @@
+{
+  "scripts": {
+    "ui:audit": "node scripts/ui-visual-audit.mjs",
+    "ui:gate": "bash scripts/ui-gate.sh"
+  }
+}
