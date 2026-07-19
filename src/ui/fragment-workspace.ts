@@ -1,9 +1,16 @@
 import type { SourceDocument } from "../core/document-model";
 import { syncLinkedVisualFragmentInstances } from "../core/fragments/component";
 import { extractVisualFragment } from "../core/fragments/extract";
+import { ingestVisualFragmentBytes } from "../core/fragments/ingest";
 import { applyVisualFragmentInsertPlan, planVisualFragmentInsert } from "../core/fragments/import";
-import { VisualFragmentLibrary } from "../core/fragments/library";
-import { decodeVisualFragmentPackage, visualFragmentBlob } from "../core/fragments/package";
+import {
+  FileSystemVisualFragmentStorage,
+  VisualFragmentLibrary,
+  recalledFragmentDirectory,
+  rememberFragmentDirectory,
+  type FragmentDirectoryHandleLike,
+} from "../core/fragments/library";
+import { decodeVisualFragmentPackage, encodeVisualFragmentPackage, visualFragmentBlob } from "../core/fragments/package";
 import type {
   VisualFragmentCompatibilityReport,
   VisualFragmentLibraryRecord,
@@ -34,6 +41,13 @@ export interface FragmentWorkspaceCallbacks {
   notice(message: string): void;
 }
 
+interface FragmentInsertUiOptions {
+  placement?: VisualFragmentPlacement;
+  confirmCompatibility?: boolean;
+  sourceLibrary?: VisualFragmentLibrary | null;
+  label?: string;
+}
+
 function escapeHtml(value: string): string {
   return value.replace(/[&<>'"]/g, (character) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
@@ -61,6 +75,7 @@ function inlinePackageAssets(value: string, fragment: VisualFragmentPackage): st
 }
 
 function fragmentPreviewText(fragment: VisualFragmentPackage): string {
+  if (fragment.manifest.contentType === "raster" || typeof fragment.content !== "string") return fragment.manifest.name;
   const parsed = new DOMParser().parseFromString(
     fragment.content,
     fragment.manifest.contentType === "svg" ? "image/svg+xml" : "text/html",
@@ -110,22 +125,35 @@ function allElements(root: Element): Element[] {
   return [root, ...Array.from(root.querySelectorAll("*"))];
 }
 
+function fragmentStructureLabel(fragment: VisualFragmentLibraryRecord["manifest"]): string {
+  if (fragment.contentType === "raster") return "Raster PNG/JPG · 单一图片图层";
+  if (fragment.contentType === "svg") return "SVG · 保留图层结构";
+  if (["component", "template"].includes(fragment.fragmentType)) return "组件 · 保留结构与属性";
+  return "HTML · 保留节点结构";
+}
+
 const fragmentUi = `
-  <input id="fragment-import-input" type="file" accept=".vfrag,application/zip" hidden />
+  <input id="fragment-import-input" type="file" accept=".vfrag,.svg,.png,.jpg,.jpeg,application/zip,image/svg+xml,image/png,image/jpeg" hidden />
   <dialog id="fragment-save-dialog" class="fragment-dialog fragment-save-dialog">
     <form id="fragment-save-form" method="dialog">
       <header class="fragment-dialog-heading">
-        <div><span class="eyebrow">VISUAL FRAGMENT</span><h2>保存视觉片段</h2></div>
+        <div><span class="eyebrow">LOCAL FRAGMENT FILE</span><h2>保存本地片段</h2></div>
         <button value="cancel" aria-label="关闭">×</button>
       </header>
+      <p class="fragment-purpose-note">片段以你拥有的 <code>.vfrag</code> 文件为主；组件和 SVG 保留结构，PNG/JPG 作为单一图片图层。</p>
       <div class="fragment-form-grid">
         <label class="field"><span>名称</span><input id="fragment-name" required maxlength="160" /></label>
         <label class="field"><span>版本</span><input id="fragment-version" value="1.0.0" required /></label>
         <label class="field"><span>类型</span><select id="fragment-type"><option value="element">Element</option><option value="group">Group</option><option value="component">Component</option><option value="template">Template</option></select></label>
         <label class="field"><span>保存模式</span><select id="fragment-mode"><option value="source-preserving">Source-preserving</option><option value="self-contained" selected>Self-contained</option></select></label>
+        <label class="field"><span>保存位置</span><select id="fragment-save-target"><option value="directory">本地片段目录（推荐）</option><option value="file">下载 .vfrag 文件</option><option value="both">保存到目录并下载</option></select></label>
         <label class="field"><span>分类</span><input id="fragment-category" value="Uncategorized" /></label>
         <label class="field"><span>标签（逗号分隔）</span><input id="fragment-tags" /></label>
       </div>
+      <section class="fragment-save-storage">
+        <div><strong id="fragment-save-storage-title">尚未连接本地片段目录</strong><small id="fragment-save-storage-detail">默认下载 .vfrag 文件；浏览器临时数据不作为长期保存。</small></div>
+        <button id="fragment-save-connect-directory" type="button">选择本地片段目录</button>
+      </section>
       <label class="field stack"><span>描述</span><textarea id="fragment-description" rows="3" maxlength="2000"></textarea></label>
       <section id="fragment-component-schema" class="fragment-schema-editor" hidden>
         <div class="fragment-schema-heading"><div><h3>组件属性</h3><p>将内部节点的文字、属性或样式暴露给用户和 Codex。</p></div><button id="fragment-add-property" type="button">＋ 属性</button></div>
@@ -133,15 +161,25 @@ const fragmentUi = `
         <div class="fragment-schema-heading"><div><h3>内容插槽</h3><p>定义允许用户或 Codex 插入内容的位置与约束。</p></div><button id="fragment-add-slot" type="button">＋ 插槽</button></div>
         <div id="fragment-slot-rows" class="fragment-schema-rows"></div>
       </section>
-      <footer class="fragment-dialog-actions"><span id="fragment-save-selection"></span><button value="cancel">取消</button><button id="fragment-save-submit" type="submit" value="default" class="button primary">保存到本地库</button></footer>
+      <footer class="fragment-dialog-actions"><span id="fragment-save-selection"></span><button value="cancel">取消</button><button id="fragment-save-submit" type="submit" value="default" class="button primary">下载 .vfrag</button></footer>
     </form>
   </dialog>
 
   <dialog id="fragment-library-dialog" class="fragment-dialog fragment-library-dialog">
     <div class="fragment-dialog-heading">
-      <div><span class="eyebrow">LOCAL LIBRARY</span><h2>视觉片段库</h2><small id="fragment-storage-status"></small></div>
+      <div><span class="eyebrow">LOCAL FRAGMENTS</span><h2 id="fragment-library-title">本地片段</h2><small id="fragment-storage-status"></small></div>
       <button id="fragment-library-close" type="button" aria-label="关闭">×</button>
     </div>
+    <section id="fragment-storage-panel" class="fragment-storage-panel">
+      <div><strong id="fragment-storage-title">尚未连接本地片段目录</strong><span id="fragment-storage-detail">当前显示浏览器临时片段剪贴板，数据可能被浏览器清理。</span></div>
+      <div class="fragment-storage-actions">
+        <button id="fragment-connect-directory" type="button" class="button primary">选择本地片段目录</button>
+        <button id="fragment-view-directory" type="button" hidden>查看本地目录</button>
+        <button id="fragment-view-clipboard" type="button" hidden>查看临时剪贴板</button>
+        <button id="fragment-migrate-cache" type="button" hidden>将临时片段复制到目录</button>
+        <button id="fragment-disconnect-directory" type="button" hidden>断开目录</button>
+      </div>
+    </section>
     <div class="fragment-library-toolbar">
       <input id="fragment-search" type="search" placeholder="搜索名称、描述、标签或 ID" />
       <select id="fragment-category-filter"><option value="">全部分类</option></select>
@@ -155,8 +193,8 @@ const fragmentUi = `
       </select>
       <label class="fragment-coordinate">X <input id="fragment-place-x" type="number" value="0" /></label>
       <label class="fragment-coordinate">Y <input id="fragment-place-y" type="number" value="0" /></label>
-      <button id="fragment-import" type="button">导入 .vfrag</button>
-      <button id="fragment-library-save-selection" type="button" class="button primary">保存当前选区</button>
+      <button id="fragment-import" type="button">导入文件到目录</button>
+      <button id="fragment-library-save-selection" type="button" class="button primary">导出选区到本地</button>
     </div>
     <div id="fragment-library-results" class="fragment-library-results"></div>
   </dialog>
@@ -171,26 +209,21 @@ const fragmentUi = `
 `;
 
 export class FragmentWorkspace {
-  private readonly library = new VisualFragmentLibrary();
+  private readonly browserLibrary = new VisualFragmentLibrary();
+  private directoryLibrary: VisualFragmentLibrary | null = null;
+  private library = this.browserLibrary;
   private readonly previewUrls = new Set<string>();
   private renderToken = 0;
+  private importMode: "insert" | "library" = "insert";
+  private clipboardRecordKey = "";
+  private pasteSequence = 0;
 
   constructor(private readonly host: HTMLElement, private readonly callbacks: FragmentWorkspaceCallbacks) {
-    const toolbar = host.querySelector(".toolbar-primary");
-    const separator = toolbar?.querySelector(".toolbar-separator");
-    if (!toolbar || !separator) throw new Error("Fragment toolbar mount point was not found.");
-    const save = document.createElement("button");
-    save.id = "save-fragment";
-    save.className = "button";
-    save.textContent = "保存片段";
-    const library = document.createElement("button");
-    library.id = "open-fragment-library";
-    library.className = "button";
-    library.textContent = "片段库";
-    separator.before(save, library);
     host.insertAdjacentHTML("beforeend", fragmentUi);
     this.bindEvents();
+    this.refreshStorageUi();
     this.refreshSelection();
+    void this.restoreDirectory();
   }
 
   private get<T extends HTMLElement = HTMLElement>(selector: string): T {
@@ -200,13 +233,21 @@ export class FragmentWorkspace {
   }
 
   private bindEvents(): void {
-    this.get("#save-fragment").addEventListener("click", () => this.openSaveDialog());
-    this.get("#open-fragment-library").addEventListener("click", () => void this.openLibrary());
     this.get("#fragment-library-close").addEventListener("click", () => this.get<HTMLDialogElement>("#fragment-library-dialog").close());
     this.get("#fragment-library-dialog").addEventListener("close", () => this.clearPreviewUrls());
     this.get("#fragment-library-save-selection").addEventListener("click", () => this.openSaveDialog());
-    this.get("#fragment-import").addEventListener("click", () => this.get<HTMLInputElement>("#fragment-import-input").click());
-    this.get("#fragment-import-input").addEventListener("change", (event) => void this.importPackage(event));
+    this.get("#fragment-import").addEventListener("click", () => {
+      this.importMode = "library";
+      this.get<HTMLInputElement>("#fragment-import-input").click();
+    });
+    this.get("#fragment-import-input").addEventListener("change", (event) => void this.importFile(event));
+    this.get("#fragment-connect-directory").addEventListener("click", () => void this.connectDirectory());
+    this.get("#fragment-save-connect-directory").addEventListener("click", () => void this.connectDirectory());
+    this.get("#fragment-disconnect-directory").addEventListener("click", () => void this.disconnectDirectory());
+    this.get("#fragment-migrate-cache").addEventListener("click", () => void this.migrateBrowserCache());
+    this.get("#fragment-view-directory").addEventListener("click", () => void this.viewDirectory());
+    this.get("#fragment-view-clipboard").addEventListener("click", () => void this.viewClipboard());
+    this.get("#fragment-save-target").addEventListener("change", () => this.updateSaveTargetUi());
     this.get("#fragment-save-form").addEventListener("submit", (event) => void this.saveSelection(event));
     this.get("#fragment-type").addEventListener("change", () => this.toggleComponentSchema());
     this.get("#fragment-add-property").addEventListener("click", () => this.addPropertyRow());
@@ -227,9 +268,82 @@ export class FragmentWorkspace {
 
   refreshSelection(): void {
     const context = this.callbacks.getContext();
-    this.get<HTMLButtonElement>("#save-fragment").disabled = context.selectedIds.length === 0;
     this.get<HTMLButtonElement>("#fragment-library-save-selection").disabled = context.selectedIds.length === 0;
     this.renderInstanceInspector();
+  }
+
+  openSelectionExport(): void {
+    this.openSaveDialog();
+  }
+
+  chooseInsertFile(): void {
+    this.importMode = "insert";
+    this.get<HTMLInputElement>("#fragment-import-input").click();
+  }
+
+  async copySelectionToClipboard(): Promise<void> {
+    const context = this.callbacks.getContext();
+    if (!context.selectionItems.length) {
+      this.callbacks.toast("请先选择要复制的元素或元素组", true);
+      return;
+    }
+    try {
+      const first = context.selectionItems[0]!.element;
+      const label = first.getAttribute("data-editor-name")?.trim()
+        || first.textContent?.replace(/\s+/g, " ").trim().slice(0, 42)
+        || context.selectedIds[0]
+        || "片段";
+      const nonce = globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      const fragment = extractVisualFragment(context.model, context.assets, context.sourcePath, context.selectionItems, {
+        fragmentId: `clipboard-${nonce}`,
+        name: context.selectionItems.length === 1 ? label : `${context.selectionItems.length} 个元素`,
+        description: "由画布复制到临时片段剪贴板",
+        fragmentType: context.selectionItems.length === 1 ? "element" : "group",
+        saveMode: "self-contained",
+        category: "Clipboard",
+        tags: ["clipboard"],
+        version: "1.0.0",
+        sourceProject: context.sourcePath,
+      });
+      const record = await this.browserLibrary.save(fragment);
+      this.clipboardRecordKey = record.key;
+      this.pasteSequence = 0;
+      if (fragment.warnings.length) this.callbacks.notice(fragment.warnings.join(" "));
+      this.callbacks.toast(`已复制到临时片段剪贴板：${fragment.manifest.name}`);
+      if (this.get<HTMLDialogElement>("#fragment-library-dialog").open && this.library === this.browserLibrary) await this.renderLibrary();
+    } catch (error) {
+      this.callbacks.toast(error instanceof Error ? error.message : String(error), true);
+    }
+  }
+
+  async pasteLatestClipboard(): Promise<void> {
+    try {
+      const record = await this.browserLibrary.latestRecord();
+      if (!record) {
+        this.callbacks.toast("临时片段剪贴板为空；请先选择元素并按 Ctrl/Cmd+C", true);
+        return;
+      }
+      const fragment = await decodeVisualFragmentPackage(record.packageBytes);
+      if (record.key !== this.clipboardRecordKey) {
+        this.clipboardRecordKey = record.key;
+        this.pasteSequence = 0;
+      }
+      const nextSequence = this.pasteSequence + 1;
+      const offset = nextSequence * 16;
+      const pasted = await this.insertFragment(fragment, false, {
+        placement: {
+          mode: "point",
+          x: fragment.manifest.coordinateSystem.origin.x + offset,
+          y: fragment.manifest.coordinateSystem.origin.y + offset,
+        },
+        confirmCompatibility: false,
+        sourceLibrary: this.browserLibrary,
+        label: `Paste fragment ${fragment.manifest.name}`,
+      });
+      if (pasted) this.pasteSequence = nextSequence;
+    } catch (error) {
+      this.callbacks.toast(error instanceof Error ? error.message : String(error), true);
+    }
   }
 
   private selectionCandidates(): Array<{ value: string; label: string }> {
@@ -311,8 +425,63 @@ export class FragmentWorkspace {
     record?.manifest.slots.forEach((slot) => this.addSlotRow(slot));
     const selectionType = context.selectionItems.length > 0 && context.selectionItems.every((item) => item.element.namespaceURI === "http://www.w3.org/2000/svg") ? "SVG" : context.model.kind.toUpperCase();
     this.get("#fragment-save-selection").textContent = `${context.selectedIds.length} 个顶层选择 · ${selectionType}`;
+    const target = this.get<HTMLSelectElement>("#fragment-save-target");
+    target.value = this.directoryLibrary ? "directory" : "file";
+    this.refreshStorageUi();
     this.toggleComponentSchema();
     dialog.showModal();
+  }
+
+  private refreshStorageUi(preferDirectory = false): void {
+    const directoryConnected = Boolean(this.directoryLibrary);
+    const viewingDirectory = directoryConnected && this.library === this.directoryLibrary;
+    const directoryLabel = this.directoryLibrary?.storageLabel ?? "";
+    const target = this.get<HTMLSelectElement>("#fragment-save-target");
+    const directoryOption = target.querySelector<HTMLOptionElement>('option[value="directory"]');
+    const bothOption = target.querySelector<HTMLOptionElement>('option[value="both"]');
+    if (directoryOption) {
+      directoryOption.disabled = !directoryConnected;
+      directoryOption.textContent = directoryConnected ? `${directoryLabel}（推荐）` : "本地片段目录（请先选择）";
+    }
+    if (bothOption) bothOption.disabled = !directoryConnected;
+    if (!directoryConnected && ["directory", "both"].includes(target.value)) target.value = "file";
+    if (directoryConnected && preferDirectory) target.value = "directory";
+
+    this.get("#fragment-save-storage-title").textContent = directoryConnected ? `${directoryLabel} 已连接` : "尚未连接本地片段目录";
+    this.get("#fragment-save-storage-detail").textContent = directoryConnected
+      ? ".vfrag 将直接写入该目录，可自行备份、复制或版本管理。"
+      : "默认下载 .vfrag 文件；浏览器临时数据不作为长期保存。";
+    this.get<HTMLButtonElement>("#fragment-save-connect-directory").hidden = directoryConnected;
+
+    this.get("#fragment-library-title").textContent = viewingDirectory ? "本地片段" : "临时片段剪贴板";
+    this.get("#fragment-storage-panel").dataset.kind = viewingDirectory ? "directory" : "clipboard";
+    this.get("#fragment-storage-title").textContent = viewingDirectory
+      ? `${directoryLabel} · 本地文件模式`
+      : directoryConnected ? "临时片段剪贴板" : "尚未连接本地片段目录";
+    this.get("#fragment-storage-detail").textContent = viewingDirectory
+      ? "目录中的 .vfrag 文件是事实源；关闭浏览器后仍由你持有。"
+      : directoryConnected
+        ? "当前显示 IndexedDB 临时片段；它只用于短期复制粘贴，可能被浏览器清理。"
+        : "当前显示 IndexedDB 临时片段剪贴板，数据可能被浏览器清理；长期保存请连接目录或下载 .vfrag。";
+    this.get("#fragment-storage-status").textContent = viewingDirectory
+      ? `${directoryLabel} · .vfrag 文件为事实源`
+      : "临时片段剪贴板 · 非可靠长期存储";
+    this.get<HTMLButtonElement>("#fragment-connect-directory").hidden = directoryConnected;
+    this.get<HTMLButtonElement>("#fragment-view-directory").hidden = !directoryConnected || viewingDirectory;
+    this.get<HTMLButtonElement>("#fragment-view-clipboard").hidden = !directoryConnected || !viewingDirectory;
+    this.get<HTMLButtonElement>("#fragment-migrate-cache").hidden = !directoryConnected;
+    this.get<HTMLButtonElement>("#fragment-disconnect-directory").hidden = !directoryConnected;
+    this.get<HTMLButtonElement>("#fragment-import").hidden = !viewingDirectory;
+    this.get<HTMLButtonElement>("#fragment-library-save-selection").hidden = !viewingDirectory;
+    this.updateSaveTargetUi();
+  }
+
+  private updateSaveTargetUi(): void {
+    const target = this.get<HTMLSelectElement>("#fragment-save-target").value;
+    const submit = this.get<HTMLButtonElement>("#fragment-save-submit");
+    submit.textContent = target === "directory" ? "保存到本地目录"
+      : target === "both" ? "保存到目录并下载"
+        : "下载 .vfrag";
   }
 
   private toggleComponentSchema(): void {
@@ -405,18 +574,108 @@ export class FragmentWorkspace {
         properties: ["component", "template"].includes(type) ? this.readProperties() : [],
         slots: ["component", "template"].includes(type) ? this.readSlots() : [],
       });
-      await this.library.save(fragment);
+      const target = this.get<HTMLSelectElement>("#fragment-save-target").value;
+      if (["directory", "both"].includes(target)) {
+        if (!this.directoryLibrary) throw new Error("请先选择本地片段目录，或改为下载 .vfrag 文件。");
+        await this.directoryLibrary.save(fragment);
+      }
+      if (["file", "both"].includes(target)) {
+        const bytes = await encodeVisualFragmentPackage(fragment);
+        downloadBlob(visualFragmentBlob(bytes), `${fileStem(fragment.manifest.name)}-${fragment.manifest.version}.vfrag`);
+      }
       dialog.close();
       if (fragment.warnings.length) this.callbacks.notice(fragment.warnings.join(" "));
-      this.callbacks.toast(`已保存 ${fragment.manifest.name} @ ${fragment.manifest.version}`);
+      const destination = target === "directory" ? "本地片段目录"
+        : target === "both" ? "本地片段目录并下载"
+          : "本地 .vfrag 文件";
+      this.callbacks.toast(`已保存到${destination}：${fragment.manifest.name} @ ${fragment.manifest.version}`);
       if (this.get<HTMLDialogElement>("#fragment-library-dialog").open) await this.renderLibrary();
     } catch (error) {
       this.callbacks.toast(error instanceof Error ? error.message : String(error), true);
     }
   }
 
-  private async openLibrary(): Promise<void> {
-    this.get<HTMLDialogElement>("#fragment-library-dialog").showModal();
+  async openLibrary(view: "clipboard" | "directory" = "clipboard"): Promise<void> {
+    this.library = view === "directory" && this.directoryLibrary ? this.directoryLibrary : this.browserLibrary;
+    this.refreshStorageUi();
+    this.clearPreviewUrls();
+    this.get("#fragment-library-results").replaceChildren();
+    const dialog = this.get<HTMLDialogElement>("#fragment-library-dialog");
+    if (!dialog.open) dialog.showModal();
+    await this.renderLibrary();
+  }
+
+  private setDirectoryLibrary(handle: FragmentDirectoryHandleLike): void {
+    this.directoryLibrary = new VisualFragmentLibrary(new FileSystemVisualFragmentStorage(handle));
+    this.library = this.directoryLibrary;
+    this.refreshStorageUi(true);
+  }
+
+  private async restoreDirectory(): Promise<void> {
+    try {
+      const handle = await recalledFragmentDirectory();
+      if (!handle) return;
+      const permission = await handle.queryPermission?.({ mode: "readwrite" });
+      if (permission === "granted") this.setDirectoryLibrary(handle);
+    } catch {
+      // The temporary clipboard remains available when a remembered handle cannot be restored.
+    }
+  }
+
+  private async connectDirectory(): Promise<void> {
+    const picker = (window as Window & { showDirectoryPicker?: (options?: { mode?: "read" | "readwrite" }) => Promise<FragmentDirectoryHandleLike> }).showDirectoryPicker;
+    if (!picker) {
+      this.callbacks.notice("当前浏览器不支持直接连接本地目录；仍可导出和导入 .vfrag 文件。");
+      return;
+    }
+    try {
+      const handle = await picker.call(window, { mode: "readwrite" });
+      const permission = await handle.requestPermission?.({ mode: "readwrite" });
+      if (permission && permission !== "granted") throw new Error("未获得本地片段目录的读写权限。");
+      this.setDirectoryLibrary(handle);
+      try {
+        await rememberFragmentDirectory(handle);
+      } catch {
+        this.callbacks.notice("本地目录已连接，但浏览器无法记住该目录；下次打开时需要重新连接。");
+      }
+      this.callbacks.toast(`已连接本地片段目录：${handle.name}`);
+      await this.renderLibrary();
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      this.callbacks.toast(error instanceof Error ? error.message : String(error), true);
+    }
+  }
+
+  private async disconnectDirectory(): Promise<void> {
+    this.directoryLibrary = null;
+    this.library = this.browserLibrary;
+    await rememberFragmentDirectory(null);
+    this.refreshStorageUi();
+    this.callbacks.toast("已断开本地目录，当前显示临时片段剪贴板");
+    await this.renderLibrary();
+  }
+
+  private async migrateBrowserCache(): Promise<void> {
+    if (!this.directoryLibrary) return;
+    try {
+      const count = await this.browserLibrary.copyTo(this.directoryLibrary);
+      this.callbacks.toast(`已将 ${count} 个临时片段复制到本地目录；临时副本仍保留`);
+      await this.renderLibrary();
+    } catch (error) {
+      this.callbacks.toast(error instanceof Error ? error.message : String(error), true);
+    }
+  }
+
+  private async viewDirectory(): Promise<void> {
+    if (!this.directoryLibrary) return;
+    this.library = this.directoryLibrary;
+    this.refreshStorageUi();
+    await this.renderLibrary();
+  }
+
+  private async viewClipboard(): Promise<void> {
+    this.library = this.browserLibrary;
+    this.refreshStorageUi();
     await this.renderLibrary();
   }
 
@@ -426,6 +685,7 @@ export class FragmentWorkspace {
   }
 
   private async renderLibrary(): Promise<void> {
+    this.refreshStorageUi();
     const token = ++this.renderToken;
     const allRecords = await this.library.list();
     const categorySelect = this.get<HTMLSelectElement>("#fragment-category-filter");
@@ -444,32 +704,36 @@ export class FragmentWorkspace {
     }));
     if (token !== this.renderToken) return;
     this.clearPreviewUrls();
-    this.get("#fragment-storage-status").textContent = this.library.persistent ? "IndexedDB 持久化存储" : "浏览器存储不可用：当前为会话内存库";
     const results = this.get("#fragment-library-results");
     if (!records.length) {
-      results.innerHTML = `<div class="fragment-empty"><span>◇</span><strong>本地库为空</strong><p>选择画布元素并保存，或导入一个经过验证的 .vfrag 包。</p></div>`;
+      const directoryMode = this.directoryLibrary !== null && this.library === this.directoryLibrary;
+      results.innerHTML = directoryMode
+        ? `<div class="fragment-empty"><span>◇</span><strong>这个本地目录还没有片段</strong><p>保存当前选区，或导入 .vfrag、SVG、PNG、JPG 文件。SVG/组件保留结构，PNG/JPG 为单一图片图层。</p></div>`
+        : `<div class="fragment-empty"><span>◇</span><strong>临时片段剪贴板为空</strong><p>这里仅用于短期复制粘贴。长期保存请选择本地目录或下载 .vfrag 文件。</p></div>`;
       return;
     }
     results.innerHTML = records.map((record, index) => `
       <article class="fragment-card" data-fragment-id="${escapeHtml(record.fragmentId)}" data-fragment-version="${escapeHtml(record.version)}">
         <div class="fragment-preview"><img data-fragment-preview="${index}" alt="${escapeHtml(record.manifest.name)} 预览" /><span>${record.manifest.canvas.width.toFixed(0)} × ${record.manifest.canvas.height.toFixed(0)}</span></div>
         <div class="fragment-card-body">
-          <div class="fragment-card-title"><div><strong>${escapeHtml(record.manifest.name)}</strong><span>${escapeHtml(record.manifest.fragmentType)} · ${escapeHtml(record.manifest.contentType)}</span></div><button data-fragment-action="favorite" title="收藏">${record.favorite ? "★" : "☆"}</button></div>
+          <div class="fragment-card-title"><div><strong>${escapeHtml(record.manifest.name)}</strong><span>${escapeHtml(record.manifest.fragmentType)} · ${escapeHtml(fragmentStructureLabel(record.manifest))}</span></div><button data-fragment-action="favorite" title="收藏">${record.favorite ? "★" : "☆"}</button></div>
           <p>${escapeHtml(record.manifest.description || "无描述")}</p>
           <div class="fragment-card-meta"><span>${escapeHtml(record.manifest.category)}</span><span>v${escapeHtml(record.version)}</span><span>使用 ${record.useCount}</span><span title="${escapeHtml(record.manifest.provenance.sourceProject)}">来源 ${escapeHtml(record.manifest.provenance.sourceProject)}</span></div>
           <div class="fragment-tags">${record.manifest.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>
           <div class="fragment-card-actions">
             <button data-fragment-action="insert-copy" class="button primary">插入副本</button>
-            <button data-fragment-action="insert-linked">关联实例</button>
             <button data-fragment-action="inspect">检查</button>
-            <button data-fragment-action="export">.vfrag</button>
-            <button data-fragment-action="standard">标准格式</button>
-            <button data-fragment-action="copy">复制源码</button>
-            <button data-fragment-action="preview-svg">预览 SVG</button>
-            <button data-fragment-action="preview-png">预览 PNG</button>
-            <button data-fragment-action="update">从选区更新</button>
-            <button data-fragment-action="sync">同步实例</button>
-            <button data-fragment-action="delete" class="danger">删除版本</button>
+            <details><summary>更多</summary><div class="fragment-more-actions">
+              ${record.manifest.contentType !== "raster" ? '<button data-fragment-action="insert-linked">关联实例</button>' : ""}
+              <button data-fragment-action="export">.vfrag</button>
+              <button data-fragment-action="standard">标准格式</button>
+              ${record.manifest.contentType !== "raster" ? '<button data-fragment-action="copy">复制源码</button>' : ""}
+              <button data-fragment-action="preview-svg">预览 SVG</button>
+              <button data-fragment-action="preview-png">预览 PNG</button>
+              ${record.manifest.contentType !== "raster" ? '<button data-fragment-action="update">从选区更新</button>' : ""}
+              ${["component", "template"].includes(record.manifest.fragmentType) ? '<button data-fragment-action="sync">同步实例</button>' : ""}
+              <button data-fragment-action="delete" class="danger">删除版本</button>
+            </div></details>
           </div>
         </div>
       </article>`).join("");
@@ -562,25 +826,33 @@ export class FragmentWorkspace {
     }
   }
 
-  private async insertFragment(fragment: VisualFragmentPackage, linked: boolean): Promise<void> {
+  private async insertFragment(fragment: VisualFragmentPackage, linked: boolean, options: FragmentInsertUiOptions = {}): Promise<boolean> {
     const context = this.callbacks.getContext();
     if (!context.insertionParentId) throw new Error("当前页面没有可用的插入父元素。");
     const plan = planVisualFragmentInsert(context.model, context.assets, fragment, {
       parentId: context.insertionParentId,
-      placement: this.placement(),
+      placement: options.placement ?? this.placement(),
       linked,
       targetSourcePath: context.sourcePath,
     });
-    const confirmed = await this.confirmCompatibility(plan.report);
-    if (!confirmed) return;
+    if (options.confirmCompatibility !== false) {
+      const confirmed = await this.confirmCompatibility(plan.report);
+      if (!confirmed) return false;
+    } else if (!plan.report.compatible) {
+      await this.confirmCompatibility(plan.report);
+      return false;
+    }
     if (!plan.report.compatible) throw new Error(plan.report.errors.join("；"));
-    const committed = this.callbacks.commit(`Insert fragment ${fragment.manifest.name}`, () => {
+    const committed = this.callbacks.commit(options.label ?? `Insert fragment ${fragment.manifest.name}`, () => {
       const result = applyVisualFragmentInsertPlan(context.model, context.assets, plan);
       return result.rootEditorIds;
     });
-    if (!committed) return;
-    await this.library.markUsed(fragment.manifest.fragmentId, fragment.manifest.version);
+    if (!committed) return false;
+    const sourceLibrary = options.sourceLibrary === undefined ? this.library : options.sourceLibrary;
+    if (sourceLibrary) await sourceLibrary.markUsed(fragment.manifest.fragmentId, fragment.manifest.version);
+    if (plan.report.warnings.length) this.callbacks.notice(plan.report.warnings.join(" "));
     this.callbacks.toast(`已插入${linked ? "关联实例" : "独立副本"}：${fragment.manifest.name}`);
+    return true;
   }
 
   private async confirmCompatibility(report: VisualFragmentCompatibilityReport): Promise<boolean> {
@@ -615,6 +887,7 @@ export class FragmentWorkspace {
   }
 
   private standardSource(fragment: VisualFragmentPackage): string {
+    if (fragment.manifest.contentType === "raster" || typeof fragment.content !== "string") throw new Error("Raster 片段没有可复制的结构化源码。");
     const content = inlinePackageAssets(fragment.content, fragment);
     const styles = inlinePackageAssets(fragment.styles, fragment);
     if (fragment.manifest.contentType === "html") return `<!doctype html>\n<html><head><meta charset="utf-8"><style>\n${styles}\n</style></head><body>\n${content}\n</body></html>\n`;
@@ -622,6 +895,12 @@ export class FragmentWorkspace {
   }
 
   private async exportStandard(fragment: VisualFragmentPackage): Promise<void> {
+    if (fragment.manifest.contentType === "raster") {
+      const mimeType = fragment.manifest.entry === "content.png" ? "image/png" : "image/jpeg";
+      const extension = mimeType === "image/png" ? "png" : "jpg";
+      downloadBlob(new Blob([fragment.content as Uint8Array<ArrayBuffer>], { type: mimeType }), `${fileStem(fragment.manifest.name)}.${extension}`);
+      return;
+    }
     if (fragment.manifest.contentType === "svg") {
       downloadText(this.standardSource(fragment), `${fileStem(fragment.manifest.name)}.svg`, "image/svg+xml");
       return;
@@ -695,7 +974,7 @@ export class FragmentWorkspace {
     context.fillStyle = "#667085";
     context.font = `600 ${Math.max(10, Math.round(14 * scale))}px system-ui, sans-serif`;
     context.fillText(`${fragment.manifest.fragmentType.toUpperCase()} · ${fragment.manifest.canvas.width.toFixed(0)} × ${fragment.manifest.canvas.height.toFixed(0)} · v${fragment.manifest.version}`, padding, padding + bandHeight + Math.round(48 * scale), canvas.width - padding * 2);
-    const parsed = new DOMParser().parseFromString(fragment.content, "text/html");
+    const parsed = new DOMParser().parseFromString(fragment.content as string, "text/html");
     const text = (parsed.body.textContent ?? "").replace(/\s+/g, " ").trim();
     context.fillStyle = "#344054";
     context.font = `400 ${Math.max(11, Math.round(18 * scale))}px system-ui, sans-serif`;
@@ -730,17 +1009,26 @@ export class FragmentWorkspace {
     this.callbacks.toast(`已同步 ${summary.updated} 个实例${summary.failed ? `，${summary.failed} 个失败` : ""}`, summary.failed > 0);
   }
 
-  private async importPackage(event: Event): Promise<void> {
+  private async importFile(event: Event): Promise<void> {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
     input.value = "";
     if (!file) return;
     try {
-      const record = await this.library.importPackage(file);
-      const fragment = await this.library.get(record.fragmentId, record.version);
-      if (fragment?.warnings.length) this.callbacks.notice(fragment.warnings.join(" "));
-      this.callbacks.toast(`已导入 ${record.manifest.name} @ ${record.version}`);
-      await this.renderLibrary();
+      const imported = await ingestVisualFragmentBytes(new Uint8Array(await file.arrayBuffer()), file.name);
+      if (this.importMode === "insert") {
+        await this.insertFragment(imported, false, {
+          placement: { mode: "center" },
+          confirmCompatibility: true,
+          sourceLibrary: null,
+        });
+      } else {
+        if (!this.directoryLibrary || this.library !== this.directoryLibrary) throw new Error("请先连接并打开本地片段目录。");
+        const record = await this.directoryLibrary.save(imported);
+        if (imported.warnings.length) this.callbacks.notice(imported.warnings.join(" "));
+        this.callbacks.toast(`已导入到本地片段目录：${record.manifest.name} @ ${record.version}`);
+        await this.renderLibrary();
+      }
     } catch (error) {
       this.callbacks.toast(error instanceof Error ? error.message : String(error), true);
     }

@@ -323,6 +323,7 @@ export class CanvasRenderer {
   constructor(readonly host: HTMLElement, callbacks: RendererCallbacks) {
     this.callbacks = callbacks;
     this.shadow = host.shadowRoot ?? host.attachShadow({ mode: "open" });
+    this.shadow.addEventListener("pointerdown", this.handlePointerDown, { capture: true });
     this.shadow.addEventListener("click", this.handleClick, { capture: true });
     this.shadow.addEventListener("dblclick", this.handleDoubleClick, { capture: true });
   }
@@ -489,18 +490,21 @@ export class CanvasRenderer {
 
   private handleClick = (event: Event): void => {
     if (!this.interactive) return;
-    const mouseEvent = event as MouseEvent;
     const element = this.elementFromEvent(event);
     if (!element) return;
     event.preventDefault();
     event.stopPropagation();
-    let target = element;
-    if (mouseEvent.altKey) {
-      const parent = element.parentElement?.closest("[data-editor-id]");
-      if (parent) target = parent;
-    }
-    const id = target.getAttribute("data-editor-id");
-    if (id) this.callbacks.onSelect(id, { additive: mouseEvent.ctrlKey || mouseEvent.metaKey || mouseEvent.shiftKey, parent: mouseEvent.altKey });
+  };
+
+  private handlePointerDown = (event: Event): void => {
+    if (!this.interactive || !(event instanceof PointerEvent) || event.button !== 0 || !event.isPrimary) return;
+    const element = this.elementFromEvent(event);
+    const id = element?.getAttribute("data-editor-id");
+    if (!id) return;
+    this.callbacks.onSelect(id, {
+      additive: event.ctrlKey || event.metaKey || event.shiftKey,
+      parent: event.altKey,
+    });
   };
 
   private handleDoubleClick = (event: Event): void => {
@@ -653,6 +657,7 @@ export class CanvasRenderer {
   dispose(): void {
     this.inlineFinish?.(false);
     this.inlineFinish = null;
+    this.shadow.removeEventListener("pointerdown", this.handlePointerDown, { capture: true });
     this.shadow.removeEventListener("click", this.handleClick, { capture: true });
     this.shadow.removeEventListener("dblclick", this.handleDoubleClick, { capture: true });
     if ("adoptedStyleSheets" in this.shadow) this.shadow.adoptedStyleSheets = [];

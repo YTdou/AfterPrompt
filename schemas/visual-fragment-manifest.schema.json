@@ -32,14 +32,14 @@
   ],
   "properties": {
     "format": { "const": "last-mile-studio.visual-fragment" },
-    "formatVersion": { "const": "1.0" },
+    "formatVersion": { "enum": ["1.0", "1.1"] },
     "fragmentId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$" },
     "name": { "type": "string", "minLength": 1, "maxLength": 160 },
     "description": { "type": "string", "maxLength": 2000 },
     "fragmentType": { "enum": ["element", "group", "component", "template"] },
-    "contentType": { "enum": ["html", "svg"] },
+    "contentType": { "enum": ["html", "svg", "raster"] },
     "saveMode": { "enum": ["source-preserving", "self-contained"] },
-    "entry": { "enum": ["content.html", "content.svg"] },
+    "entry": { "enum": ["content.html", "content.svg", "content.png", "content.jpg"] },
     "styles": { "const": "styles.css" },
     "tokens": { "const": "tokens.json" },
     "preview": { "const": "preview.svg" },
@@ -115,6 +115,29 @@
     },
     "category": { "type": "string", "maxLength": 120 }
   },
+  "allOf": [
+    {
+      "if": { "properties": { "formatVersion": { "const": "1.0" } }, "required": ["formatVersion"] },
+      "then": {
+        "properties": {
+          "contentType": { "enum": ["html", "svg"] },
+          "entry": { "enum": ["content.html", "content.svg"] }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "formatVersion": { "const": "1.1" } }, "required": ["formatVersion"] },
+      "then": {
+        "properties": {
+          "fragmentType": { "const": "element" },
+          "contentType": { "const": "raster" },
+          "entry": { "enum": ["content.png", "content.jpg"] },
+          "properties": { "maxItems": 0 },
+          "slots": { "maxItems": 0 }
+        }
+      }
+    }
+  ],
   "$defs": {
     "point": {
       "type": "object",

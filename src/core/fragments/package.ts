@@ -43,9 +43,69 @@ function assertTextSize(name: string, value: string): void {
   if (byteLength(value) > MAX_TEXT_BYTES) throw new Error(`${name} 超过 ${MAX_TEXT_BYTES / 1024 / 1024} MiB 文本上限。`);
 }
 
+export interface RasterImageInfo {
+  mimeType: "image/png" | "image/jpeg";
+  width: number;
+  height: number;
+}
+
+function uint32(bytes: Uint8Array, offset: number): number {
+  return ((bytes[offset]! * 0x1000000) + (bytes[offset + 1]! << 16) + (bytes[offset + 2]! << 8) + bytes[offset + 3]!) >>> 0;
+}
+
+function jpegDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+  const startOfFrame = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
+  let offset = 2;
+  while (offset + 3 < bytes.length) {
+    while (offset < bytes.length && bytes[offset] !== 0xff) offset += 1;
+    while (offset < bytes.length && bytes[offset] === 0xff) offset += 1;
+    if (offset >= bytes.length) break;
+    const marker = bytes[offset++]!;
+    if (marker === 0xd9 || marker === 0xda) break;
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+    if (offset + 1 >= bytes.length) break;
+    const length = (bytes[offset]! << 8) | bytes[offset + 1]!;
+    if (length < 2 || offset + length > bytes.length) break;
+    if (startOfFrame.has(marker) && length >= 7) {
+      const height = (bytes[offset + 3]! << 8) | bytes[offset + 4]!;
+      const width = (bytes[offset + 5]! << 8) | bytes[offset + 6]!;
+      return width > 0 && height > 0 ? { width, height } : null;
+    }
+    offset += length;
+  }
+  return null;
+}
+
+export function inspectRasterImage(bytes: Uint8Array, expectedEntry?: "content.png" | "content.jpg"): RasterImageInfo {
+  let info: RasterImageInfo | null = null;
+  if (bytes.length >= 24 && [137, 80, 78, 71, 13, 10, 26, 10].every((value, index) => bytes[index] === value)) {
+    if (String.fromCharCode(...bytes.slice(12, 16)) !== "IHDR") throw new Error("PNG 缺少有效 IHDR。");
+    info = { mimeType: "image/png", width: uint32(bytes, 16), height: uint32(bytes, 20) };
+  } else {
+    const dimensions = jpegDimensions(bytes);
+    if (dimensions) info = { mimeType: "image/jpeg", ...dimensions };
+  }
+  if (!info || info.width <= 0 || info.height <= 0) throw new Error("Raster 内容不是有效的 PNG 或 JPEG，或缺少可识别尺寸。");
+  if (info.width * info.height > 100_000_000) throw new Error("Raster 图像面积不能超过 100,000,000 像素。");
+  if (expectedEntry === "content.png" && info.mimeType !== "image/png") throw new Error("content.png 的真实内容不是 PNG。");
+  if (expectedEntry === "content.jpg" && info.mimeType !== "image/jpeg") throw new Error("content.jpg 的真实内容不是 JPEG。");
+  return info;
+}
+
 function validatePackageShape(fragment: VisualFragmentPackage): void {
   assertVisualFragmentManifest(fragment.manifest);
-  assertTextSize(fragment.manifest.entry, fragment.content);
+  if (fragment.manifest.contentType === "raster") {
+    if (!(fragment.content instanceof Uint8Array)) throw new Error("Raster 片段内容必须是二进制字节。");
+    if (fragment.content.byteLength > MAX_FILE_BYTES) throw new Error(`Raster 内容超过 ${MAX_FILE_BYTES / 1024 / 1024} MiB 上限。`);
+    const info = inspectRasterImage(fragment.content, fragment.manifest.entry as "content.png" | "content.jpg");
+    if (info.width !== fragment.manifest.canvas.width || info.height !== fragment.manifest.canvas.height) {
+      throw new Error("Raster manifest 画布尺寸与图像真实尺寸不一致。");
+    }
+  } else {
+    if (typeof fragment.content !== "string") throw new Error("HTML/SVG 片段内容必须是文本。");
+    assertTextSize(fragment.manifest.entry, fragment.content);
+  }
   assertTextSize(fragment.manifest.styles, fragment.styles);
   assertTextSize(fragment.manifest.preview, fragment.previewSvg);
   const manifestAssetPaths = new Set(fragment.manifest.assets.filter((asset) => !asset.external).map((asset) => safeAssetPath(asset.path)));
@@ -66,7 +126,9 @@ function validatePackageShape(fragment: VisualFragmentPackage): void {
 }
 
 export async function encodeVisualFragmentPackage(fragment: VisualFragmentPackage): Promise<Uint8Array> {
-  const sanitizedContent = sanitizePackageContent(fragment.content, fragment.manifest.contentType);
+  const sanitizedContent = fragment.manifest.contentType === "raster"
+    ? { value: new Uint8Array(fragment.content as Uint8Array), warnings: [] }
+    : sanitizePackageContent(fragment.content as string, fragment.manifest.contentType);
   const cssWarnings: string[] = [];
   const sanitizedPreview = sanitizePreviewSvg(fragment.previewSvg);
   const normalized: VisualFragmentPackage = {
@@ -249,9 +311,18 @@ export async function decodeVisualFragmentPackage(input: Blob | ArrayBuffer | Ui
   };
 
   const warnings: string[] = [];
-  const sanitizedContent = sanitizePackageContent(await requiredText(manifest.entry), manifest.contentType);
-  const content = sanitizedContent.value;
-  warnings.push(...sanitizedContent.warnings);
+  let content: string | Uint8Array;
+  if (manifest.contentType === "raster") {
+    const entry = files.get(safePackagePath(manifest.entry));
+    if (!entry) throw new Error(`.vfrag 缺少 ${manifest.entry}。`);
+    content = await entry.async("uint8array");
+    if (content.byteLength > MAX_FILE_BYTES) throw new Error(`Raster 内容超过 ${MAX_FILE_BYTES / 1024 / 1024} MiB 上限。`);
+    inspectRasterImage(content, manifest.entry as "content.png" | "content.jpg");
+  } else {
+    const sanitizedContent = sanitizePackageContent(await requiredText(manifest.entry), manifest.contentType);
+    content = sanitizedContent.value;
+    warnings.push(...sanitizedContent.warnings);
+  }
   const cssWarnings: string[] = [];
   const styles = sanitizeCss(await requiredText(manifest.styles), cssWarnings);
   warnings.push(...cssWarnings.map((warning) => `styles.css: ${warning}`));
@@ -262,7 +333,7 @@ export async function decodeVisualFragmentPackage(input: Blob | ArrayBuffer | Ui
   warnings.push(...preview.warnings);
   const assets: ProjectAsset[] = [];
   const declaredAssets = new Map(manifest.assets.filter((asset) => !asset.external).map((asset) => [safeAssetPath(asset.path), asset]));
-  let totalBytes = byteLength(manifestText) + byteLength(content) + byteLength(styles) + byteLength(tokensText) + byteLength(previewSvg);
+  let totalBytes = byteLength(manifestText) + (typeof content === "string" ? byteLength(content) : content.byteLength) + byteLength(styles) + byteLength(tokensText) + byteLength(previewSvg);
   if (totalBytes > MAX_PACKAGE_BYTES) throw new Error(".vfrag 解压后超过安全大小上限。");
   for (const [path, dependency] of declaredAssets) {
     const entry = files.get(path);

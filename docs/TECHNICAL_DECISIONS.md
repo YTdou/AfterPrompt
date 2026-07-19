@@ -23,7 +23,8 @@
 - CodeMirror 6：代码编辑、语法高亮、搜索和定位；
 - Prettier：按需加载的显式格式化；
 - JSZip：按需加载的项目目录导出；
-- IndexedDB：保存可能包含二进制资源的本地 Visual Fragment 版本；不可用时显式降级到内存，不使用容量不足的 localStorage；
+- File System Access：在支持的桌面浏览器中连接用户明确授权的片段目录，`.vfrag` 文件是长期事实源；
+- IndexedDB：仅作为临时片段剪贴板、旧片段迁移来源和目录 handle 保存位置；不可用时显式降级到会话内存，不使用容量不足的 localStorage；
 - JSDOM：CLI 中解析 HTML / SVG 和解析声明式 CSS；
 - Vitest：核心模块测试；
 - Playwright Core + 系统 Chrome：真实浏览器冒烟测试。
@@ -33,6 +34,12 @@
 ## 为什么自定义 `.vfrag` 仍同时导出标准格式
 
 HTML/SVG 本身没有统一表达“局部节点 + 匹配 CSS + 资源 + 组件属性 + 插槽 + 来源与版本”的可移植容器，因此 `.vfrag` 使用可检查的 ZIP 和 JSON Schema 承载这些元数据。但它不能成为锁定格式：库中仍可导出标准 SVG、HTML/CSS、预览 SVG/PNG，也可复制源码。导入后的规范状态仍是标准 DOM/SVG。
+
+格式 1.1 只增加 PNG/JPEG Raster entry，不重写 1.0 HTML/SVG。Raster 是表示类型，不是组件语义：它始终作为单个 element 插入，不提供属性、插槽或关联同步。原始 SVG 则保留节点树，并可在编辑器中进一步保存为 component。
+
+## 为什么本地目录而不是 IndexedDB 是事实源
+
+IndexedDB 是不稳定的站点数据：用户难以检查、备份和跨浏览器迁移，也可能被浏览器清理。因此它只作为 `Ctrl/Cmd+C`、`Ctrl/Cmd+V` 驱动的短期临时片段剪贴板。用户目录中的独立 `.vfrag` 文件可以被复制、版本控制和恢复，也避免服务端账号、配额、对象存储与同步冲突。目录 provider 与 package/schema/plan/apply 分离；不支持目录 API 时默认下载/导入 `.vfrag`，保存 UI 不提供临时剪贴板目标。本阶段不实现云端占位接口。
 
 ## 为什么导入分成 plan / apply
 

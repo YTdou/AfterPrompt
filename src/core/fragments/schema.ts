@@ -139,8 +139,18 @@ function validateNode(value: unknown, schema: JsonSchema, path: string, issues: 
 function addSemanticIssues(value: Record<string, unknown>, issues: VisualFragmentValidationIssue[]): void {
   const contentType = value.contentType;
   const entry = value.entry;
-  if ((contentType === "html" && entry !== "content.html") || (contentType === "svg" && entry !== "content.svg")) {
+  if (
+    (contentType === "html" && entry !== "content.html")
+    || (contentType === "svg" && entry !== "content.svg")
+    || (contentType === "raster" && !["content.png", "content.jpg"].includes(String(entry)))
+  ) {
     appendIssue(issues, "$.entry", "入口文件必须与 contentType 一致");
+  }
+  if (value.formatVersion === "1.0" && contentType === "raster") {
+    appendIssue(issues, "$.formatVersion", "Raster 片段必须使用格式版本 1.1");
+  }
+  if (value.formatVersion === "1.1" && contentType !== "raster") {
+    appendIssue(issues, "$.formatVersion", "格式版本 1.1 当前仅用于 Raster 片段");
   }
   const canvas = isRecord(value.canvas) ? value.canvas : {};
   if (typeof canvas.width === "number" && typeof canvas.height === "number" && canvas.width * canvas.height > 100_000_000) {
@@ -196,6 +206,9 @@ function addSemanticIssues(value: Record<string, unknown>, issues: VisualFragmen
     appendIssue(issues, "$.fragmentType", "element 和 group 不能声明组件属性或插槽");
   }
   if (fragmentType === "template" && slots.length === 0) appendIssue(issues, "$.slots", "template 必须声明至少一个插槽");
+  if (contentType === "raster" && fragmentType !== "element") {
+    appendIssue(issues, "$.fragmentType", "Raster 片段必须作为单个 element 保存");
+  }
 
   for (const key of ["assets", "fonts"] as const) {
     const items = Array.isArray(value[key]) ? value[key] as Array<Record<string, unknown>> : [];

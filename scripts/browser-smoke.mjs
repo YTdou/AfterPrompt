@@ -70,6 +70,25 @@ async function dragBy(page, locator, deltaX, deltaY) {
   await page.mouse.up();
 }
 
+async function openFragmentMore(card) {
+  const details = card.locator(".fragment-card-actions details");
+  if (!(await details.getAttribute("open"))) await details.locator("summary").click();
+}
+
+async function chooseIoAction(page, menuId, actionSelector) {
+  const menu = page.locator(menuId);
+  if (!(await menu.getAttribute("open"))) await menu.locator(":scope > summary").click();
+  await page.locator(actionSelector).click();
+}
+
+async function loadExample(page, kind) {
+  await chooseIoAction(page, "#import-menu", `[data-load-example="${kind}"]`);
+}
+
+async function exportDocument(page) {
+  await chooseIoAction(page, "#export-menu", "#export-document-action");
+}
+
 async function run() {
   if (!executablePath) throw new Error("Chrome/Chromium was not found. Set CHROME_PATH to its executable.");
   await ensureServer();
@@ -81,6 +100,36 @@ async function run() {
   const errors = [];
   try {
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+    await page.addInitScript(() => {
+      const files = new Map();
+      globalThis.__fragmentDirectoryFiles = files;
+      globalThis.showDirectoryPicker = async () => ({
+        kind: "directory",
+        name: "Browser Smoke Fragments",
+        queryPermission: async () => "granted",
+        requestPermission: async () => "granted",
+        async *values() { yield* files.values(); },
+        async getFileHandle(name, options = {}) {
+          let handle = files.get(name);
+          if (!handle && options.create) {
+            let bytes = new Uint8Array();
+            handle = {
+              kind: "file",
+              name,
+              getFile: async () => ({ name, lastModified: Date.now(), arrayBuffer: async () => bytes.slice().buffer }),
+              createWritable: async () => ({
+                write: async (value) => { bytes = value instanceof Blob ? new Uint8Array(await value.arrayBuffer()) : new Uint8Array(value); },
+                close: async () => undefined,
+              }),
+            };
+            files.set(name, handle);
+          }
+          if (!handle) throw new Error(`Missing file: ${name}`);
+          return handle;
+        },
+        removeEntry: async (name) => { files.delete(name); },
+      });
+    });
     page.setDefaultTimeout(20_000);
     page.on("pageerror", (error) => errors.push(error.stack ?? error.message));
     page.on("console", (message) => {
@@ -96,6 +145,8 @@ async function run() {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await page.locator("#document-status").waitFor();
     assert((await page.locator("#document-status").textContent())?.includes("HTML"), "HTML example did not load.");
+    assert((await page.locator("#export-document-label").textContent()) === "导出 HTML", "The export menu did not reflect the active HTML document type.");
+    assert(await page.locator("#export-selection-action").isDisabled(), "Selection export is enabled without a selection.");
     assert(await page.locator("[data-layer-id]").count() >= 12, "Layer tree is unexpectedly empty.");
 
     progress("checking the default collapsed source bar and canvas space");
@@ -206,8 +257,10 @@ async function run() {
     assert((await page.locator(".cm-content").innerText()).includes("width:"), "Resize did not synchronize to source code.");
 
     await page.locator('[data-layer-id="title-001"]').click();
+    assert(await page.locator("#export-selection-action").isEnabled(), "Selection export did not enable after selecting an element.");
     await page.locator('[data-prop="text"]').waitFor();
     assert((await shadowText(page, "title-001")) === "Energy-Proportional LLM Inference", "HTML title selection did not map to the Shadow DOM node.");
+    assert(await page.locator('#inspector-content input[type="color"][data-prop="color"]').inputValue() === "#15213b", "The text-color swatch does not reflect the selected element's computed color.");
 
     const textEditor = page.locator('textarea[data-prop="text"]');
     await textEditor.fill("Browser smoke title");
@@ -245,10 +298,146 @@ async function run() {
     await page.waitForFunction(() => document.querySelector("#selection-status")?.textContent?.startsWith("takeaway-001"));
     assert(!(await page.locator('[data-inspector-action="select-parent"]').isDisabled()), "Child-first canvas selection lost parent navigation.");
 
-    progress("checking Visual Fragment save, package export, linked insert, properties, and definition sync");
+    progress("checking parent-to-child click and drag gesture arbitration");
+    await page.evaluate(() => {
+      const child = document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="takeaway-001"]');
+      if (child instanceof HTMLElement) child.style.pointerEvents = "";
+    });
+    await page.locator('[data-layer-id="accent-block-001"]').click();
+    const childTransformBeforeJitter = await page.locator('#canvas-host [data-editor-id="takeaway-001"]').getAttribute("data-editor-translate-x");
+    await page.mouse.move(childHitPoint.x, childHitPoint.y);
+    await page.mouse.down();
+    await page.mouse.move(childHitPoint.x + 2, childHitPoint.y + 1);
+    await page.mouse.up();
+    await page.waitForFunction(() => document.querySelector("#selection-status")?.textContent?.startsWith("takeaway-001"));
+    assert(
+      await page.locator('#canvas-host [data-editor-id="takeaway-001"]').getAttribute("data-editor-translate-x") === childTransformBeforeJitter,
+      "Sub-threshold pointer jitter moved the child instead of acting as a click.",
+    );
+
+    const childTransformBeforeDrag = Number(await page.locator('#canvas-host [data-editor-id="takeaway-001"]').getAttribute("data-editor-translate-x") ?? 0);
+    await page.mouse.move(childHitPoint.x, childHitPoint.y);
+    await page.mouse.down();
+    await page.mouse.move(childHitPoint.x + 18, childHitPoint.y + 10, { steps: 4 });
+    await page.mouse.up();
+    await page.waitForFunction((before) => {
+      const child = document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="takeaway-001"]');
+      return Math.abs(Number(child?.getAttribute("data-editor-translate-x") ?? 0) - before) >= 4;
+    }, childTransformBeforeDrag);
+    assert((await page.locator("#selection-status").textContent())?.startsWith("takeaway-001"), "Direct child drag did not keep the child selected.");
+    await page.locator("#undo").click();
+    await page.waitForFunction((before) => {
+      const child = document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="takeaway-001"]');
+      return Math.abs(Number(child?.getAttribute("data-editor-translate-x") ?? 0) - before) < 0.01;
+    }, childTransformBeforeDrag);
+
+    await page.locator('[data-layer-id="accent-block-001"]').click();
+    const parentBoxBeforeDrag = await page.locator('#canvas-host [data-editor-id="accent-block-001"]').boundingBox();
+    assert(parentBoxBeforeDrag, "Selected parent has no browser bounds before Alt-drag.");
+    const refreshedChildBox = await page.locator('#canvas-host [data-editor-id="takeaway-001"]').boundingBox();
+    assert(refreshedChildBox, "Nested child has no browser bounds before Alt-drag.");
+    const altDragPoint = { x: refreshedChildBox.x + refreshedChildBox.width / 2, y: refreshedChildBox.y + refreshedChildBox.height / 2 };
+    await page.keyboard.down("Alt");
+    await page.mouse.move(altDragPoint.x, altDragPoint.y);
+    await page.mouse.down();
+    assert((await page.locator("#selection-status").textContent())?.startsWith("accent-block-001"), "Alt pointerdown did not preserve the selected parent target.");
+    await page.mouse.move(altDragPoint.x + 18, altDragPoint.y + 10, { steps: 4 });
+    await page.mouse.up();
+    await page.keyboard.up("Alt");
+    await page.waitForFunction((beforeLeft) => {
+      const parent = document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="accent-block-001"]');
+      return parent ? Math.abs(parent.getBoundingClientRect().left - beforeLeft) >= 4 : false;
+    }, parentBoxBeforeDrag.x);
+    await page.waitForFunction(() => document.querySelector("#selection-status")?.textContent?.startsWith("accent-block-001"));
+    await page.locator("#undo").click();
+
+    const parentTransformBeforePan = await page.locator('#canvas-host [data-editor-id="accent-block-001"]').getAttribute("data-editor-translate-x");
+    const canvasTransformBeforePan = await page.locator("#canvas-transform").getAttribute("style");
+    const panStartBox = await page.locator('#canvas-host [data-editor-id="takeaway-001"]').boundingBox();
+    assert(panStartBox, "Nested child has no browser bounds before Space-pan.");
+    await page.keyboard.down("Space");
+    await page.mouse.move(panStartBox.x + panStartBox.width / 2, panStartBox.y + panStartBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(panStartBox.x + panStartBox.width / 2 + 24, panStartBox.y + panStartBox.height / 2 + 12, { steps: 4 });
+    await page.mouse.up();
+    await page.keyboard.up("Space");
+    assert(
+      await page.locator('#canvas-host [data-editor-id="accent-block-001"]').getAttribute("data-editor-translate-x") === parentTransformBeforePan,
+      "Space-pan moved the selected parent element.",
+    );
+    assert(await page.locator("#canvas-transform").getAttribute("style") !== canvasTransformBeforePan, "Space-pan did not move the canvas.");
+    await page.locator("#fit-canvas").click();
+
+    progress("checking consolidated import/export menus and the temporary fragment clipboard");
+    assert(await page.locator("#import-menu > summary").count() === 1, "The top bar does not expose exactly one import entry.");
+    assert(await page.locator("#export-menu > summary").count() === 1, "The top bar does not expose exactly one export entry.");
+    assert(await page.locator("#save-fragment, #import-local-fragment, #open-fragment-library, #fragment-toolbar-storage, #export-html").count() === 0, "Legacy top-level import/export or IndexedDB controls are still mounted.");
+    await page.locator("#import-menu > summary").click();
+    assert(await page.locator("#import-menu .io-menu-panel button").count() === 9, "The import menu lost one or more grouped actions.");
+    await page.keyboard.press("Escape");
+    assert(!(await page.locator("#import-menu").getAttribute("open")), "Escape did not close the import menu.");
+
     await page.locator('[data-layer-id="title-001"]').click();
-    await page.locator("#save-fragment").click();
+    await page.keyboard.press("Control+C");
+    await page.waitForFunction(() => document.querySelector("#toast")?.textContent?.includes("临时片段剪贴板"));
+    await chooseIoAction(page, "#import-menu", "#open-temporary-clipboard-action");
+    await page.locator("#fragment-library-dialog").waitFor({ state: "visible" });
+    const clipboardCard = page.locator('.fragment-card[data-fragment-id^="clipboard-"]').first();
+    await clipboardCard.waitFor();
+    assert((await page.locator("#fragment-storage-status").textContent())?.includes("临时片段剪贴板"), "The clipboard manager did not open in temporary mode.");
+    assert(await page.locator('#fragment-save-target option[value="clipboard"]').count() === 0, "The explicit IndexedDB save target is still present.");
+    assert(await page.locator("#fragment-import").isHidden() && await page.locator("#fragment-library-save-selection").isHidden(), "Temporary clipboard mode still exposes explicit write controls.");
+    const libraryPreview = clipboardCard.locator(".fragment-preview img");
+    await libraryPreview.evaluate((image) => image.decode());
+    const libraryPreviewState = await libraryPreview.evaluate((image) => ({
+      naturalWidth: image.naturalWidth,
+      naturalHeight: image.naturalHeight,
+      width: image.getBoundingClientRect().width,
+      height: image.getBoundingClientRect().height,
+      opacity: getComputedStyle(image).opacity,
+    }));
+    assert(libraryPreviewState.naturalWidth > 0 && libraryPreviewState.naturalHeight > 0 && libraryPreviewState.height >= 20 && libraryPreviewState.opacity === "1", `Fragment clipboard preview is effectively empty: ${JSON.stringify(libraryPreviewState)}`);
+    await page.locator("#fragment-library-close").click();
+
+    await page.keyboard.press("Control+V");
+    await page.waitForFunction(() => document.querySelector("#selection-status")?.textContent?.includes("clipboard-"));
+    const firstPasteId = (await page.locator("#selection-status").textContent())?.split(/\s+/)[0];
+    assert(firstPasteId, "First clipboard paste did not select the inserted fragment.");
+    const firstPastePosition = await page.locator(`#canvas-host [data-editor-id="${firstPasteId}"]`).evaluate((element) => ({
+      left: Number.parseFloat(element.style.left),
+      top: Number.parseFloat(element.style.top),
+    }));
+    await page.keyboard.press("Control+V");
+    await page.waitForFunction((firstId) => {
+      const selection = document.querySelector("#selection-status")?.textContent?.split(/\s+/)[0];
+      return Boolean(selection?.includes("clipboard-") && selection !== firstId);
+    }, firstPasteId);
+    const secondPasteId = (await page.locator("#selection-status").textContent())?.split(/\s+/)[0];
+    assert(secondPasteId, "Second clipboard paste did not select the inserted fragment.");
+    const secondPastePosition = await page.locator(`#canvas-host [data-editor-id="${secondPasteId}"]`).evaluate((element) => ({
+      left: Number.parseFloat(element.style.left),
+      top: Number.parseFloat(element.style.top),
+    }));
+    assert(Math.abs(secondPastePosition.left - firstPastePosition.left - 16) < 0.1 && Math.abs(secondPastePosition.top - firstPastePosition.top - 16) < 0.1, `Repeated paste did not advance by 16px: ${JSON.stringify({ firstPastePosition, secondPastePosition })}`);
+    await page.locator("#undo").click();
+    assert(await page.locator(`#canvas-host [data-editor-id="${secondPasteId}"]`).count() === 0, "Undo did not remove the latest clipboard paste.");
+    await page.locator("#redo").click();
+    assert(await page.locator(`#canvas-host [data-editor-id="${secondPasteId}"]`).count() === 1, "Redo did not restore the latest clipboard paste.");
+
+    progress("checking local directory migration and Visual Fragment export metadata");
+    await chooseIoAction(page, "#import-menu", "#open-temporary-clipboard-action");
+    await page.locator("#fragment-connect-directory").click();
+    await page.locator("#fragment-migrate-cache").click();
+    assert((await page.locator("#fragment-storage-status").textContent())?.includes("本地目录"), "Fragment library did not switch to the user-owned directory source.");
+    await page.waitForFunction(() => (globalThis.__fragmentDirectoryFiles?.size ?? 0) >= 1);
+    assert(await page.evaluate(() => globalThis.__fragmentDirectoryFiles?.size ?? 0) >= 1, "Browser fragment migration did not create a .vfrag file in the selected directory.");
+    await page.locator("#fragment-library-close").click();
+
+    await page.locator('[data-layer-id="title-001"]').click();
+    await chooseIoAction(page, "#export-menu", "#export-selection-action");
     await page.locator("#fragment-save-dialog").waitFor({ state: "visible" });
+    assert((await page.locator("#fragment-save-target").inputValue()) === "directory", "A connected local directory was not the default selection export target.");
+    assert((await page.locator("#fragment-save-submit").textContent()) === "保存到本地目录", "Selection export did not identify its durable destination.");
     await page.locator("#fragment-name").fill("Browser Title Component");
     await page.locator("#fragment-type").selectOption("component");
     await page.locator("#fragment-add-property").click();
@@ -271,27 +460,24 @@ async function run() {
       throw new Error(`Visual Fragment save failed: ${toast || "no toast message"}${errors.length ? `\n${errors.join("\n")}` : ""}`);
     }
 
-    await page.locator("#open-fragment-library").click();
+    await chooseIoAction(page, "#import-menu", "#open-local-library-action");
     await page.locator("#fragment-library-dialog").waitFor({ state: "visible" });
     const fragmentCard = page.locator('.fragment-card:has-text("Browser Title Component")').first();
     await fragmentCard.waitFor();
     const fragmentId = await fragmentCard.getAttribute("data-fragment-id");
     assert(fragmentId, "Saved Visual Fragment has no definition ID.");
-    assert((await page.locator("#fragment-storage-status").textContent())?.includes("IndexedDB"), "Visual Fragment library did not use persistent browser storage.");
-    const libraryPreview = fragmentCard.locator(".fragment-preview img");
-    await libraryPreview.evaluate((image) => image.decode());
-    const libraryPreviewState = await libraryPreview.evaluate((image) => ({
-      naturalWidth: image.naturalWidth,
-      naturalHeight: image.naturalHeight,
-      width: image.getBoundingClientRect().width,
-      height: image.getBoundingClientRect().height,
-      opacity: getComputedStyle(image).opacity,
-    }));
-    assert(libraryPreviewState.naturalWidth > 0 && libraryPreviewState.naturalHeight > 0 && libraryPreviewState.height >= 20 && libraryPreviewState.opacity === "1", `Fragment library preview is effectively empty: ${JSON.stringify(libraryPreviewState)}`);
+    await page.locator("#fragment-view-clipboard").click();
+    assert((await page.locator("#fragment-storage-status").textContent())?.includes("临时片段剪贴板"), "Connected users could not switch back to the temporary clipboard.");
+    await clipboardCard.waitFor();
+    await page.locator("#fragment-view-directory").click();
+    assert((await page.locator("#fragment-storage-status").textContent())?.includes("本地目录"), "Connected users could not return to the durable local directory.");
+    await fragmentCard.waitFor();
 
-    const fragmentDownloadPromise = page.waitForEvent("download");
+    const fragmentDownloadPromise = page.waitForEvent("download", { timeout: 8_000 }).catch(() => null);
+    await openFragmentMore(fragmentCard);
     await fragmentCard.locator('[data-fragment-action="export"]').click();
     const fragmentDownload = await fragmentDownloadPromise;
+    if (!fragmentDownload) throw new Error(`Migrated .vfrag export failed: ${await page.locator("#toast").textContent()}`);
     const fragmentDownloadPath = await fragmentDownload.path();
     assert(fragmentDownloadPath, ".vfrag export did not produce a download path.");
     const fragmentBytes = await readFile(fragmentDownloadPath);
@@ -308,7 +494,8 @@ async function run() {
 
     await page.locator("#fragment-library-close").click();
     await page.locator('[data-layer-id="accent-block-001"]').click();
-    await page.locator("#open-fragment-library").click();
+    await chooseIoAction(page, "#import-menu", "#open-local-library-action");
+    await openFragmentMore(fragmentCard);
     await fragmentCard.locator('[data-fragment-action="insert-linked"]').click();
     await page.locator("#fragment-report-dialog").waitFor({ state: "visible" });
     const compatibilityText = await page.locator("#fragment-report-content").textContent();
@@ -365,15 +552,16 @@ async function run() {
       return root?.querySelector('[data-vfrag-node-key="title-001"]')?.textContent === expected;
     }, { definitionId: fragmentId, expected: "Reusable browser title" });
     const componentSourceDownloadPromise = page.waitForEvent("download");
-    await page.locator("#export-html").click();
+    await exportDocument(page);
     const componentSourceDownload = await componentSourceDownloadPromise;
     const componentSourcePath = await componentSourceDownload.path();
     assert(componentSourcePath, "Component source export did not produce a download path.");
     const componentSource = await readFile(componentSourcePath, "utf8");
     assert(componentSource.includes("data-vfrag-property-overrides") && componentSource.includes("Reusable browser title"), "Component property override did not synchronize to exported source code.");
 
-    await page.locator("#open-fragment-library").click();
+    await chooseIoAction(page, "#import-menu", "#open-local-library-action");
     const originalCard = page.locator(`.fragment-card[data-fragment-id="${fragmentId}"][data-fragment-version="1.0.0"]`);
+    await openFragmentMore(originalCard);
     await originalCard.locator('[data-fragment-action="update"]').click();
     await page.locator("#fragment-save-dialog").waitFor({ state: "visible" });
     assert((await page.locator("#fragment-version").inputValue()) === "1.0.1", "Updating a definition did not advance the patch version.");
@@ -381,6 +569,7 @@ async function run() {
     await page.locator("#fragment-save-dialog").waitFor({ state: "hidden" });
     const updatedCard = page.locator(`.fragment-card[data-fragment-id="${fragmentId}"][data-fragment-version="1.0.1"]`);
     await updatedCard.waitFor();
+    await openFragmentMore(updatedCard);
     await updatedCard.locator('[data-fragment-action="sync"]').click();
     await page.locator("#fragment-library-close").click();
     await page.waitForFunction(({ definitionId, expected }) => {
@@ -407,9 +596,80 @@ async function run() {
       return root?.getAttribute("data-vfrag-linked") === "false";
     }, fragmentId);
 
+    progress("checking direct SVG insertion and directory-backed PNG/JPEG imports");
+    const svgBytes = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80"><g id="raw-layer"><rect width="40" height="20" fill="#315efb"/><text x="4" y="50">Raw SVG</text></g></svg>');
+    const selectionBeforeRawSvg = await page.locator("#selection-status").textContent();
+    const rawSvgChooserPromise = page.waitForEvent("filechooser");
+    await chooseIoAction(page, "#import-menu", "#insert-fragment-action");
+    const rawSvgChooser = await rawSvgChooserPromise;
+    await rawSvgChooser.setFiles({ name: "raw-mark.svg", mimeType: "image/svg+xml", buffer: svgBytes });
+    await page.locator("#fragment-report-dialog").waitFor({ state: "visible" });
+    await page.locator("#fragment-report-confirm").click();
+    await page.locator("#fragment-report-dialog").waitFor({ state: "hidden" });
+    await page.waitForFunction((previous) => document.querySelector("#selection-status")?.textContent !== previous, selectionBeforeRawSvg);
+    const rawSvgRootId = (await page.locator("#selection-status").textContent())?.split(/\s+/)[0];
+    const rawSvgId = rawSvgRootId
+      ? await page.locator(`#canvas-host [data-editor-id="${rawSvgRootId}"]`).getAttribute("data-vfrag-definition-id")
+      : null;
+    assert(rawSvgId?.startsWith("raw-mark-"), `Top-level SVG import did not insert directly into the current page: ${rawSvgId}`);
+
+    await chooseIoAction(page, "#import-menu", "#open-local-library-action");
+
+    const rasterData = await page.evaluate(() => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 3;
+      canvas.height = 2;
+      const context = canvas.getContext("2d");
+      context.fillStyle = "#315efb";
+      context.fillRect(0, 0, 3, 2);
+      return {
+        png: canvas.toDataURL("image/png").split(",")[1],
+        jpg: canvas.toDataURL("image/jpeg", 0.9).split(",")[1],
+      };
+    });
+    const pngChooserPromise = page.waitForEvent("filechooser");
+    await page.locator("#fragment-import").click();
+    const pngChooser = await pngChooserPromise;
+    await pngChooser.setFiles({ name: "pixel.png", mimeType: "image/png", buffer: Buffer.from(rasterData.png, "base64") });
+    const pngCard = page.locator('.fragment-card:has-text("pixel")').first();
+    await pngCard.waitFor();
+    const jpgChooserPromise = page.waitForEvent("filechooser");
+    await page.locator("#fragment-import").click();
+    const jpgChooser = await jpgChooserPromise;
+    await jpgChooser.setFiles({ name: "photo.jpeg", mimeType: "image/jpeg", buffer: Buffer.from(rasterData.jpg, "base64") });
+    const jpgCard = page.locator('.fragment-card:has-text("photo")').first();
+    await jpgCard.waitFor();
+    assert((await pngCard.textContent())?.includes("Raster") && (await jpgCard.textContent())?.includes("Raster"), "PNG/JPEG imports were not classified as Raster fragments.");
+
+    const pngId = await pngCard.getAttribute("data-fragment-id");
+    const jpgId = await jpgCard.getAttribute("data-fragment-id");
+    for (const card of [pngCard, jpgCard]) {
+      await card.locator('[data-fragment-action="insert-copy"]').click();
+      await page.locator("#fragment-report-dialog").waitFor({ state: "visible" });
+      await page.locator("#fragment-report-confirm").click();
+      await page.locator("#fragment-report-dialog").waitFor({ state: "hidden" });
+    }
+    await page.locator("#fragment-library-close").click();
+    const rawImportState = await page.evaluate(({ rawSvgId, pngId, jpgId }) => {
+      const shadow = document.querySelector("#canvas-host")?.shadowRoot;
+      const find = (id) => Array.from(shadow?.querySelectorAll("[data-vfrag-definition-id]") ?? []).find((node) => node.getAttribute("data-vfrag-definition-id") === id);
+      const svg = find(rawSvgId);
+      const png = find(pngId);
+      const jpg = find(jpgId);
+      return {
+        svgKeepsTree: Boolean(svg?.querySelector("g rect") && svg.querySelector("g text")),
+        png: png ? { tag: png.localName, children: png.children.length, src: png.getAttribute("src") } : null,
+        jpg: jpg ? { tag: jpg.localName, children: jpg.children.length, src: jpg.getAttribute("src") } : null,
+      };
+    }, { rawSvgId, pngId, jpgId });
+    assert(rawImportState.svgKeepsTree, "Raw SVG insertion flattened or lost its editable child tree.");
+    assert(rawImportState.png?.tag === "img" && rawImportState.png.children === 0 && rawImportState.png.src?.startsWith("blob:"), `PNG was not inserted as one image layer with a local preview resource: ${JSON.stringify(rawImportState.png)}`);
+    assert(rawImportState.jpg?.tag === "img" && rawImportState.jpg.children === 0 && rawImportState.jpg.src?.startsWith("blob:"), `JPEG was not inserted as one image layer with a local preview resource: ${JSON.stringify(rawImportState.jpg)}`);
+
     progress("checking SVG selection and polygon scaling");
-    await page.locator("#example-select").selectOption("svg");
+    await loadExample(page, "svg");
     await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.startsWith("SVG"));
+    assert((await page.locator("#export-document-label").textContent()) === "导出 SVG", "The export menu did not update for the active SVG document type.");
     assert(await page.locator('[data-layer-id="svg-title"]').count() === 1, "SVG layer tree did not load.");
     await page.locator('[data-layer-id="svg-title"]').click();
     assert((await shadowText(page, "svg-title")) === "Editable SVG energy curve", "SVG selection did not map to the native SVG node.");
@@ -430,7 +690,7 @@ async function run() {
     });
     await page.waitForTimeout(250);
     const downloadPromise = page.waitForEvent("download");
-    await page.locator("#export-html").click();
+    await exportDocument(page);
     const svgDownload = await downloadPromise;
     const svgDownloadPath = await svgDownload.path();
     assert(svgDownloadPath, "SVG export did not produce a local download path.");
@@ -443,7 +703,7 @@ async function run() {
     assert(exportedSvg.includes("data-editor-scale-x"), `Polygon scaling did not synchronize to exported source code: ${JSON.stringify({ polygonAfterScale, exportedPolygon, errors })}`);
 
     progress("checking Phase 4 presentation workflow");
-    await page.locator("#example-select").selectOption("deck");
+    await loadExample(page, "deck");
     await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("page 1/3"));
     assert((await page.locator("#page-select option").count()) === 3, "The bundled deck did not expose three editable pages.");
     assert((await page.locator(".page-thumbnail").count()) === 3, "The page filmstrip did not render three thumbnails.");
@@ -535,7 +795,7 @@ async function run() {
     await page.locator("#document-status").waitFor();
     assert(Math.abs(await page.locator("#layers-panel").evaluate((element) => element.clientWidth) - persistedLayout.layersWidth) <= 2, "Reload did not restore the layer panel width.");
     assert(Math.abs(await page.locator("#inspector-panel").evaluate((element) => element.clientWidth) - persistedLayout.inspectorWidth) <= 2, "Reload did not restore the inspector width.");
-    await page.locator("#example-select").selectOption("deck");
+    await loadExample(page, "deck");
     await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("page 1/3"));
     assert(Math.abs(await page.locator("#page-filmstrip").evaluate((element) => element.clientHeight) - persistedLayout.pagesHeight) <= 2, "Reload did not restore the PAGES height.");
     assert(Math.abs(await page.locator("#build-panel").evaluate((element) => element.clientHeight) - persistedLayout.buildHeight) <= 2, "Reload did not restore the Build panel height.");
@@ -673,7 +933,7 @@ async function run() {
     await page.locator("#close-presentation").click();
 
     const slidesDownloadPromise = page.waitForEvent("download");
-    await page.locator("#export-html").click();
+    await exportDocument(page);
     const slidesDownload = await slidesDownloadPromise;
     const slidesDownloadPath = await slidesDownload.path();
     assert(slidesDownloadPath, "Interactive HTML export did not produce a local download path.");
@@ -690,7 +950,7 @@ async function run() {
     await page.locator("#duplicate-page").click();
     await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("page 2/5"));
     const secondRoundDownloadPromise = page.waitForEvent("download");
-    await page.locator("#export-html").click();
+    await exportDocument(page);
     const secondRoundDownload = await secondRoundDownloadPromise;
     const secondRoundPath = await secondRoundDownload.path();
     assert(secondRoundPath, "Editing and re-exporting a re-imported HTML file did not produce a download.");
@@ -726,6 +986,8 @@ async function run() {
       adjustableWorkspacePanels: true,
       panelCollapseReclaimsCanvas: true,
       persistentLayoutPreferences: true,
+      consolidatedImportExportMenus: true,
+      clipboardKeyboardPasteOffset: true,
       visualFragmentPackage: true,
       visualFragmentLibraryPreview: true,
       visualFragmentActiveSlicePlacement: true,
@@ -736,6 +998,12 @@ async function run() {
       visualFragmentPropertyOverride: true,
       visualFragmentSlotInsertion: true,
       visualFragmentDefinitionSync: true,
+      visualFragmentLocalFirstUi: true,
+      visualFragmentTemporaryClipboard: true,
+      visualFragmentLocalDirectory: true,
+      visualFragmentRawSvgImport: true,
+      visualFragmentPngImport: true,
+      visualFragmentJpegImport: true,
       buildStateEditing: true,
       buildAllAndGroupViews: true,
       buildOrchestration: true,

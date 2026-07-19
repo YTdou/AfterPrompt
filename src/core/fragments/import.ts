@@ -42,6 +42,9 @@ function allocateUnique(preferred: string, used: Set<string>): string {
 }
 
 function parseFragmentRoot(fragment: VisualFragmentPackage): { root: Element; warnings: string[] } {
+  if (fragment.manifest.contentType === "raster" || typeof fragment.content !== "string") {
+    throw new Error("Raster 片段不包含可解析的结构化根元素。");
+  }
   const Parser = globalThis.DOMParser;
   if (!Parser) throw new Error("当前环境不提供 DOMParser，无法导入视觉片段。");
   const parsed = new Parser().parseFromString(fragment.content, fragment.manifest.contentType === "svg" ? "image/svg+xml" : "text/html");
@@ -88,7 +91,14 @@ function prepareAssets(
   const remaps: Record<string, string> = {};
   const references: Record<string, string> = {};
   const reserved = new Set(targetAssets.list().map((asset) => asset.path));
-  for (const asset of fragment.assets) {
+  const packageAssets = fragment.manifest.contentType === "raster"
+    ? [{
+      path: fragment.manifest.entry,
+      mimeType: fragment.manifest.entry === "content.png" ? "image/png" : "image/jpeg",
+      bytes: new Uint8Array(fragment.content as Uint8Array),
+    }, ...fragment.assets]
+    : fragment.assets;
+  for (const asset of packageAssets) {
     let targetPath = `${basePath}/${fileName(asset.path)}`;
     let counter = 2;
     while (reserved.has(targetPath) && !byteArraysEqual(targetAssets.get(targetPath)?.bytes ?? new Uint8Array(), asset.bytes)) {
@@ -293,6 +303,36 @@ function serializeRoot(root: Element, contentType: "html" | "svg"): string {
   return `${Serializer ? new Serializer().serializeToString(root) : root.outerHTML}\n`;
 }
 
+function createRasterRoot(fragment: VisualFragmentPackage, targetType: "html" | "svg"): Element {
+  const Parser = globalThis.DOMParser;
+  if (!Parser) throw new Error("当前环境不提供 DOMParser，无法创建 Raster 片段实例。");
+  const width = fragment.manifest.canvas.width;
+  const height = fragment.manifest.canvas.height;
+  const id = fragment.manifest.fragmentId;
+  if (targetType === "svg") {
+    const document = new Parser().parseFromString("<svg xmlns=\"http://www.w3.org/2000/svg\"/>", "image/svg+xml");
+    const image = document.createElementNS(SVG_NS, "image");
+    image.setAttribute("data-vfrag-root", id);
+    image.setAttribute("data-vfrag-node-key", "fragment-root");
+    image.setAttribute("data-editor-id", id);
+    image.setAttribute("width", String(width));
+    image.setAttribute("height", String(height));
+    image.setAttribute("href", fragment.manifest.entry);
+    return image;
+  }
+  const document = new Parser().parseFromString("<!doctype html><html><body></body></html>", "text/html");
+  const image = document.createElement("img");
+  image.setAttribute("data-vfrag-root", id);
+  image.setAttribute("data-vfrag-node-key", "fragment-root");
+  image.setAttribute("data-editor-id", id);
+  image.setAttribute("src", fragment.manifest.entry);
+  image.setAttribute("alt", fragment.manifest.name);
+  image.style.position = "absolute";
+  image.style.width = `${width}px`;
+  image.style.height = `${height}px`;
+  return image;
+}
+
 function compatibilityError(report: VisualFragmentCompatibilityReport, message: string): void {
   report.errors.push(message);
   report.compatible = false;
@@ -322,11 +362,15 @@ export function planVisualFragmentInsert(
   else if (parent.getAttribute("data-editor-locked") === "true") compatibilityError(report, `插入父元素已锁定：${options.parentId}`);
   if (fragment.manifest.contentType === "html" && model.kind === "svg") compatibilityError(report, "HTML 片段不能导入 SVG 文档。");
   if (fragment.manifest.contentType === "html" && parent?.namespaceURI === SVG_NS) compatibilityError(report, "HTML 片段不能插入 SVG 子树。");
+  if (fragment.manifest.contentType === "raster" && options.linked) compatibilityError(report, "Raster 片段只能插入为独立副本。");
 
-  const parsed = parseFragmentRoot(fragment);
+  const plannedContentType = model.kind === "svg" || parent?.namespaceURI === SVG_NS ? "svg" : "html";
+  const parsed = fragment.manifest.contentType === "raster"
+    ? { root: createRasterRoot(fragment, plannedContentType), warnings: [] }
+    : parseFragmentRoot(fragment);
   report.warnings.push(...parsed.warnings);
   const root = parsed.root;
-  const actualReferences = resourceReferences(root, fragment.styles);
+  const actualReferences = fragment.manifest.contentType === "raster" ? [] : resourceReferences(root, fragment.styles);
   const externalReferences = actualReferences.filter((reference) => networkOrigin(reference));
   const declaredOrigins = new Set(fragment.manifest.permissions.origins);
   report.externalResources = Array.from(new Set([
@@ -340,7 +384,10 @@ export function planVisualFragmentInsert(
     const origin = networkOrigin(reference);
     if (origin && !declaredOrigins.has(origin)) compatibilityError(report, `网络来源未在 manifest 声明：${origin}`);
   }
-  const declaredAssetReferences = new Set(fragment.manifest.assets.flatMap((asset) => [asset.path, asset.source]));
+  const declaredAssetReferences = new Set([
+    ...(fragment.manifest.contentType === "raster" ? [fragment.manifest.entry] : []),
+    ...fragment.manifest.assets.flatMap((asset) => [asset.path, asset.source]),
+  ]);
   const undeclaredAssets = actualReferences.filter((reference) => {
     const path = reference.split(/[?#]/, 1)[0]!;
     if (declaredAssetReferences.has(reference) || declaredAssetReferences.has(path)) return false;
@@ -400,7 +447,8 @@ export function planVisualFragmentInsert(
     parentId: options.parentId,
     placement: options.placement,
     linked: options.linked,
-    content: serializeRoot(root, fragment.manifest.contentType),
+    content: serializeRoot(root, plannedContentType),
+    plannedContentType,
     styles,
     assets: preparedAssets.assets,
     assetPathRemaps: preparedAssets.remaps,
@@ -411,10 +459,10 @@ export function planVisualFragmentInsert(
 
 function parsePlannedRoot(plan: VisualFragmentInsertPlan): Element {
   const Parser = globalThis.DOMParser;
-  const parsed = new Parser().parseFromString(plan.content, plan.fragment.manifest.contentType === "svg" ? "image/svg+xml" : "text/html");
+  const parsed = new Parser().parseFromString(plan.content, plan.plannedContentType === "svg" ? "image/svg+xml" : "text/html");
   const error = parsed.querySelector("parsererror");
   if (error) throw new Error(`已验证的片段计划无法重新解析：${error.textContent?.replace(/\s+/g, " ").trim()}`);
-  const root = plan.fragment.manifest.contentType === "svg" ? parsed.documentElement : parsed.body.firstElementChild;
+  const root = plan.plannedContentType === "svg" ? parsed.documentElement : parsed.body.firstElementChild;
   if (!root) throw new Error("已验证的片段计划没有根元素。");
   return root;
 }

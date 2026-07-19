@@ -7,6 +7,7 @@ import { getTransformValues, readDeclaredBounds } from "../core/commands";
 import { detectDocumentKind, SourceDocument } from "../core/document-model";
 import { extractVisualFragment } from "../core/fragments/extract";
 import { applyVisualFragmentInsertPlan, planVisualFragmentInsert } from "../core/fragments/import";
+import { ingestVisualFragmentBytes } from "../core/fragments/ingest";
 import { decodeVisualFragmentPackage, encodeVisualFragmentPackage } from "../core/fragments/package";
 import {
   createSavedProject,
@@ -129,6 +130,8 @@ Usage:
       [--type element|group|component|template] [--mode source-preserving|self-contained]
       [--fragment-id <stable-id>] [--version 1.0.0] [--category <name>] [--tags <tag,tag>]
       [--schema component-schema.json]
+  npm run cli -- fragment-pack <input.svg|input.png|input.jpg> --output <fragment.vfrag>
+      [--name <name>] [--description <text>] [--category <name>] [--tags <tag,tag>]
   npm run cli -- fragment-insert <input> --fragment <fragment.vfrag> --parent <element-id>
       [--placement center|original|x,y] [--linked] (--output <output> | --in-place)
 
@@ -229,7 +232,7 @@ async function main(): Promise<void> {
         manifest: fragment.manifest,
         files: {
           entry: fragment.manifest.entry,
-          contentBytes: new TextEncoder().encode(fragment.content).byteLength,
+          contentBytes: typeof fragment.content === "string" ? new TextEncoder().encode(fragment.content).byteLength : fragment.content.byteLength,
           stylesBytes: new TextEncoder().encode(fragment.styles).byteLength,
           previewBytes: new TextEncoder().encode(fragment.previewSvg).byteLength,
           assets: fragment.assets.map((asset) => ({ path: asset.path, mimeType: asset.mimeType, bytes: asset.bytes.byteLength })),
@@ -237,6 +240,21 @@ async function main(): Promise<void> {
         warnings: fragment.warnings,
       });
     }
+    return;
+  }
+  if (command === "fragment-pack") {
+    const outputPath = option(args, "--output");
+    if (!outputPath) throw new Error("fragment-pack requires --output <fragment.vfrag>.");
+    const fragment = await ingestVisualFragmentBytes(new Uint8Array(await readFile(inputPath)), basename(inputPath), {
+      name: option(args, "--name"),
+      description: option(args, "--description"),
+      category: option(args, "--category"),
+      tags: (option(args, "--tags") ?? "").split(",").map((tag) => tag.trim()).filter(Boolean),
+      sourceProject: inputPath,
+    });
+    const bytes = await encodeVisualFragmentPackage(fragment);
+    await writeFile(outputPath, bytes);
+    print({ output: outputPath, fragmentId: fragment.manifest.fragmentId, contentType: fragment.manifest.contentType, bytes: bytes.byteLength });
     return;
   }
   const parsed = await readInput(inputPath);

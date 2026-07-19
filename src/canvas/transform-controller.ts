@@ -15,6 +15,7 @@ export interface TransformCallbacks {
   onStart: (label: string) => void;
   onChange: () => void;
   onEnd: (label: string) => void;
+  canStartDrag?: () => boolean;
 }
 
 function idOf(element: Element): string | null {
@@ -29,6 +30,8 @@ export class TransformController {
   readonly moveable: Moveable;
   private selectedIds: string[] = [];
   private kind: DocumentKind = "html";
+  private dragGesture: { startX: number; startY: number; activated: boolean } | null = null;
+  private readonly dragThresholdPx = 4;
   private resizeStart = new Map<string, {
     bounds: { width: number; height: number };
     transform: TransformValues;
@@ -60,6 +63,7 @@ export class TransformController {
       throttleRotate: 0,
     });
     this.installEvents();
+    this.container.addEventListener("mousedown", this.beginMoveableTargetDrag, { capture: true });
     this.container.addEventListener("pointerdown", this.beginGenericSvgResize, { capture: true });
   }
 
@@ -108,9 +112,16 @@ export class TransformController {
   }
 
   destroy(): void {
+    this.container.removeEventListener("mousedown", this.beginMoveableTargetDrag, { capture: true });
     this.container.removeEventListener("pointerdown", this.beginGenericSvgResize, { capture: true });
     this.moveable.destroy();
   }
+
+  private beginMoveableTargetDrag = (event: MouseEvent): void => {
+    if (event.button !== 0) return;
+    const editableTarget = event.composedPath().find((node) => node instanceof Element && node.hasAttribute("data-editor-id"));
+    if (editableTarget instanceof Element) this.moveable.dragStart(event, editableTarget);
+  };
 
   private bothTargets(preview: Element): Element[] {
     const id = idOf(preview);
@@ -194,26 +205,38 @@ export class TransformController {
 
   private installEvents(): void {
     this.moveable.on("dragStart", (event) => {
+      if (this.callbacks.canStartDrag && !this.callbacks.canStartDrag()) {
+        this.dragGesture = null;
+        event.stopDrag();
+        return;
+      }
+      this.dragGesture = { startX: event.clientX, startY: event.clientY, activated: false };
       const transform = getTransformValues(event.target);
       event.set([transform.x, transform.y]);
-      this.callbacks.onStart("Move element");
     });
     this.moveable.on("drag", (event: OnDrag) => {
+      if (!this.activateDragGesture(event.clientX, event.clientY, "Move element")) return;
       for (const target of this.bothTargets(event.target)) {
         setElementTranslation(target, this.kindOf(target), event.beforeTranslate[0] ?? 0, event.beforeTranslate[1] ?? 0);
       }
       this.callbacks.onChange();
     });
-    this.moveable.on("dragEnd", () => this.callbacks.onEnd("Move element"));
+    this.moveable.on("dragEnd", () => this.finishDragGesture("Move element"));
 
     this.moveable.on("dragGroupStart", (event) => {
+      if (this.callbacks.canStartDrag && !this.callbacks.canStartDrag()) {
+        this.dragGesture = null;
+        event.stopDrag();
+        return;
+      }
+      this.dragGesture = { startX: event.clientX, startY: event.clientY, activated: false };
       event.events.forEach((child) => {
         const transform = getTransformValues(child.target);
         child.set([transform.x, transform.y]);
       });
-      this.callbacks.onStart("Move elements");
     });
     this.moveable.on("dragGroup", (event: OnDragGroup) => {
+      if (!this.activateDragGesture(event.clientX, event.clientY, "Move elements")) return;
       event.events.forEach((child) => {
         for (const target of this.bothTargets(child.target)) {
           setElementTranslation(target, this.kindOf(target), child.beforeTranslate[0] ?? 0, child.beforeTranslate[1] ?? 0);
@@ -221,7 +244,7 @@ export class TransformController {
       });
       this.callbacks.onChange();
     });
-    this.moveable.on("dragGroupEnd", () => this.callbacks.onEnd("Move elements"));
+    this.moveable.on("dragGroupEnd", () => this.finishDragGesture("Move elements"));
 
     this.moveable.on("resizeStart", (event) => {
       const id = idOf(event.target);
@@ -283,5 +306,22 @@ export class TransformController {
       this.callbacks.onChange();
     });
     this.moveable.on("rotateEnd", () => this.callbacks.onEnd("Rotate element"));
+  }
+
+  private activateDragGesture(clientX: number, clientY: number, label: string): boolean {
+    const gesture = this.dragGesture;
+    if (!gesture) return false;
+    if (!gesture.activated) {
+      if (Math.hypot(clientX - gesture.startX, clientY - gesture.startY) < this.dragThresholdPx) return false;
+      gesture.activated = true;
+      this.callbacks.onStart(label);
+    }
+    return true;
+  }
+
+  private finishDragGesture(label: string): void {
+    const changed = Boolean(this.dragGesture?.activated);
+    this.dragGesture = null;
+    if (changed) this.callbacks.onEnd(label);
   }
 }

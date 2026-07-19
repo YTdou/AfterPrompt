@@ -978,7 +978,7 @@ Visual Fragment 分为：
 ```text
 fragment.vfrag
 ├── manifest.json
-├── content.html 或 content.svg
+├── content.html、content.svg、content.png 或 content.jpg
 ├── styles.css
 ├── tokens.json
 ├── assets/
@@ -1127,6 +1127,18 @@ Codex 和用户均可以向插槽中插入内容。
 * 使用次数；
 * 导入和导出。
 
+本地库采用 local-first：
+
+* 用户明确选择的本地目录中的 `.vfrag` 文件是长期事实源；
+* IndexedDB 只作为“临时片段剪贴板”，用于短期复制粘贴和旧数据迁移；它可能被浏览器清理，不是长期存储；
+* 目录索引必须可以从 `.vfrag` 的 manifest 重建；
+* 支持把临时剪贴板中的片段复制到目录，但不得自动删除原记录；
+* 未连接目录时，保存默认下载 `.vfrag`；连接目录后默认直接写入目录；保存 UI 不提供 IndexedDB 目标；
+* 非文字编辑状态下，`Ctrl/Cmd+C` 将画布选区写入临时片段剪贴板，`Ctrl/Cmd+V` 插入其中最新记录；输入框和代码编辑器保持系统原生复制粘贴；
+* 本阶段不实现账号、云端存储或同步。
+
+允许直接导入 `.vfrag`、原始 SVG、PNG 和 JPEG。原始 SVG 保留节点树；PNG/JPEG 统一封装为 Raster element，插入后只有一个图片根图层。
+
 Codex 控制接口需要支持查询、检查和插入视觉片段。
 
 ## 10. 多格式导出
@@ -1139,6 +1151,7 @@ Codex 控制接口需要支持查询、检查和插入视觉片段。
 * 复制为 HTML；
 * 复制为 SVG；
 * 导出预览 PNG 或 SVG。
+* 导出 Raster 的原始 PNG 或 JPEG。
 
 自有格式不能替代标准格式。
 
@@ -1152,3 +1165,5 @@ Codex 控制接口需要支持查询、检查和插入视觉片段。
 4. 导出的视觉效果应与编辑器画布保持一致；
 5. 导出的 `.vfrag` 在空白项目中导入后，应能够独立、正确渲染；
 6. 导入包含重复 ID 的两个视觉片段后，不应出现 ID 或 SVG 引用冲突。
+7. 重新连接本地目录后，应能仅根据 `.vfrag` 文件重建可用库；
+8. PNG/JPEG 导入 HTML 或 SVG 后应分别成为单个 `img`/`image` 图层，且项目不得依赖原始导入文件继续存在。
