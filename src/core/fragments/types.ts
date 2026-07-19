@@ -2,9 +2,16 @@ import type { Bounds, ProjectAsset } from "../types";
 
 export const VISUAL_FRAGMENT_FORMAT = "last-mile-studio.visual-fragment" as const;
 export const VISUAL_FRAGMENT_FORMAT_VERSION = "1.0" as const;
+export const VISUAL_FRAGMENT_RASTER_FORMAT_VERSION = "1.1" as const;
 
 export type VisualFragmentType = "element" | "group" | "component" | "template";
-export type VisualFragmentContentType = "html" | "svg";
+export type VisualFragmentFormatVersion =
+  | typeof VISUAL_FRAGMENT_FORMAT_VERSION
+  | typeof VISUAL_FRAGMENT_RASTER_FORMAT_VERSION;
+export type VisualFragmentContentType = "html" | "svg" | "raster";
+export type VisualFragmentStructuredContentType = Exclude<VisualFragmentContentType, "raster">;
+export type VisualFragmentRasterMimeType = "image/png" | "image/jpeg";
+export type VisualFragmentEntry = "content.html" | "content.svg" | "content.png" | "content.jpg";
 export type VisualFragmentSaveMode = "source-preserving" | "self-contained";
 export type VisualFragmentPropertyType =
   | "text"
@@ -66,14 +73,14 @@ export interface VisualFragmentFontDependency {
 
 export interface VisualFragmentManifest {
   format: typeof VISUAL_FRAGMENT_FORMAT;
-  formatVersion: typeof VISUAL_FRAGMENT_FORMAT_VERSION;
+  formatVersion: VisualFragmentFormatVersion;
   fragmentId: string;
   name: string;
   description: string;
   fragmentType: VisualFragmentType;
   contentType: VisualFragmentContentType;
   saveMode: VisualFragmentSaveMode;
-  entry: "content.html" | "content.svg";
+  entry: VisualFragmentEntry;
   styles: "styles.css";
   tokens: "tokens.json";
   preview: "preview.svg";
@@ -111,12 +118,17 @@ export interface VisualFragmentManifest {
 
 export interface VisualFragmentPackage {
   manifest: VisualFragmentManifest;
-  content: string;
+  content: string | Uint8Array;
   styles: string;
   tokens: Record<string, string>;
   assets: ProjectAsset[];
   previewSvg: string;
   warnings: string[];
+}
+
+export interface StructuredVisualFragmentPackage extends VisualFragmentPackage {
+  manifest: VisualFragmentManifest & { contentType: VisualFragmentStructuredContentType; entry: "content.html" | "content.svg" };
+  content: string;
 }
 
 export interface VisualFragmentValidationIssue {
@@ -162,6 +174,7 @@ export interface VisualFragmentInsertPlan {
   placement: VisualFragmentPlacement;
   linked: boolean;
   content: string;
+  plannedContentType: VisualFragmentStructuredContentType;
   styles: string;
   assets: ProjectAsset[];
   assetPathRemaps: Record<string, string>;

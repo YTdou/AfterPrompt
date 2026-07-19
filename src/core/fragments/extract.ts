@@ -10,7 +10,7 @@ import {
   type VisualFragmentExtractOptions,
   type VisualFragmentFontDependency,
   type VisualFragmentManifest,
-  type VisualFragmentPackage,
+  type StructuredVisualFragmentPackage,
   type VisualFragmentProperty,
   type VisualFragmentSelectionItem,
   type VisualFragmentSlot,
@@ -705,7 +705,7 @@ export function extractVisualFragment(
   sourcePath: string,
   selectedItems: VisualFragmentSelectionItem[],
   options: VisualFragmentExtractOptions,
-): VisualFragmentPackage {
+): StructuredVisualFragmentPackage {
   const selection = normalizeSelection(selectedItems);
   validateFragmentSemantics(options, selection.length);
   const bounds = unionBounds(selection);
@@ -767,7 +767,6 @@ export function extractVisualFragment(
     contentRoot = root;
   } else {
     const root = ownerDocument.createElementNS(SVG_NS, "svg");
-    root.setAttribute("xmlns", SVG_NS);
     root.setAttribute("data-vfrag-root", fragmentId);
     root.setAttribute("data-vfrag-node-key", "fragment-root");
     root.setAttribute("data-editor-id", fragmentId);
@@ -873,7 +872,7 @@ export function extractVisualFragment(
     network: bundler.origins.size > 0 ? "declared" as const : "none" as const,
     origins: Array.from(bundler.origins).sort(),
   };
-  const manifest: VisualFragmentManifest = {
+  const manifest: StructuredVisualFragmentPackage["manifest"] = {
     format: VISUAL_FRAGMENT_FORMAT,
     formatVersion: VISUAL_FRAGMENT_FORMAT_VERSION,
     fragmentId,
@@ -898,7 +897,7 @@ export function extractVisualFragment(
       sourceProject: (options.sourceProject ?? sourcePath).slice(0, 512),
       sourceDocument: model.sourceName.slice(0, 512),
       createdAt: new Date().toISOString(),
-      generator: "Last Mile Studio 0.3.0",
+      generator: "Last Mile Studio 0.4.0",
     },
     version: normalizeVersion(options.version),
     tags: normalizeTags(options.tags),

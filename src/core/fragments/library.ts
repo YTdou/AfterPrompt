@@ -6,11 +6,18 @@ import type {
 } from "./types";
 
 const DATABASE_NAME = "last-mile-studio-visual-fragments";
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
 const STORE_NAME = "fragments";
+const SETTINGS_STORE_NAME = "settings";
+const DIRECTORY_HANDLE_KEY = "fragment-directory-handle";
+const DIRECTORY_METADATA_FILE = ".last-mile-library.json";
 
-interface FragmentStorage {
+export type FragmentStorageKind = "directory" | "indexeddb" | "memory";
+
+export interface FragmentStorage {
   readonly persistent: boolean;
+  readonly kind: FragmentStorageKind;
+  readonly label: string;
   list(): Promise<VisualFragmentLibraryRecord[]>;
   get(key: string): Promise<VisualFragmentLibraryRecord | undefined>;
   put(record: VisualFragmentLibraryRecord): Promise<void>;
@@ -27,6 +34,8 @@ function cloneRecord(record: VisualFragmentLibraryRecord): VisualFragmentLibrary
 
 export class MemoryVisualFragmentStorage implements FragmentStorage {
   readonly persistent = false;
+  readonly kind = "memory" as const;
+  readonly label = "会话临时片段剪贴板";
   private readonly records = new Map<string, VisualFragmentLibraryRecord>();
 
   async list(): Promise<VisualFragmentLibraryRecord[]> {
@@ -49,6 +58,8 @@ export class MemoryVisualFragmentStorage implements FragmentStorage {
 
 class IndexedDbVisualFragmentStorage implements FragmentStorage {
   readonly persistent = true;
+  readonly kind = "indexeddb" as const;
+  readonly label = "临时片段剪贴板";
   private databasePromise: Promise<IDBDatabase> | null = null;
 
   constructor(private readonly factory: IDBFactory) {}
@@ -64,6 +75,7 @@ class IndexedDbVisualFragmentStorage implements FragmentStorage {
           store.createIndex("updatedAt", "updatedAt", { unique: false });
           store.createIndex("lastUsedAt", "lastUsedAt", { unique: false });
         }
+        if (!database.objectStoreNames.contains(SETTINGS_STORE_NAME)) database.createObjectStore(SETTINGS_STORE_NAME);
       };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("无法打开视觉片段数据库。"));
@@ -112,6 +124,14 @@ class ResilientFragmentStorage implements FragmentStorage {
     return Boolean(this.primary?.persistent && !this.degraded);
   }
 
+  get kind(): FragmentStorageKind {
+    return this.primary?.persistent && !this.degraded ? this.primary.kind : "memory";
+  }
+
+  get label(): string {
+    return this.primary?.persistent && !this.degraded ? this.primary.label : this.fallback.label;
+  }
+
   private async use<T>(operation: (storage: FragmentStorage) => Promise<T>): Promise<T> {
     if (!this.primary || this.degraded) return operation(this.fallback);
     try {
@@ -141,6 +161,171 @@ class ResilientFragmentStorage implements FragmentStorage {
 
 function recordKey(fragmentId: string, version: string): string {
   return `${fragmentId}@${version}`;
+}
+
+export interface FragmentWritableLike {
+  write(data: Uint8Array | Blob): Promise<void>;
+  close(): Promise<void>;
+}
+
+export interface FragmentFileHandleLike {
+  readonly kind: "file";
+  readonly name: string;
+  getFile(): Promise<{ name: string; lastModified: number; arrayBuffer(): Promise<ArrayBuffer> }>;
+  createWritable(): Promise<FragmentWritableLike>;
+}
+
+export interface FragmentDirectoryHandleLike {
+  readonly kind: "directory";
+  readonly name: string;
+  values(): AsyncIterable<FragmentFileHandleLike | { readonly kind: "directory"; readonly name: string }>;
+  getFileHandle(name: string, options?: { create?: boolean }): Promise<FragmentFileHandleLike>;
+  removeEntry(name: string): Promise<void>;
+  queryPermission?(options?: { mode?: "read" | "readwrite" }): Promise<PermissionState>;
+  requestPermission?(options?: { mode?: "read" | "readwrite" }): Promise<PermissionState>;
+}
+
+function fragmentFileName(record: Pick<VisualFragmentLibraryRecord, "fragmentId" | "version">): string {
+  const safe = `${record.fragmentId}@${record.version}`.replace(/[^A-Za-z0-9._@-]+/g, "-").slice(0, 180) || "fragment";
+  return `${safe}.vfrag`;
+}
+
+export class FileSystemVisualFragmentStorage implements FragmentStorage {
+  readonly persistent = true;
+  readonly kind = "directory" as const;
+  readonly label: string;
+
+  constructor(readonly handle: FragmentDirectoryHandleLike) {
+    this.label = `本地目录：${handle.name}`;
+  }
+
+  private async metadata(): Promise<Record<string, Pick<VisualFragmentLibraryRecord, "favorite" | "useCount" | "createdAt" | "updatedAt" | "lastUsedAt">>> {
+    try {
+      const handle = await this.handle.getFileHandle(DIRECTORY_METADATA_FILE);
+      const file = await handle.getFile();
+      const value: unknown = JSON.parse(new TextDecoder().decode(await file.arrayBuffer()));
+      return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, Pick<VisualFragmentLibraryRecord, "favorite" | "useCount" | "createdAt" | "updatedAt" | "lastUsedAt">> : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private async writeMetadata(value: Record<string, Pick<VisualFragmentLibraryRecord, "favorite" | "useCount" | "createdAt" | "updatedAt" | "lastUsedAt">>): Promise<void> {
+    const handle = await this.handle.getFileHandle(DIRECTORY_METADATA_FILE, { create: true });
+    const writable = await handle.createWritable();
+    await writable.write(new Blob([`${JSON.stringify(value, null, 2)}\n`], { type: "application/json" }));
+    await writable.close();
+  }
+
+  private async recordsWithFiles(): Promise<Array<{ record: VisualFragmentLibraryRecord; fileName: string }>> {
+    const records: Array<{ record: VisualFragmentLibraryRecord; fileName: string }> = [];
+    const metadata = await this.metadata();
+    for await (const entry of this.handle.values()) {
+      if (entry.kind !== "file" || !entry.name.toLowerCase().endsWith(".vfrag")) continue;
+      try {
+        const file = await entry.getFile();
+        const packageBytes = new Uint8Array(await file.arrayBuffer());
+        const fragment = await decodeVisualFragmentPackage(packageBytes);
+        const timestamp = new Date(file.lastModified || Date.now()).toISOString();
+        const key = recordKey(fragment.manifest.fragmentId, fragment.manifest.version);
+        const local = metadata[key];
+        records.push({
+          fileName: entry.name,
+          record: {
+            key,
+            fragmentId: fragment.manifest.fragmentId,
+            version: fragment.manifest.version,
+            manifest: fragment.manifest,
+            packageBytes,
+            favorite: local?.favorite ?? false,
+            useCount: local?.useCount ?? 0,
+            createdAt: local?.createdAt ?? timestamp,
+            updatedAt: local?.updatedAt ?? timestamp,
+            lastUsedAt: local?.lastUsedAt,
+          },
+        });
+      } catch {
+        // Invalid packages remain untouched on disk and are omitted from the usable library.
+      }
+    }
+    return records;
+  }
+
+  async list(): Promise<VisualFragmentLibraryRecord[]> {
+    return (await this.recordsWithFiles()).map(({ record }) => cloneRecord(record));
+  }
+
+  async get(key: string): Promise<VisualFragmentLibraryRecord | undefined> {
+    return (await this.recordsWithFiles()).find(({ record }) => record.key === key)?.record;
+  }
+
+  async put(record: VisualFragmentLibraryRecord): Promise<void> {
+    const handle = await this.handle.getFileHandle(fragmentFileName(record), { create: true });
+    const writable = await handle.createWritable();
+    await writable.write(new Uint8Array(record.packageBytes));
+    await writable.close();
+    const metadata = await this.metadata();
+    metadata[record.key] = {
+      favorite: record.favorite,
+      useCount: record.useCount,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+      lastUsedAt: record.lastUsedAt,
+    };
+    await this.writeMetadata(metadata);
+  }
+
+  async delete(key: string): Promise<void> {
+    const matches = (await this.recordsWithFiles()).filter(({ record }) => record.key === key);
+    for (const match of matches) await this.handle.removeEntry(match.fileName);
+    const metadata = await this.metadata();
+    delete metadata[key];
+    await this.writeMetadata(metadata);
+  }
+}
+
+async function settingsDatabase(): Promise<IDBDatabase> {
+  if (typeof indexedDB === "undefined") throw new Error("浏览器不支持 IndexedDB，无法记住本地片段目录。");
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(STORE_NAME)) {
+        const store = database.createObjectStore(STORE_NAME, { keyPath: "key" });
+        store.createIndex("fragmentId", "fragmentId", { unique: false });
+        store.createIndex("updatedAt", "updatedAt", { unique: false });
+        store.createIndex("lastUsedAt", "lastUsedAt", { unique: false });
+      }
+      if (!database.objectStoreNames.contains(SETTINGS_STORE_NAME)) database.createObjectStore(SETTINGS_STORE_NAME);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("无法打开片段设置数据库。"));
+  });
+}
+
+export async function rememberFragmentDirectory(handle: FragmentDirectoryHandleLike | null): Promise<void> {
+  const database = await settingsDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(SETTINGS_STORE_NAME, "readwrite");
+    const request = handle
+      ? transaction.objectStore(SETTINGS_STORE_NAME).put(handle, DIRECTORY_HANDLE_KEY)
+      : transaction.objectStore(SETTINGS_STORE_NAME).delete(DIRECTORY_HANDLE_KEY);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error ?? new Error("无法保存本地片段目录授权。"));
+  });
+  database.close();
+}
+
+export async function recalledFragmentDirectory(): Promise<FragmentDirectoryHandleLike | null> {
+  if (typeof indexedDB === "undefined") return null;
+  const database = await settingsDatabase();
+  const handle = await new Promise<FragmentDirectoryHandleLike | null>((resolve, reject) => {
+    const request = database.transaction(SETTINGS_STORE_NAME, "readonly").objectStore(SETTINGS_STORE_NAME).get(DIRECTORY_HANDLE_KEY);
+    request.onsuccess = () => resolve((request.result as FragmentDirectoryHandleLike | undefined) ?? null);
+    request.onerror = () => reject(request.error ?? new Error("无法读取本地片段目录授权。"));
+  });
+  database.close();
+  return handle;
 }
 
 function compareVersions(left: string, right: string): number {
@@ -191,6 +376,14 @@ export class VisualFragmentLibrary {
     return this.storage.persistent;
   }
 
+  get storageKind(): FragmentStorageKind {
+    return this.storage.kind;
+  }
+
+  get storageLabel(): string {
+    return this.storage.label;
+  }
+
   async save(fragment: VisualFragmentPackage, favorite?: boolean): Promise<VisualFragmentLibraryRecord> {
     const packageBytes = await encodeVisualFragmentPackage(fragment);
     const key = recordKey(fragment.manifest.fragmentId, fragment.manifest.version);
@@ -222,6 +415,14 @@ export class VisualFragmentLibrary {
       if (query.recentFirst) return (right.lastUsedAt ?? "").localeCompare(left.lastUsedAt ?? "") || right.updatedAt.localeCompare(left.updatedAt);
       return left.manifest.name.localeCompare(right.manifest.name) || compareVersions(right.version, left.version);
     });
+  }
+
+  async latestRecord(): Promise<VisualFragmentLibraryRecord | undefined> {
+    return (await this.storage.list()).sort((left, right) =>
+      right.createdAt.localeCompare(left.createdAt)
+      || right.manifest.provenance.createdAt.localeCompare(left.manifest.provenance.createdAt)
+      || right.key.localeCompare(left.key),
+    )[0];
   }
 
   async getRecord(fragmentId: string, version?: string): Promise<VisualFragmentLibraryRecord | undefined> {
@@ -264,5 +465,11 @@ export class VisualFragmentLibrary {
     const record = await this.getRecord(fragmentId, version);
     if (!record) throw new Error(`本地库中没有视觉片段：${fragmentId}${version ? `@${version}` : ""}`);
     return new Uint8Array(record.packageBytes);
+  }
+
+  async copyTo(target: VisualFragmentLibrary): Promise<number> {
+    const records = await this.storage.list();
+    for (const record of records) await target.importPackage(record.packageBytes);
+    return records.length;
   }
 }

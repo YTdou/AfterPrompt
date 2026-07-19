@@ -34,7 +34,9 @@ flowchart LR
   Presentation --> Slides[Standalone HTML Slides]
   Model --> Extract[Fragment extractor]
   Extract --> Package[Schema-validated .vfrag]
-  Package --> Library[IndexedDB library]
+  Package --> Files[User-owned .vfrag directory]
+  Files --> Library[Fragment library]
+  Clipboard[IndexedDB temporary clipboard] --> Library
   Library --> Plan[Compatibility plan]
   Plan -->|Confirmed apply| Model
 ```
@@ -69,7 +71,8 @@ flowchart LR
 | `fragments/package.ts` / `schema.ts` | `.vfrag` ZIP、JSON Schema、安全限额与往返 | 决定 UI 插入位置 |
 | `fragments/import.ts` | 兼容性报告、ID/引用/资源映射与确认后写入 | 静默忽略冲突 |
 | `fragments/component.ts` | 属性、插槽、关联状态和显式实例同步 | 建立第二套组件树 |
-| `fragments/library.ts` | IndexedDB 版本库及内存降级 | 云端市场或项目真相 |
+| `fragments/library.ts` | 用户目录 provider、IndexedDB 临时剪贴板、内存降级及非破坏迁移 | 云端市场或页面实例真相 |
+| `fragments/ingest.ts` | 原始 SVG/PNG/JPEG 规范化为 `.vfrag` | OCR、自动分层或矢量化 |
 | `SourceCodeEditor` | 代码草稿、搜索、元素定位 | 自动接受无效源码 |
 | CLI | 文件读取、命令批处理、安全写出 | 浏览器精确布局 |
 
@@ -156,6 +159,10 @@ Visual Fragment 定义是规范 DOM/SVG 选区的可移植派生包。包内 `da
 导入严格分为只读 `planVisualFragmentInsert()` 和有副作用 `applyVisualFragmentInsertPlan()`。兼容性报告、全部 ID/资源映射和最终源码在 plan 阶段确定；用户确认后才把节点、版本隔离样式和资源写入当前项目。关联信息使用可读 `data-vfrag-*` 属性保存在规范节点上，本地库只保存定义和版本，不拥有页面实例状态。
 
 完整协议见 [VISUAL_FRAGMENTS.md](VISUAL_FRAGMENTS.md)。
+
+`.vfrag` 1.0 保存 HTML/SVG 结构；1.1 保存单个 PNG/JPEG Raster element。Raster 字节在插入时进入 `ProjectAssets`，HTML 物化为 `<img>`，SVG 物化为 `<image>`。预览中的相对路径可以映射为 Blob URL，但规范源码仍保存可导出的项目资源路径。
+
+本地片段目录中的 `.vfrag` 是库的长期事实源。IndexedDB 只承担由 `Ctrl/Cmd+C` 写入、由 `Ctrl/Cmd+V` 读取的短期临时片段剪贴板和旧记录迁移；未连接目录时，持久保存默认下载 `.vfrag`，保存 UI 不提供 IndexedDB 目标。目录内容索引可由包 manifest 重建，可选 sidecar 只保存收藏和使用次数。页面实例仍完全物化在 `SourceDocument` 中，不依赖目录文件持续存在。本阶段没有账号、云端存储或同步 adapter。
 
 ## 可扩展点
 

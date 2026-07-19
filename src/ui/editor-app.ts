@@ -47,9 +47,24 @@ function numeric(value: string, fallback = 0): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function colorValue(value: string): string {
-  const match = value.trim().match(/^#(?:[\da-f]{6})$/i);
-  return match ? match[0] : "#000000";
+export function colorValue(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (/^#[\da-f]{6}$/.test(normalized)) return normalized;
+  const shortHex = normalized.match(/^#([\da-f])([\da-f])([\da-f])$/);
+  if (shortHex) return `#${shortHex.slice(1).map((channel) => channel.repeat(2)).join("")}`;
+
+  const functional = normalized.match(/^rgba?\((.*)\)$/);
+  if (!functional) return "#000000";
+  const channels = functional[1]!.split(/[,\s/]+/).filter(Boolean).slice(0, 3);
+  if (channels.length !== 3) return "#000000";
+  const bytes = channels.map((channel) => {
+    const numericChannel = Number.parseFloat(channel);
+    if (!Number.isFinite(numericChannel)) return null;
+    const byte = channel.endsWith("%") ? (numericChannel / 100) * 255 : numericChannel;
+    return Math.round(Math.min(255, Math.max(0, byte)));
+  });
+  if (bytes.some((channel) => channel === null)) return "#000000";
+  return `#${bytes.map((channel) => channel!.toString(16).padStart(2, "0")).join("")}`;
 }
 
 function fileStem(fileName: string): string {
@@ -85,26 +100,51 @@ const appTemplate = `
         <span><strong>Last Mile</strong><small>Studio</small></span>
       </div>
       <div class="toolbar toolbar-primary">
-        <label class="tool-select">示例
-          <select id="example-select" aria-label="Load example">
-            <option value="html">HTML Slide</option>
-            <option value="deck">Multi-page deck</option>
-            <option value="svg">SVG shapes</option>
-          </select>
-        </label>
-        <button id="import-file" class="button">导入文件</button>
-        <button id="import-directory" class="button">导入目录</button>
-        <button id="paste-source" class="button">粘贴代码</button>
+        <details id="import-menu" class="io-menu" data-io-menu>
+          <summary class="button primary">导入 <span aria-hidden="true">⌄</span></summary>
+          <div class="io-menu-panel" role="menu" aria-label="导入选项">
+            <section>
+              <span class="io-menu-heading">打开</span>
+              <button id="import-document-action" type="button" role="menuitem"><strong>文档文件</strong><small>HTML、SVG 或可编辑项目</small></button>
+              <button id="import-directory-action" type="button" role="menuitem"><strong>项目目录</strong><small>载入入口文件及本地资源</small></button>
+              <button id="paste-source-action" type="button" role="menuitem"><strong>粘贴 HTML / SVG</strong><small>用源码替换当前文档</small></button>
+            </section>
+            <section>
+              <span class="io-menu-heading">插入当前页面</span>
+              <button id="insert-fragment-action" type="button" role="menuitem"><strong>片段或图片</strong><small>.vfrag、SVG、PNG、JPG</small></button>
+              <button id="open-temporary-clipboard-action" type="button" role="menuitem"><strong>临时片段剪贴板</strong><small>Ctrl/Cmd+V 粘贴最新片段</small></button>
+              <button id="open-local-library-action" type="button" role="menuitem"><strong>本地片段库</strong><small>连接或管理 .vfrag 目录</small></button>
+            </section>
+            <section>
+              <span class="io-menu-heading">示例</span>
+              <button type="button" role="menuitem" data-load-example="html"><strong>HTML Slide</strong></button>
+              <button type="button" role="menuitem" data-load-example="deck"><strong>Multi-page deck</strong></button>
+              <button type="button" role="menuitem" data-load-example="svg"><strong>SVG shapes</strong></button>
+            </section>
+          </div>
+        </details>
         <span class="toolbar-separator"></span>
         <button id="undo" class="icon-button" title="Undo (Ctrl/Cmd+Z)">↶</button>
         <button id="redo" class="icon-button" title="Redo (Ctrl/Cmd+Shift+Z)">↷</button>
       </div>
       <div class="toolbar toolbar-export">
         <button id="preview-presentation" class="button">演示预览</button>
-        <button id="export-html" class="button primary">导出 HTML</button>
-        <button id="export-project" class="button">保存项目</button>
-        <button id="export-zip" class="button">导出 ZIP</button>
-        <button id="export-summary" class="icon-button" title="Export AI-readable structure JSON">{ }</button>
+        <details id="export-menu" class="io-menu io-menu-end" data-io-menu>
+          <summary class="button primary">导出 <span aria-hidden="true">⌄</span></summary>
+          <div class="io-menu-panel" role="menu" aria-label="导出选项">
+            <section>
+              <span class="io-menu-heading">当前内容</span>
+              <button id="export-document-action" type="button" role="menuitem"><strong id="export-document-label">导出 HTML</strong><small>可直接打开并重新导入</small></button>
+              <button id="export-selection-action" type="button" role="menuitem"><strong>导出选区为片段</strong><small>.vfrag 文件或本地目录</small></button>
+            </section>
+            <section>
+              <span class="io-menu-heading">项目与自动化</span>
+              <button id="export-project-action" type="button" role="menuitem"><strong>保存可编辑项目</strong><small>.visual-project.json</small></button>
+              <button id="export-zip-action" type="button" role="menuitem"><strong>源码与资源包</strong><small>导出项目 ZIP</small></button>
+              <button id="export-summary-action" type="button" role="menuitem"><strong>AI 结构数据</strong><small>导出结构 JSON</small></button>
+            </section>
+          </div>
+        </details>
       </div>
     </header>
 
@@ -130,7 +170,7 @@ const appTemplate = `
           <button data-layer-action="delete" class="danger" title="Delete">删除</button>
         </div>
         <div id="layers-tree" class="layers-tree"></div>
-        <div class="panel-footnote">Ctrl / Shift 点击可多选；Alt 点击画布元素选择父级。</div>
+        <div class="panel-footnote">单击或拖拽优先操作子级；Alt 点击或拖拽操作当前父级；Ctrl / Shift 点击可多选。</div>
         <div class="layout-resizer column-resizer" data-layout-resizer="layers" role="separator" aria-orientation="vertical" aria-label="调整图层与结构面板宽度" tabindex="0"></div>
       </aside>
 
@@ -316,7 +356,7 @@ export class EditorApp {
     );
 
     this.renderer = new CanvasRenderer(this.get("#canvas-host"), {
-      onSelect: (id, options) => this.selectElement(id, options.additive),
+      onSelect: (id, options) => this.selectCanvasElement(id, options),
       onInlineTextCommit: (id, text) => this.commitMutation("Edit text", () => {
         this.model.apply({ action: "replaceText", elementId: id, text });
       }),
@@ -330,6 +370,7 @@ export class EditorApp {
         if (this.history.commit(this.createSnapshot(), label)) this.recordOperation(label, "ui");
         this.renderDocument(true);
       },
+      canStartDrag: () => !this.spacePressed,
     });
 
     this.layout = new EditorLayoutController(host, {
@@ -367,12 +408,38 @@ export class EditorApp {
   }
 
   private bindEvents(): void {
-    this.get("#import-file").addEventListener("click", () => this.get<HTMLInputElement>("#file-input").click());
-    this.get("#import-directory").addEventListener("click", () => this.get<HTMLInputElement>("#directory-input").click());
-    this.get("#paste-source").addEventListener("click", () => this.get<HTMLDialogElement>("#paste-dialog").showModal());
+    this.get("#import-document-action").addEventListener("click", () => {
+      this.closeIoMenus();
+      this.get<HTMLInputElement>("#file-input").click();
+    });
+    this.get("#import-directory-action").addEventListener("click", () => {
+      this.closeIoMenus();
+      this.get<HTMLInputElement>("#directory-input").click();
+    });
+    this.get("#paste-source-action").addEventListener("click", () => {
+      this.closeIoMenus();
+      this.get<HTMLDialogElement>("#paste-dialog").showModal();
+    });
+    this.get("#insert-fragment-action").addEventListener("click", () => {
+      this.closeIoMenus();
+      this.fragments.chooseInsertFile();
+    });
+    this.get("#open-temporary-clipboard-action").addEventListener("click", () => {
+      this.closeIoMenus();
+      void this.fragments.openLibrary("clipboard");
+    });
+    this.get("#open-local-library-action").addEventListener("click", () => {
+      this.closeIoMenus();
+      void this.fragments.openLibrary("directory");
+    });
     this.get("#file-input").addEventListener("change", (event) => void this.handleFileImport(event));
     this.get("#directory-input").addEventListener("change", (event) => void this.handleDirectoryImport(event));
-    this.get("#example-select").addEventListener("change", (event) => this.loadExample((event.target as HTMLSelectElement).value));
+    this.host.querySelectorAll<HTMLButtonElement>("[data-load-example]").forEach((button) => {
+      button.addEventListener("click", () => {
+        this.closeIoMenus();
+        this.loadExample(button.dataset.loadExample ?? "html");
+      });
+    });
     this.get("#apply-paste").addEventListener("click", (event) => {
       event.preventDefault();
       const source = this.get<HTMLTextAreaElement>("#paste-editor").value;
@@ -386,10 +453,37 @@ export class EditorApp {
     this.get("#preview-presentation").addEventListener("click", () => this.get<HTMLDialogElement>("#preview-choice-dialog").showModal());
     this.get("#preview-from-start").addEventListener("click", () => this.previewPresentation(0));
     this.get("#preview-from-current").addEventListener("click", () => this.previewPresentation(this.activePageIndex));
-    this.get("#export-html").addEventListener("click", () => this.exportDocument());
-    this.get("#export-project").addEventListener("click", () => this.exportProject());
-    this.get("#export-zip").addEventListener("click", () => void this.exportZip());
-    this.get("#export-summary").addEventListener("click", () => this.exportSummary());
+    this.get("#export-document-action").addEventListener("click", () => {
+      this.closeIoMenus();
+      this.exportDocument();
+    });
+    this.get("#export-selection-action").addEventListener("click", () => {
+      this.closeIoMenus();
+      this.fragments.openSelectionExport();
+    });
+    this.get("#export-project-action").addEventListener("click", () => {
+      this.closeIoMenus();
+      this.exportProject();
+    });
+    this.get("#export-zip-action").addEventListener("click", () => {
+      this.closeIoMenus();
+      void this.exportZip();
+    });
+    this.get("#export-summary-action").addEventListener("click", () => {
+      this.closeIoMenus();
+      this.exportSummary();
+    });
+    this.host.querySelectorAll<HTMLDetailsElement>("[data-io-menu]").forEach((menu) => {
+      menu.addEventListener("toggle", () => {
+        if (!menu.open) return;
+        this.host.querySelectorAll<HTMLDetailsElement>("[data-io-menu]").forEach((candidate) => {
+          if (candidate !== menu) candidate.open = false;
+        });
+      });
+    });
+    this.host.addEventListener("pointerdown", (event) => {
+      if (!(event.target as Element).closest("[data-io-menu]")) this.closeIoMenus();
+    });
 
     this.get("#zoom-out").addEventListener("click", () => this.setZoom(this.zoom / 1.2));
     this.get("#zoom-in").addEventListener("click", () => this.setZoom(this.zoom * 1.2));
@@ -506,6 +600,10 @@ export class EditorApp {
     window.addEventListener("resize", () => this.transform.update());
   }
 
+  private closeIoMenus(): void {
+    this.host.querySelectorAll<HTMLDetailsElement>("[data-io-menu]").forEach((menu) => { menu.open = false; });
+  }
+
   private fragmentWorkspaceContext(): FragmentWorkspaceContext {
     const selectedElements = this.selectedIds.map((id) => this.model.find(id)).filter((element): element is Element => Boolean(element));
     const selectionItems = selectedElements.map((element) => {
@@ -600,6 +698,7 @@ export class EditorApp {
     this.renderLayers();
     this.renderInspector();
     this.fragments.refreshSelection();
+    this.updateIoMenuState();
     this.renderWarnings();
     this.updateLiveSelectionStatus();
   }
@@ -1093,7 +1192,31 @@ export class EditorApp {
     this.renderInspector();
     this.renderBuildPanel(this.model.buildSequence(this.activePageIndex));
     this.fragments.refreshSelection();
+    this.updateIoMenuState();
     this.updateLiveSelectionStatus();
+  }
+
+  private updateIoMenuState(): void {
+    const extension = this.model.kind === "svg" ? "SVG" : "HTML";
+    this.get("#export-document-label").textContent = `导出 ${extension}`;
+    this.get<HTMLButtonElement>("#export-selection-action").disabled = this.selectedIds.length === 0;
+  }
+
+  private selectCanvasElement(id: string, options: { additive: boolean; parent: boolean }): void {
+    if (this.spacePressed) return;
+    let targetId = id;
+    if (options.parent) {
+      const hit = this.model.find(id);
+      const selectedId = this.selectedIds.length === 1 ? this.selectedIds[0] : undefined;
+      const selected = selectedId ? this.model.find(selectedId) : null;
+      if (hit && selectedId && selected && selected !== hit && selected.contains(hit)) {
+        targetId = selectedId;
+      } else {
+        targetId = hit?.parentElement?.closest("[data-editor-id]")?.getAttribute("data-editor-id") ?? id;
+      }
+    }
+    if (!options.additive && this.selectedIds.length === 1 && this.selectedIds[0] === targetId) return;
+    this.selectElement(targetId, options.additive);
   }
 
   private updateLiveSelectionStatus(): void {
@@ -1476,6 +1599,11 @@ export class EditorApp {
       node instanceof Element && node.matches("input,textarea,select,[contenteditable],.cm-editor"),
     );
     if (editableTarget) return;
+    if (event.key === "Escape" && this.host.querySelector<HTMLDetailsElement>("[data-io-menu][open]")) {
+      event.preventDefault();
+      this.closeIoMenus();
+      return;
+    }
     if (event.altKey && (event.key === "[" || event.key === "]")) {
       event.preventDefault();
       this.changeBuild(event.key === "[" ? -1 : 1);
@@ -1503,6 +1631,16 @@ export class EditorApp {
     if (modifier && event.key.toLowerCase() === "y") {
       event.preventDefault();
       this.redo();
+      return;
+    }
+    if (modifier && event.key.toLowerCase() === "c" && this.selectedIds.length) {
+      event.preventDefault();
+      void this.fragments.copySelectionToClipboard();
+      return;
+    }
+    if (modifier && event.key.toLowerCase() === "v") {
+      event.preventDefault();
+      void this.fragments.pasteLatestClipboard();
       return;
     }
     if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key) && this.selectedIds.length) {

@@ -15,12 +15,15 @@ npm run cli -- fragments <input>
 npm run cli -- fragment-inspect <fragment.vfrag>
 npm run cli -- fragment-validate <fragment.vfrag>
 npm run cli -- fragment-create <input> --elements <id,id> --name <name> --output <fragment.vfrag>
+npm run cli -- fragment-pack <input.svg|input.png|input.jpg> --output <fragment.vfrag>
 npm run cli -- fragment-insert <input> --fragment <fragment.vfrag> --parent <element-id> --output <output>
 ```
 
 `input` 可以是 HTML、SVG 或 `.visual-project.json`。CLI 默认拒绝隐式覆盖源文件。
 
 `fragment-create` 支持 `--type`、`--mode`、`--fragment-id`、`--version`、`--category`、`--tags` 和 `--schema`；Schema 文件为 `{ "properties": [...], "slots": [...] }`。更新已有定义时同时传原 `--fragment-id` 和新语义版本。`fragment-insert` 支持 `--placement center|original|x,y`、`--linked` 和显式 `--in-place`。导入前会输出与 UI 相同的兼容性报告。
+
+`fragment-pack` 把原始 SVG、PNG、JPG/JPEG 封装为经过验证的 `.vfrag`。SVG 保留结构；PNG/JPEG 生成格式 1.1 Raster element。可选参数为 `--name`、`--description`、`--category` 和 `--tags`。
 
 ## 通用更新
 

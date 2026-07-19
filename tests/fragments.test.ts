@@ -7,11 +7,19 @@ import {
   syncLinkedVisualFragmentInstances,
 } from "../src/core/fragments/component";
 import { extractVisualFragment } from "../src/core/fragments/extract";
+import { createRasterVisualFragment, createSvgVisualFragment } from "../src/core/fragments/ingest";
 import { insertVisualFragment, planVisualFragmentInsert } from "../src/core/fragments/import";
-import { MemoryVisualFragmentStorage, VisualFragmentLibrary } from "../src/core/fragments/library";
-import { decodeVisualFragmentPackage, encodeVisualFragmentPackage } from "../src/core/fragments/package";
+import {
+  FileSystemVisualFragmentStorage,
+  MemoryVisualFragmentStorage,
+  VisualFragmentLibrary,
+  type FragmentDirectoryHandleLike,
+  type FragmentFileHandleLike,
+  type FragmentWritableLike,
+} from "../src/core/fragments/library";
+import { decodeVisualFragmentPackage, encodeVisualFragmentPackage, inspectRasterImage } from "../src/core/fragments/package";
 import { validateVisualFragmentManifest } from "../src/core/fragments/schema";
-import type { VisualFragmentPackage } from "../src/core/fragments/types";
+import type { StructuredVisualFragmentPackage } from "../src/core/fragments/types";
 import { ProjectAssets } from "../src/core/project";
 
 beforeAll(() => {
@@ -46,7 +54,7 @@ function sourceModel(): { model: SourceDocument; assets: ProjectAssets } {
   return { model, assets };
 }
 
-function extractComponent(version = "1.0.0", title = "Original title"): VisualFragmentPackage {
+function extractComponent(version = "1.0.0", title = "Original title"): StructuredVisualFragmentPackage {
   const { model, assets } = sourceModel();
   model.find("title-001")!.textContent = title;
   return extractVisualFragment(model, assets, "components/card.html", [{
@@ -85,6 +93,69 @@ function blankTarget(): { model: SourceDocument; assets: ProjectAssets; parentId
     <main data-editor-id="canvas-root"><svg><defs><linearGradient id="paint"><stop/></linearGradient></defs></svg></main>
   </body></html>`, "target/index.html");
   return { model, assets: new ProjectAssets(), parentId: "canvas-root" };
+}
+
+function tinyPng(): Uint8Array {
+  return new Uint8Array(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6D1sAAAAASUVORK5CYII=", "base64"));
+}
+
+function tinyJpeg(width = 3, height = 2): Uint8Array {
+  return new Uint8Array([
+    0xff, 0xd8,
+    0xff, 0xc0, 0x00, 0x11, 0x08,
+    (height >>> 8) & 0xff, height & 0xff,
+    (width >>> 8) & 0xff, width & 0xff,
+    0x03, 0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00,
+    0xff, 0xd9,
+  ]);
+}
+
+class FakeFileHandle implements FragmentFileHandleLike {
+  readonly kind = "file" as const;
+  bytes = new Uint8Array();
+  lastModified = Date.now();
+
+  constructor(readonly name: string) {}
+
+  async getFile(): Promise<{ name: string; lastModified: number; arrayBuffer(): Promise<ArrayBuffer> }> {
+    const copy = new Uint8Array(this.bytes);
+    return { name: this.name, lastModified: this.lastModified, arrayBuffer: async () => copy.buffer as ArrayBuffer };
+  }
+
+  async createWritable(): Promise<FragmentWritableLike> {
+    return {
+      write: async (data) => {
+        this.bytes = data instanceof Blob ? new Uint8Array(await data.arrayBuffer()) : new Uint8Array(data);
+        this.lastModified = Date.now();
+      },
+      close: async () => undefined,
+    };
+  }
+}
+
+class FakeDirectoryHandle implements FragmentDirectoryHandleLike {
+  readonly kind = "directory" as const;
+  readonly files = new Map<string, FakeFileHandle>();
+
+  constructor(readonly name = "Fragments") {}
+
+  async *values(): AsyncIterable<FragmentFileHandleLike> {
+    yield* this.files.values();
+  }
+
+  async getFileHandle(name: string, options?: { create?: boolean }): Promise<FakeFileHandle> {
+    let file = this.files.get(name);
+    if (!file && options?.create) {
+      file = new FakeFileHandle(name);
+      this.files.set(name, file);
+    }
+    if (!file) throw new Error(`Missing file: ${name}`);
+    return file;
+  }
+
+  async removeEntry(name: string): Promise<void> {
+    this.files.delete(name);
+  }
 }
 
 describe("Visual Fragment packages", () => {
@@ -285,6 +356,28 @@ describe("Visual Fragment packages", () => {
     zip.file("../manifest.json", "{}");
     await expect(decodeVisualFragmentPackage(await zip.generateAsync({ type: "uint8array" }))).rejects.toThrow(/不安全路径|缺少 manifest/i);
   });
+
+  it("round-trips PNG and JPEG as format 1.1 Raster packages with real dimensions", async () => {
+    const png = createRasterVisualFragment(tinyPng(), "pixel.png");
+    const jpg = createRasterVisualFragment(tinyJpeg(), "photo.jpeg");
+    expect(png.manifest).toMatchObject({ formatVersion: "1.1", contentType: "raster", entry: "content.png", canvas: { width: 1, height: 1 } });
+    expect(jpg.manifest).toMatchObject({ formatVersion: "1.1", contentType: "raster", entry: "content.jpg", canvas: { width: 3, height: 2 } });
+    expect(inspectRasterImage(tinyPng()).mimeType).toBe("image/png");
+    expect(inspectRasterImage(tinyJpeg()).mimeType).toBe("image/jpeg");
+    const restoredPng = await decodeVisualFragmentPackage(await encodeVisualFragmentPackage(png));
+    const restoredJpg = await decodeVisualFragmentPackage(await encodeVisualFragmentPackage(jpg));
+    expect(restoredPng.content).toBeInstanceOf(Uint8Array);
+    expect(restoredJpg.content).toBeInstanceOf(Uint8Array);
+    await expect(encodeVisualFragmentPackage({ ...png, manifest: { ...png.manifest, entry: "content.jpg" } })).rejects.toThrow(/真实内容不是 JPEG/);
+  });
+
+  it("wraps raw SVG while preserving its editable node tree", () => {
+    const fragment = createSvgVisualFragment('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80"><g id="layer"><rect width="40" height="20"/><text>Label</text></g></svg>', "mark.svg");
+    expect(fragment.manifest.contentType).toBe("svg");
+    const parsed = new DOMParser().parseFromString(fragment.content, "image/svg+xml");
+    expect(parsed.querySelector("g > rect")).not.toBeNull();
+    expect(parsed.querySelector("g > text")?.textContent).toBe("Label");
+  });
 });
 
 describe("Visual Fragment import", () => {
@@ -484,6 +577,35 @@ describe("Visual Fragment import", () => {
     expect(root.querySelector('[data-vfrag-node-key="slot-001"]')?.textContent).toBe("Preserved slot content");
     expect(target.model.find("instance-slot-content")).not.toBeNull();
   });
+
+  it("inserts Raster packages as one HTML or SVG image layer with materialized project bytes", () => {
+    const raster = createRasterVisualFragment(tinyPng(), "pixel.png");
+    const html = blankTarget();
+    const htmlResult = insertVisualFragment(html.model, html.assets, raster, {
+      parentId: html.parentId,
+      placement: { mode: "point", x: 12, y: 18 },
+      linked: false,
+      targetSourcePath: "target/index.html",
+    });
+    const htmlRoot = html.model.find(htmlResult.rootEditorIds[0]!)!;
+    expect(htmlRoot.localName).toBe("img");
+    expect(htmlRoot.children).toHaveLength(0);
+    expect(htmlRoot.getAttribute("src")).toContain("fragments/pixel/1.0.0/content.png");
+    expect(html.assets.get("target/fragments/pixel/1.0.0/content.png")?.bytes).toEqual(tinyPng());
+
+    const svgModel = SourceDocument.parse('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" data-editor-id="svg-root"></svg>', "target.svg");
+    const svgAssets = new ProjectAssets();
+    const svgResult = insertVisualFragment(svgModel, svgAssets, raster, {
+      parentId: "svg-root",
+      placement: { mode: "center" },
+      linked: false,
+      targetSourcePath: "target.svg",
+    });
+    const svgRoot = svgModel.find(svgResult.rootEditorIds[0]!)!;
+    expect(svgRoot.localName).toBe("image");
+    expect(svgRoot.children).toHaveLength(0);
+    expect(svgRoot.getAttribute("href")).toContain("fragments/pixel/1.0.0/content.png");
+  });
 });
 
 describe("local Visual Fragment library", () => {
@@ -493,11 +615,34 @@ describe("local Visual Fragment library", () => {
     await library.save(extractComponent("1.1.0", "Next"));
     expect((await library.list({ search: "research" }))).toHaveLength(2);
     expect((await library.get("contribution-card"))?.manifest.version).toBe("1.1.0");
+    expect((await library.latestRecord())?.version).toBe("1.1.0");
+    await library.setFavorite("contribution-card", "1.0.0", true);
+    expect((await library.latestRecord())?.version).toBe("1.1.0");
     await library.setFavorite("contribution-card", "1.1.0", true);
     await library.markUsed("contribution-card", "1.1.0");
     const record = await library.getRecord("contribution-card", "1.1.0");
     expect(record).toMatchObject({ favorite: true, useCount: 1 });
     expect((await library.exportBytes("contribution-card", "1.1.0")).byteLength).toBeGreaterThan(100);
     expect(await library.delete("contribution-card")).toBe(2);
+  });
+
+  it("rebuilds a directory-backed library from vfrag files and copies browser records without deleting them", async () => {
+    const browser = new VisualFragmentLibrary(new MemoryVisualFragmentStorage());
+    await browser.save(extractComponent());
+    await browser.save(createRasterVisualFragment(tinyJpeg(), "photo.jpg"));
+    const directoryHandle = new FakeDirectoryHandle();
+    const directory = new VisualFragmentLibrary(new FileSystemVisualFragmentStorage(directoryHandle));
+    expect(await browser.copyTo(directory)).toBe(2);
+    expect(Array.from(directoryHandle.files.keys()).filter((name) => name.endsWith(".vfrag"))).toHaveLength(2);
+    expect(await directory.list()).toHaveLength(2);
+    expect(await browser.list()).toHaveLength(2);
+    await directory.setFavorite("photo", "1.0.0", true);
+    await directory.markUsed("photo", "1.0.0");
+
+    const rebuilt = new VisualFragmentLibrary(new FileSystemVisualFragmentStorage(directoryHandle));
+    expect((await rebuilt.get("photo"))?.manifest.contentType).toBe("raster");
+    expect(await rebuilt.getRecord("photo", "1.0.0")).toMatchObject({ favorite: true, useCount: 1 });
+    expect(await rebuilt.delete("photo")).toBe(1);
+    expect(await rebuilt.list()).toHaveLength(1);
   });
 });

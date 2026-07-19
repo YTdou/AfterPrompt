@@ -2,14 +2,14 @@
 
 Last Mile Studio 是一个面向 AI 生成 HTML、HTML Slide 和 SVG 的“最后一公里”可视化编辑器。它直接编辑真实 DOM / SVG 节点，并持续生成可读、可导出的标准源代码；没有把页面栅格化，也没有把 Canvas 状态当作唯一数据源。
 
-当前版本是可运行的 MVP（`0.3.0`），已经完成 Phase 1–4，并新增视觉片段、组件保存与复用主链路：
+当前版本是可运行的 MVP（`0.4.0`），已经完成 Phase 1–4，并提供 local-first 视觉片段、组件保存与复用主链路：
 
 ```text
 HTML / SVG 源码 → 安全解析与稳定 ID → 真实节点画布
       ↑                                  ↓
       └──── CodeMirror / JSON 命令 / CLI ← 视觉操作
 
-选中 DOM / SVG → Visual Fragment → 本地版本库 / .vfrag
+选中 DOM / SVG → Visual Fragment → 用户本地目录中的 .vfrag
                          ↓
         冲突预检 → 独立副本或关联实例 → 仍回写标准 DOM / SVG
 ```
@@ -53,6 +53,7 @@ CHROME_PATH=/path/to/chrome npm run test:browser
 
 ### 导入、画布与双向同步
 
+- 顶栏只保留“导入”一个入口，并按打开文档、插入当前页面、片段库和示例分组现有能力；
 - 导入 `.html`、`.htm`、`.svg` 和 `.visual-project.json`；
 - 直接粘贴 HTML / SVG；
 - 使用目录选择器载入简单本地项目，优先选择 `index.html`，并解析本地 CSS、SVG 和图片；
@@ -90,17 +91,21 @@ CHROME_PATH=/path/to/chrome npm run test:browser
 - Source-preserving 模式保留节点、class 和匹配的 CSS 声明；Self-contained 模式额外捕获计算样式；
 - 计算选区包围盒并保存局部坐标，可在原位置、画布中心、最近鼠标位置或指定坐标插入；
 - 自动收集本地图片、字体、CSS URL、CSS 变量和选区外 SVG defs，并生成 SVG 缩略图；
-- `.vfrag` 是带版本的 ZIP 包，包含 `manifest.json`、HTML/SVG、CSS、tokens、assets 和 preview；公开 Schema 位于 [schemas/visual-fragment-manifest.schema.json](schemas/visual-fragment-manifest.schema.json)；
+- `.vfrag` 是带版本的 ZIP 包：1.0 保存 HTML/SVG 结构，1.1 保存单层 PNG/JPEG Raster；公开 Schema 位于 [schemas/visual-fragment-manifest.schema.json](schemas/visual-fragment-manifest.schema.json)；
 - 导入前验证 Schema、ZIP 路径与大小，并展示普通 ID、编辑器 ID、CSS、字体和资源兼容性报告；
 - 重写 HTML/SVG IDREF、CSS `#id`、SVG `href` 和 `url(#id)`，同一片段重复插入不会静默冲突；
-- 本地库使用 IndexedDB 保存缩略图、搜索、标签、分类、收藏、最近使用、版本、来源和使用次数；不可用时明确降级为会话内存；
+- 用户可连接一个本地目录，目录内 `.vfrag` 文件是长期事实源；刷新或重新连接后从文件 manifest 重建库；
+- IndexedDB 明确作为“临时片段剪贴板”，只服务 `Ctrl/Cmd+C`、`Ctrl/Cmd+V` 和旧片段迁移；它可能被浏览器清理，不承担长期保存，也不作为保存对话框目标；
+- 从“导入 → 片段或图片”可直接把 `.vfrag`、原始 `.svg`、`.png`、`.jpg` 和 `.jpeg` 插入当前页面，不会自动写入片段库；SVG 保留节点树，Raster 只生成一个图片图层；
 - 组件可暴露文本、数字、颜色、图片、图标、布尔、枚举、尺寸和 URL 属性，也可定义有类型和尺寸约束的内容插槽；
 - 片段可插入为独立副本或关联实例；定义升级和“同步实例”是显式操作，并保留实例级属性覆盖与已填充插槽；
 - 支持导出 `.vfrag`、标准 SVG、HTML/CSS ZIP、预览 SVG/PNG，以及复制标准 HTML/SVG 源码。
+- 顶栏“导出”按当前文档、选区片段、可编辑项目、资源 ZIP 和 AI 结构 JSON 集中提供所有导出格式。
 
 ### 选择、变换与属性
 
 - 点击画布或图层树选择节点；Ctrl / Shift 点击多选；Alt 点击选择父级；
+- 非文字编辑状态下，`Ctrl/Cmd+C` 将选区复制到应用内临时片段剪贴板，`Ctrl/Cmd+V` 粘贴最新片段并按 16 px 连续偏移；输入框和代码编辑器仍使用系统原生剪贴板；
 - Moveable 驱动的拖动、缩放、旋转、吸附控制框；
 - SVG `path`、`polygon`、`polyline`、`line`、`text` 与分组等无原生宽高节点使用固定点变换缩放；
 - X、Y、W、H、旋转角度的精确输入；
@@ -139,7 +144,7 @@ CHROME_PATH=/path/to/chrome npm run test:browser
 
 ### 编辑 HTML Slide
 
-1. 点击“导入文件”“导入目录”或“粘贴代码”；
+1. 打开顶部“导入”，选择“文档文件”“项目目录”或“粘贴 HTML / SVG”；
 2. 在画布中点击标题、图片、色块或内嵌 SVG；
 3. 拖动控制框，或在右侧属性面板输入精确值；
 4. 在下方代码视图确认 `data-editor-id`、属性和样式变化；
@@ -147,7 +152,7 @@ CHROME_PATH=/path/to/chrome npm run test:browser
 
 ### 管理多页演示稿
 
-1. 从示例菜单选择 `Multi-page deck`，或导入包含 `deck-stage > section`、`.slides > section` 等结构的 HTML；
+1. 从“导入 → 示例”选择 `Multi-page deck`，或导入包含 `deck-stage > section`、`.slides > section` 等结构的 HTML；
 2. 点击胶片栏缩略图切换页面；
 3. 使用“复制页”“删除页”“前移”“后移”，或直接拖动缩略图调整顺序；
 4. 在画布尺寸菜单选择 16:9、4:3 或手动输入尺寸；
@@ -164,7 +169,7 @@ CHROME_PATH=/path/to/chrome npm run test:browser
 
 ### 编辑 SVG
 
-1. 从示例菜单选择 `SVG shapes`，或导入自己的 `.svg`；
+1. 从“导入 → 示例”选择 `SVG shapes`，或导入自己的 `.svg`；
 2. 从图层树选择 `text`、`rect`、`circle`、`path` 或 `g`；
 3. 直接变换，或编辑填充、描边、文本和图层顺序；
 4. 导出后可直接用浏览器打开 SVG。
@@ -175,12 +180,14 @@ CHROME_PATH=/path/to/chrome npm run test:browser
 
 ### 保存和复用视觉片段
 
-1. 在画布或图层树选择一个或多个元素，点击“保存片段”；
-2. 填写名称、版本、分类和标签，选择 Source-preserving 或 Self-contained；
-3. 对 `component` / `template`，用结构化表单指定属性绑定和内容插槽；
-4. 在“片段库”中搜索定义，选择独立副本或关联实例以及插入坐标；
-5. 阅读兼容性报告并确认后，片段才会写入当前文档；
-6. 选中组件实例可直接编辑暴露属性、解除关联，或从本地库显式同步最新版。
+1. 打开“导入 → 本地片段库”并选择一个本地目录；目录中的 `.vfrag` 是长期事实源。不支持目录访问时仍可下载 `.vfrag`；
+2. 在画布或图层树选择一个或多个元素，打开“导出 → 导出选区为片段”；
+3. 填写名称、版本、分类和标签，选择 Source-preserving 或 Self-contained。已连接目录时默认写入目录，否则默认下载 `.vfrag`；保存对话框不会写入临时剪贴板；
+4. 对 `component` / `template`，用结构化表单指定属性绑定和内容插槽；
+5. 使用 `Ctrl/Cmd+C` 将当前选区放入临时片段剪贴板，`Ctrl/Cmd+V` 粘贴最新记录；也可从“导入 → 临时片段剪贴板”管理历史；
+6. 从“导入 → 片段或图片”直接插入 `.vfrag/.svg/.png/.jpg/.jpeg`，或在本地片段库中搜索定义、选择独立副本或关联实例；Raster 只支持独立副本；
+7. 阅读兼容性报告并确认后，片段才会写入当前文档；
+8. 选中组件实例可直接编辑暴露属性、解除关联，或从本地库显式同步最新版。
 
 ## Codex / CLI 工作流
 
@@ -230,6 +237,13 @@ npm run cli -- fragment-insert examples/ai-slide.html \
   --output /tmp/ai-slide-with-fragment.html
 
 npm run cli -- fragments /tmp/ai-slide-with-fragment.html
+```
+
+将原始 SVG、PNG 或 JPEG 封装为 `.vfrag`：
+
+```bash
+npm run cli -- fragment-pack logo.svg --name logo --output /tmp/logo.vfrag
+npm run cli -- fragment-pack photo.jpg --name photo --output /tmp/photo.vfrag
 ```
 
 `fragment-create --schema component-schema.json` 可定义 `properties` 与 `slots`。CLI 输出普通 HTML/SVG 时会把包内资源写到输出文件旁的 `fragments/`；输出 `.visual-project.json` 时资源嵌入项目文件。
@@ -314,7 +328,8 @@ src/
 - 浏览器无法读取的跨域样式、外部字体或网络资源不会被伪装成已打包内容；兼容性报告会保留这些依赖；
 - HTML 缩略图的完整视觉版本是 `preview.svg`；若浏览器因 `foreignObject` 的 canvas 安全规则拒绝直接编码 PNG，PNG 导出会明确提示并使用文字、尺寸和配色摘要回退；
 - 关联实例仅在用户点击同步时更新当前文档；没有后台更新、跨项目自动迁移或云端版本解析；
-- 尚未提供云协作、账号、位图语义分层和像素级编辑。
+- PNG/JPEG 是不可分解的单个 Raster 图层，不提供 OCR、自动分层、矢量化或像素级编辑；
+- 尚未提供云协作、账号、云存储或同步。
 
 ## 后续阶段建议
 

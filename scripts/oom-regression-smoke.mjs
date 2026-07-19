@@ -21,6 +21,12 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+async function chooseIoAction(page, menuId, actionSelector) {
+  const menu = page.locator(menuId);
+  if (!(await menu.getAttribute("open"))) await menu.locator(":scope > summary").click();
+  await page.locator(actionSelector).click();
+}
+
 async function reachable() {
   try {
     return (await fetch(baseUrl)).ok;
@@ -57,21 +63,16 @@ async function saveAndExportFragment(page, elementId, name) {
       parentId: element === root ? null : element.parentElement?.closest("[data-editor-id]")?.getAttribute("data-editor-id") ?? null,
     }));
   }, elementId);
-  await page.locator("#save-fragment").click();
+  await chooseIoAction(page, "#export-menu", "#export-selection-action");
   await page.locator("#fragment-save-dialog").waitFor({ state: "visible" });
   await page.locator("#fragment-name").fill(name);
   await page.locator("#fragment-type").selectOption("component");
+  const downloadPromise = page.waitForEvent("download");
   await page.locator("#fragment-save-submit").click();
   await page.locator("#fragment-save-dialog").waitFor({ state: "hidden", timeout: 60_000 });
-  await page.locator("#open-fragment-library").click();
-  const card = page.locator(`.fragment-card:has-text("${name}")`).first();
-  await card.waitFor({ timeout: 60_000 });
-  const downloadPromise = page.waitForEvent("download");
-  await card.locator('[data-fragment-action="export"]').click();
   const download = await downloadPromise;
   const path = await download.path();
   assert(path, `${name} did not produce a .vfrag download.`);
-  await page.locator("#fragment-library-close").click();
 
   const bytes = await readFile(path);
   const zip = await JSZip.loadAsync(bytes);
@@ -173,7 +174,7 @@ async function run() {
     const metrics = await cdp.send("Performance.getMetrics");
     const metric = Object.fromEntries(metrics.metrics.map(({ name, value }) => [name, value]));
     const downloadPromise = page.waitForEvent("download");
-    await page.locator("#export-html").click();
+    await chooseIoAction(page, "#export-menu", "#export-document-action");
     const exportedPath = await (await downloadPromise).path();
     assert(exportedPath, "Optimized HTML export produced no file.");
     const exportedBytes = (await readFile(exportedPath)).byteLength;
