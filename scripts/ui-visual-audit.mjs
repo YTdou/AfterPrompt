@@ -142,6 +142,15 @@ const scenarioSetups = {
     await settle(page);
   },
 
+  async "multi-selected"(page) {
+    await settle(page);
+    const rows = page.locator("#layers-tree [data-layer-id]");
+    await rows.nth(0).click();
+    await rows.nth(1).click({ modifiers: ["Control"] });
+    await page.waitForFunction(() => document.querySelector("#selection-status")?.textContent === "2 elements selected");
+    await settle(page);
+  },
+
   async deck(page) {
     await settle(page);
     await loadExample(page, "deck");

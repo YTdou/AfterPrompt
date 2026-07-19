@@ -1169,7 +1169,7 @@ async function run() {
       await page.locator("#toggle-code").click();
       await page.waitForFunction(() => !document.querySelector(".studio-shell")?.classList.contains("is-code-collapsed"));
     }
-    await page.locator(".cm-content").fill('<!doctype html><html><body><div style="width: 160px; height: 80px;">Minimal</div></body></html>');
+    await page.locator(".cm-content").fill('<!doctype html><html><body><div style="position:absolute;left:40px;top:40px;width:160px;height:80px;">First</div><div style="position:absolute;left:240px;top:120px;width:160px;height:80px;">Second</div></body></html>');
     await page.locator("#apply-code").click();
     await page.locator('[data-layer-id="document-root"]').waitFor();
     await page.locator('[data-layer-id="div-001"]').waitFor();
@@ -1200,6 +1200,26 @@ async function run() {
         Boolean(groupDragAreaBox?.width && groupDragAreaBox.height),
       `Document-root multiselection did not produce stable group controls (status=${selectedStatus}, single control boxes=${singleControlBoxCounts.join(" -> ")}, group control boxes=${groupControlBoxCounts.join(" -> ")}, drag area=${groupDragAreaBox ? `${groupDragAreaBox.width}x${groupDragAreaBox.height}` : "missing"}, errors=${multiselectErrors.join(" | ") || "none"}).`,
     );
+
+    progress("checking actual sibling group drag and undo");
+    await page.locator('[data-layer-id="div-001"]').click();
+    await page.locator('[data-layer-id="div-002"]').click({ modifiers: ["Control"] });
+    const siblingBoundsBefore = await page.evaluate(() => ["div-001", "div-002"].map((id) => {
+      const rect = document.querySelector("#canvas-host")?.shadowRoot?.querySelector(`[data-editor-id="${id}"]`)?.getBoundingClientRect();
+      return rect ? { x: rect.x, y: rect.y } : null;
+    }));
+    await dragBy(page, page.locator(".moveable-area:visible"), 24, 16);
+    await page.waitForFunction(() => document.querySelector("#sync-status")?.textContent === "代码已同步");
+    const siblingBoundsAfter = await page.evaluate(() => ["div-001", "div-002"].map((id) => {
+      const rect = document.querySelector("#canvas-host")?.shadowRoot?.querySelector(`[data-editor-id="${id}"]`)?.getBoundingClientRect();
+      return rect ? { x: rect.x, y: rect.y } : null;
+    }));
+    assert(siblingBoundsBefore.every(Boolean) && siblingBoundsAfter.every(Boolean), "Sibling group drag lost an editable element.");
+    const siblingDeltas = siblingBoundsAfter.map((after, index) => ({ x: after.x - siblingBoundsBefore[index].x, y: after.y - siblingBoundsBefore[index].y }));
+    assert(siblingDeltas.every((delta) => Math.abs(delta.x - siblingDeltas[0].x) <= 1 && Math.abs(delta.y - siblingDeltas[0].y) <= 1), `Sibling group members moved by different deltas: ${JSON.stringify(siblingDeltas)}`);
+    assert(Math.abs(siblingDeltas[0].x) >= 10 && Math.abs(siblingDeltas[0].y) >= 6, `Sibling group drag did not produce a material move: ${JSON.stringify(siblingDeltas[0])}`);
+    await page.locator("#undo").click();
+    await page.waitForFunction(() => document.querySelector("#sync-status")?.textContent === "代码已同步");
 
     assert(errors.length === 0, `Browser runtime errors:\n${errors.join("\n")}`);
     process.stdout.write(`${JSON.stringify({
@@ -1261,6 +1281,7 @@ async function run() {
       buildUndoRedoContext: true,
       buildFirstPreviewAndExport: true,
       documentRootGroupMultiselection: true,
+      actualSiblingGroupDrag: true,
     }, null, 2)}\n`);
   } finally {
     await browser.close();

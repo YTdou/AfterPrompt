@@ -38,7 +38,7 @@ run_visual_fast() {
 
 run_visual_all() {
   UI_VIEWPORTS="1280x800,1440x900,1920x1080" \
-  UI_SCENARIOS="default,selected,deck,deck-collapsed,svg,code,fragment-library,presentation" \
+  UI_SCENARIOS="default,selected,multi-selected,deck,deck-collapsed,svg,code,fragment-library,presentation" \
   node scripts/ui-visual-audit.mjs
 }
 
