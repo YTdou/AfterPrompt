@@ -205,7 +205,13 @@ function assignRegularIds(root: Element, targetDocument: Document): Record<strin
   return remaps;
 }
 
-function setPlacement(root: Element, placement: VisualFragmentPlacement, model: SourceDocument, fragment: VisualFragmentPackage): void {
+function setPlacement(
+  root: Element,
+  placement: VisualFragmentPlacement,
+  model: SourceDocument,
+  fragment: VisualFragmentPackage,
+  rootZIndex?: number,
+): void {
   let x = fragment.manifest.coordinateSystem.origin.x;
   let y = fragment.manifest.coordinateSystem.origin.y;
   if (placement.mode === "center") {
@@ -227,6 +233,11 @@ function setPlacement(root: Element, placement: VisualFragmentPlacement, model: 
     style.position = "absolute";
     style.left = `${x}px`;
     style.top = `${y}px`;
+    const numericRootZIndex = Number(rootZIndex);
+    if (Number.isFinite(numericRootZIndex)) {
+      style.zIndex = String(Math.min(2_147_483_647, Math.max(-2_147_483_648, Math.trunc(numericRootZIndex))));
+      style.isolation = "isolate";
+    }
   }
 }
 
@@ -420,7 +431,7 @@ export function planVisualFragmentInsert(
   root.setAttribute("data-vfrag-property-overrides", "{}");
   const rootStyle = (root as HTMLElement | SVGElement).style;
   for (const [name, value] of Object.entries(fragment.tokens)) rootStyle.setProperty(name, value);
-  setPlacement(root, options.placement, model, fragment);
+  setPlacement(root, options.placement, model, fragment, options.rootZIndex);
 
   let styles = replaceAssetReferences(fragment.styles, preparedAssets.references);
   styles = remapCssIds(styles, report.idRemaps, report.editorIdRemaps);
@@ -447,6 +458,7 @@ export function planVisualFragmentInsert(
     parentId: options.parentId,
     placement: options.placement,
     linked: options.linked,
+    rootZIndex: options.rootZIndex,
     content: serializeRoot(root, plannedContentType),
     plannedContentType,
     styles,

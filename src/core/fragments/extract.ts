@@ -151,11 +151,19 @@ function computedStyle(mapping: CloneMapping): CSSStyleDeclaration | null {
   const element = mapping.rendered ?? mapping.source;
   const view = element.ownerDocument.defaultView;
   if (!view?.getComputedStyle) return null;
+  const root = element.getRootNode();
+  const transientSheets = "querySelectorAll" in root
+    ? Array.from((root as ParentNode).querySelectorAll<HTMLStyleElement>("style[data-editor-transient-style]"))
+      .map((style) => style.sheet)
+      .filter((sheet): sheet is CSSStyleSheet => sheet !== null)
+    : [];
+  const transientSheetStates = transientSheets.map((sheet) => sheet.disabled);
   const portableBuildContext = mapping.topLevel && mapping.source.hasAttribute("data-build");
   const originalClass = element.getAttribute("class");
   const originalAriaHidden = element.getAttribute("aria-hidden");
   const originalBuildVisibility = element.getAttribute("data-editor-build-visibility");
   try {
+    transientSheets.forEach((sheet) => { sheet.disabled = true; });
     if (portableBuildContext) {
       element.classList.add("revealed");
       element.setAttribute("aria-hidden", "false");
@@ -172,6 +180,7 @@ function computedStyle(mapping: CloneMapping): CSSStyleDeclaration | null {
   } catch {
     return null;
   } finally {
+    transientSheets.forEach((sheet, index) => { sheet.disabled = transientSheetStates[index] ?? false; });
     if (portableBuildContext) {
       if (originalClass === null) element.removeAttribute("class");
       else element.setAttribute("class", originalClass);
@@ -897,7 +906,7 @@ export function extractVisualFragment(
       sourceProject: (options.sourceProject ?? sourcePath).slice(0, 512),
       sourceDocument: model.sourceName.slice(0, 512),
       createdAt: new Date().toISOString(),
-      generator: "Last Mile Studio 0.4.0",
+      generator: "AfterPrompt 0.4.0",
     },
     version: normalizeVersion(options.version),
     tags: normalizeTags(options.tags),

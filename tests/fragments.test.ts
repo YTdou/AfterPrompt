@@ -420,6 +420,25 @@ describe("Visual Fragment import", () => {
     expect(centeredRoot.style.top).toBe("240px");
   });
 
+  it("places an HTML fragment in an isolated, explicit stacking context when requested", () => {
+    const fragment = extractComponent();
+    const target = blankTarget();
+    const inserted = insertVisualFragment(target.model, target.assets, fragment, {
+      parentId: target.parentId,
+      placement: { mode: "point", x: 40, y: 50 },
+      linked: false,
+      targetSourcePath: "target/index.html",
+      rootZIndex: 701,
+    });
+    const root = target.model.find(inserted.rootEditorIds[0]!) as HTMLElement;
+
+    expect(root.style.zIndex).toBe("701");
+    expect(root.style.isolation).toBe("isolate");
+    expect(root.parentElement?.lastElementChild).toBe(root);
+    expect(root.querySelector('[data-vfrag-node-key="card-001"]')).not.toBeNull();
+    expect(target.model.serialize()).toContain("isolation: isolate");
+  });
+
   it("constrains original and explicit placement to the editable canvas", () => {
     const fragment = extractComponent();
     fragment.manifest.coordinateSystem.origin = { x: 4_000, y: -200 };

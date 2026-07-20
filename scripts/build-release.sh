@@ -58,6 +58,21 @@ trap cleanup EXIT
 mkdir -p "$PACKAGE_ROOT/last-mile-studio"
 cp -a dist/. "$PACKAGE_ROOT/last-mile-studio/"
 
+LEGAL_ROOT="$PACKAGE_ROOT/last-mile-studio/legal"
+mkdir -p "$LEGAL_ROOT/fonts" "$LEGAL_ROOT/npm"
+cp LICENSE NOTICE TRADEMARKS.md THIRD_PARTY_NOTICES.md RELICENSING.md "$LEGAL_ROOT/"
+cp src/assets/fonts/Inter-OFL-1.1.txt "$LEGAL_ROOT/fonts/"
+cp src/assets/fonts/catalog/LICENSE-Liberation.txt "$LEGAL_ROOT/fonts/"
+cp src/assets/fonts/catalog/LICENSE-SourceHan.txt "$LEGAL_ROOT/fonts/"
+cp src/assets/fonts/catalog/LICENSE-LXGWWenKai.txt "$LEGAL_ROOT/fonts/"
+
+while IFS= read -r license_file; do
+  relative_path="${license_file#node_modules/}"
+  destination="$LEGAL_ROOT/npm/$relative_path"
+  mkdir -p "$(dirname "$destination")"
+  cp "$license_file" "$destination"
+done < <(find node_modules -type f \( -iname 'LICENSE' -o -iname 'LICENSE.*' -o -iname 'COPYING' -o -iname 'COPYING.*' \) -print)
+
 SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
 tar \
   --sort=name \

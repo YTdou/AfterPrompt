@@ -266,7 +266,7 @@ fi
 chown -R "$DEPLOY_USER:$DEPLOY_GROUP" "$BACKUP_DIR" "$ROUTE_AFTER"
 trap - ERR
 
-printf 'Last Mile Studio bootstrap completed.\n'
+printf 'AfterPrompt bootstrap completed.\n'
 printf 'Endpoint: https://%s/last-mile-studio/\n' "$SERVER_IP"
 printf 'Nginx backup directory: %s\n' "$BACKUP_DIR"
 printf 'Certificate timer: last-mile-studio-certbot-renew.timer\n'

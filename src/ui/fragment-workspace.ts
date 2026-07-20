@@ -30,6 +30,7 @@ export interface FragmentWorkspaceContext {
   selectedIds: string[];
   selectionItems: VisualFragmentSelectionItem[];
   insertionParentId: string | null;
+  insertionZIndex?: number;
   cursor: { x: number; y: number };
 }
 
@@ -876,6 +877,7 @@ export class FragmentWorkspace {
       placement: options.placement ?? this.placement(),
       linked,
       targetSourcePath: context.sourcePath,
+      rootZIndex: context.insertionZIndex,
     });
     if (options.confirmCompatibility !== false) {
       const confirmed = await this.confirmCompatibility(plan.report);

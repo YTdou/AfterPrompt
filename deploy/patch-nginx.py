@@ -33,7 +33,7 @@ backup_path = config_path.with_name(f"{config_path.name}.pre-last-mile-studio-{t
 shutil.copy2(config_path, backup_path)
 
 replacement = (
-    "    # Last Mile Studio routes are isolated in a reviewed snippet.\n"
+    "    # AfterPrompt routes are isolated in a reviewed snippet.\n"
     f"{include_line}\n\n"
     f"{anchor}"
 )

@@ -114,7 +114,7 @@ function print(value: unknown): void {
 }
 
 function usage(): never {
-  print(`Last Mile Studio CLI
+  print(`AfterPrompt CLI
 
 Usage:
   npm run cli -- list <input>

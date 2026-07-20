@@ -1,5 +1,5 @@
 [Unit]
-Description=Run Last Mile Studio certificate renewal every six hours
+Description=Run AfterPrompt certificate renewal every six hours
 
 [Timer]
 OnCalendar=*-*-* 00/6:00:00

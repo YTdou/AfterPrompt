@@ -55,19 +55,19 @@ export function decodeEditableHtmlPayload(encoded: string): EditableHtmlPayloadV
   try {
     value = JSON.parse(new TextDecoder().decode(base64ToBytes(encoded)));
   } catch {
-    throw new Error("The embedded Last Mile Studio document payload is malformed.");
+    throw new Error("The embedded AfterPrompt document payload is malformed.");
   }
   const payload = value as Partial<EditableHtmlPayloadV1>;
   if (payload.format !== EDITABLE_HTML_FORMAT || payload.version !== EDITABLE_HTML_VERSION ||
       typeof payload.source !== "string" || !payload.source.trim() || typeof payload.sourceName !== "string" ||
       typeof payload.sourcePath !== "string" || !payload.canvas ||
       !Number.isFinite(payload.canvas.width) || !Number.isFinite(payload.canvas.height)) {
-    throw new Error("This Last Mile Studio HTML format is unsupported or incomplete.");
+    throw new Error("This AfterPrompt HTML format is unsupported or incomplete.");
   }
   const complete = payload as EditableHtmlPayloadV1;
   const { checksum, ...unsigned } = complete;
   if (typeof checksum !== "string" || checksum !== payloadChecksum(unsigned)) {
-    throw new Error("The embedded Last Mile Studio document payload failed its integrity check.");
+    throw new Error("The embedded AfterPrompt document payload failed its integrity check.");
   }
   return complete;
 }
@@ -114,6 +114,6 @@ export function decodeEditableHtml(source: string, fallbackName = "presentation.
   const document = parser.parseFromString(source, "text/html");
   const payloadNode = document.querySelector<HTMLTemplateElement>("template#lms-document-payload[data-encoding='base64-json']");
   const encoded = payloadNode?.content.textContent?.trim() ?? "";
-  if (!encoded) throw new Error("This Last Mile Studio HTML file is missing its editable document payload.");
+  if (!encoded) throw new Error("This AfterPrompt HTML file is missing its editable document payload.");
   return { payload: decodeEditableHtmlPayload(encoded), legacy: false };
 }

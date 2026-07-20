@@ -1,5 +1,5 @@
 [Unit]
-Description=Renew the Last Mile Studio IP certificate
+Description=Renew the AfterPrompt IP certificate
 Wants=network-online.target
 After=network-online.target
 

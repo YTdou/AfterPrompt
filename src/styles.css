@@ -156,9 +156,8 @@ summary:focus-visible,
 .brand small {
   color: var(--text-muted);
   font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  font-weight: 500;
+  letter-spacing: 0.01em;
 }
 
 .toolbar {
