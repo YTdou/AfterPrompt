@@ -209,9 +209,9 @@ function exampleAssets(): ProjectAssets {
 const appTemplate = `
   <div class="studio-shell is-code-collapsed">
     <header class="topbar">
-      <div class="brand" title="Source-first visual editing">
-        <span class="brand-mark">LM</span>
-        <span><strong>Last Mile</strong><small>Studio</small></span>
+      <div class="brand" title="AfterPrompt — Visually refine what AI generates.">
+        <span class="brand-mark">AP</span>
+        <span><strong>AfterPrompt</strong><small>Visually refine what AI generates.</small></span>
       </div>
       <div class="toolbar toolbar-primary">
         <details id="import-menu" class="io-menu" data-io-menu>
@@ -914,6 +914,9 @@ export class EditorApp {
       selectedIds: [...this.selectedIds],
       selectionItems,
       insertionParentId: insertionParent?.getAttribute("data-editor-id") ?? null,
+      insertionZIndex: this.model.kind === "html" && insertionParent
+        ? this.renderer.nextTopZIndex(insertionParent.getAttribute("data-editor-id") ?? "")
+        : undefined,
       cursor: {
         x: Math.min(this.model.canvas.width, Math.max(0, this.fragmentCursor.x)),
         y: Math.min(this.model.canvas.height, Math.max(0, this.fragmentCursor.y)),

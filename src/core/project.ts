@@ -195,7 +195,7 @@ export function createSavedProject(
     })),
     metadata: {
       savedAt: new Date().toISOString(),
-      generator: "Last Mile Studio 0.4.0",
+      generator: "AfterPrompt 0.4.0",
     },
   };
 }
@@ -203,7 +203,7 @@ export function createSavedProject(
 export function parseSavedProject(value: string): { project: SavedProject; assets: ProjectAssets } {
   const project = JSON.parse(value) as SavedProject;
   if (project.format !== "last-mile-studio" || project.version !== 1 || !project.source) {
-    throw new Error("This is not a supported Last Mile Studio project file.");
+    throw new Error("This is not a supported AfterPrompt project file.");
   }
   project.operations ??= [];
   const assets = new ProjectAssets(project.assets.map((asset) => ({

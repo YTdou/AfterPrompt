@@ -165,6 +165,10 @@ async function run() {
     progress("loading default HTML example");
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await page.locator("#document-status").waitFor();
+    assert(await page.title() === "AfterPrompt — Visually refine what AI generates.", "The browser title does not use the AfterPrompt full name.");
+    assert((await page.locator(".brand strong").textContent()) === "AfterPrompt", "The top bar does not use the AfterPrompt short name.");
+    assert((await page.locator(".brand small").textContent()) === "Visually refine what AI generates.", "The AfterPrompt tagline is missing from the top bar.");
+    assert((await page.locator(".brand-mark").textContent()) === "AP", "The legacy brand mark is still visible.");
     assert((await page.locator("#document-status").textContent())?.includes("HTML"), "HTML example did not load.");
     assert((await page.locator("#export-document-label").textContent()) === "导出 HTML", "The export menu did not reflect the active HTML document type.");
     assert(await page.locator("#export-selection-action").isDisabled(), "Selection export is enabled without a selection.");
@@ -606,6 +610,59 @@ async function run() {
     await page.keyboard.press("Escape");
     assert(!(await page.locator("#import-menu").getAttribute("open")), "Escape did not close the import menu.");
     assert(await importSummary.evaluate((element) => element === document.activeElement), "Closing the import menu did not restore focus to its trigger.");
+
+    progress("checking clipboard visual fidelity while editor hover chrome is active");
+    await page.locator('[data-layer-id="title-001"]').click();
+    await page.waitForFunction(() => document.querySelector("#selection-status")?.textContent?.startsWith("title-001"));
+    const titleCanvasNode = page.locator('#canvas-host [data-editor-id="title-001"]');
+    await titleCanvasNode.hover();
+    const hoveredSourceOutline = await titleCanvasNode.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { style: style.outlineStyle, width: style.outlineWidth };
+    });
+    assert(hoveredSourceOutline.style === "dashed" && hoveredSourceOutline.width !== "0px", `The fidelity probe did not activate editor hover chrome: ${JSON.stringify(hoveredSourceOutline)}`);
+    await page.keyboard.press("Control+C");
+    await page.keyboard.press("Control+V");
+    await page.waitForFunction(() => document.querySelector("#selection-status")?.textContent?.startsWith("clipboard-"));
+    const fidelityPasteRootId = (await page.locator("#selection-status").textContent())?.split(/\s+/)[0];
+    assert(fidelityPasteRootId, "The visual-fidelity clipboard probe did not create a pasted root.");
+    await page.mouse.move(8, 8);
+    await page.waitForTimeout(50);
+    const visualParity = await page.evaluate(({ sourceId, pastedRootId }) => {
+      const shadow = document.querySelector("#canvas-host")?.shadowRoot;
+      const source = shadow?.querySelector(`[data-editor-id="${sourceId}"]`);
+      const pastedRoot = shadow?.querySelector(`[data-editor-id="${pastedRootId}"]`);
+      const pasted = pastedRoot?.querySelector("[data-vfrag-coordinate-layer] > *")
+        ?? (pastedRoot?.matches("[data-vfrag-node-key]:not([data-vfrag-node-key='fragment-root'])") ? pastedRoot : null);
+      if (!(source instanceof Element) || !(pasted instanceof Element)) return null;
+      const snapshot = (element) => {
+        const style = getComputedStyle(element);
+        const bounds = element.getBoundingClientRect();
+        return {
+          text: element.textContent?.replace(/\s+/g, " ").trim() ?? "",
+          width: Math.round(bounds.width * 100) / 100,
+          height: Math.round(bounds.height * 100) / 100,
+          borderTopStyle: style.borderTopStyle,
+          borderTopWidth: style.borderTopWidth,
+          borderTopColor: style.borderTopColor,
+          borderRadius: style.borderRadius,
+          boxShadow: style.boxShadow,
+          filter: style.filter,
+          backdropFilter: style.backdropFilter,
+          opacity: style.opacity,
+          outlineStyle: style.outlineStyle,
+          outlineWidth: style.outlineWidth,
+          outlineColor: style.outlineColor,
+          textShadow: style.textShadow,
+        };
+      };
+      return { source: snapshot(source), pasted: snapshot(pasted) };
+    }, { sourceId: "title-001", pastedRootId: fidelityPasteRootId });
+    assert(visualParity, "The pasted fragment does not contain the copied source node.");
+    assert(visualParity.source.boxShadow !== "none" && visualParity.source.borderTopStyle === "solid", `The fidelity probe lost its genuine author styles before comparison: ${JSON.stringify(visualParity.source)}`);
+    assert(JSON.stringify(visualParity.pasted) === JSON.stringify(visualParity.source), `Clipboard paste changed visual style or geometry: ${JSON.stringify(visualParity)}`);
+    await page.locator("#undo").click();
+    await page.waitForFunction((id) => !document.querySelector("#canvas-host")?.shadowRoot?.querySelector(`[data-editor-id="${id}"]`), fidelityPasteRootId);
 
     progress("checking rapid application clipboard ordering with empty and stale storage");
     const rapidCopyPaste = async (layerId) => {
@@ -1295,6 +1352,87 @@ async function run() {
     await page.locator("#undo").click();
     await page.waitForFunction(() => document.querySelector("#sync-status")?.textContent === "代码已同步");
 
+    progress("checking that pasted parent and children form one frontmost stacking context");
+    const stackingSource = `<!doctype html><html><body data-editor-canvas-width="640" data-editor-canvas-height="420" style="position:relative;margin:0">
+      <main data-editor-id="stack-root" style="position:relative;width:640px;height:420px;background:#f5f7fb">
+        <section data-editor-id="copy-group" style="position:absolute;left:80px;top:80px;width:220px;height:150px;z-index:1">
+          <div data-editor-id="copy-child" style="position:absolute;inset:0;z-index:-5;display:grid;place-items:center;background:#34a46f;color:white;font:700 22px sans-serif">COPY</div>
+        </section>
+        <div data-editor-id="cover-layer" style="position:absolute;left:60px;top:60px;width:280px;height:210px;z-index:700;display:grid;place-items:center;background:#d84b56;color:white;font:700 22px sans-serif">COVER</div>
+      </main>
+    </body></html>`;
+    await page.locator(".cm-content").fill(stackingSource);
+    await page.locator("#apply-code").click();
+    await page.locator('[data-layer-id="copy-group"]').waitFor();
+    const coveredBeforePaste = await page.evaluate(() => {
+      const shadow = document.querySelector("#canvas-host")?.shadowRoot;
+      const child = shadow?.querySelector('[data-editor-id="copy-child"]');
+      const bounds = child?.getBoundingClientRect();
+      const top = bounds ? shadow?.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2) : null;
+      return top?.closest("[data-editor-id]")?.getAttribute("data-editor-id") ?? null;
+    });
+    assert(coveredBeforePaste === "cover-layer", `The stacking fixture is not covered before paste: ${coveredBeforePaste}`);
+    await page.locator('[data-layer-id="copy-group"]').click();
+    await page.keyboard.press("Control+C");
+    await page.keyboard.press("Control+V");
+    await page.waitForFunction(() => document.querySelector("#selection-status")?.textContent?.startsWith("clipboard-"));
+    const firstStackPasteId = (await page.locator("#selection-status").textContent())?.split(/\s+/)[0];
+    assert(firstStackPasteId, "The first stacking paste did not create a root.");
+    const inspectStackPaste = (rootId) => page.evaluate((id) => {
+      const shadow = document.querySelector("#canvas-host")?.shadowRoot;
+      const root = shadow?.querySelector(`[data-editor-id="${id}"]`);
+      const child = root?.querySelector('[data-vfrag-node-key="copy-child"]');
+      const bounds = child?.getBoundingClientRect();
+      const point = bounds ? { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 } : null;
+      const hitStack = point ? shadow?.elementsFromPoint(point.x, point.y) ?? [] : [];
+      const top = hitStack.find((element) => element.closest("[data-editor-id]")) ?? null;
+      const style = root ? getComputedStyle(root) : null;
+      return {
+        zIndex: style?.zIndex ?? null,
+        isolation: style?.isolation ?? null,
+        topRootId: top?.closest("[data-vfrag-instance-id]")?.getAttribute("data-editor-id") ?? null,
+        topEditorId: top?.closest("[data-editor-id]")?.getAttribute("data-editor-id") ?? null,
+        bounds: bounds ? { width: bounds.width, height: bounds.height, ...point } : null,
+        hitStack: hitStack.slice(0, 8).map((element) => ({
+          tag: element.localName,
+          id: element.closest("[data-editor-id]")?.getAttribute("data-editor-id") ?? null,
+          zIndex: getComputedStyle(element).zIndex,
+        })),
+        childText: child?.textContent?.trim() ?? null,
+      };
+    }, rootId);
+    const firstStackPaste = await inspectStackPaste(firstStackPasteId);
+    assert(Number(firstStackPaste.zIndex) > 700 && firstStackPaste.isolation === "isolate" && firstStackPaste.topRootId === firstStackPasteId && firstStackPaste.childText === "COPY", `The first pasted group is not frontmost as one stacking context: ${JSON.stringify(firstStackPaste)}`);
+    assert(await page.locator(`[data-layer-node="${firstStackPasteId}"] [data-layer-id]`).count() >= 2, "The pasted root does not expose its copied descendants as children in the layer tree.");
+
+    await page.keyboard.press("Control+V");
+    await page.waitForFunction((firstId) => {
+      const selected = document.querySelector("#selection-status")?.textContent?.split(/\s+/)[0] ?? "";
+      return selected.startsWith("clipboard-") && selected !== firstId;
+    }, firstStackPasteId);
+    const secondStackPasteId = (await page.locator("#selection-status").textContent())?.split(/\s+/)[0];
+    assert(secondStackPasteId, "The second stacking paste did not create a root.");
+    const secondStackPaste = await inspectStackPaste(secondStackPasteId);
+    assert(Number(secondStackPaste.zIndex) > Number(firstStackPaste.zIndex) && secondStackPaste.topRootId === secondStackPasteId, `Repeated paste did not advance to the visual front: ${JSON.stringify({ firstStackPaste, secondStackPaste })}`);
+    await page.locator("#undo").click();
+    await page.waitForFunction((id) => !document.querySelector("#canvas-host")?.shadowRoot?.querySelector(`[data-editor-id="${id}"]`), secondStackPasteId);
+    await page.locator("#redo").click();
+    await page.waitForFunction((id) => Boolean(document.querySelector("#canvas-host")?.shadowRoot?.querySelector(`[data-editor-id="${id}"]`)), secondStackPasteId);
+    const redoneStackPaste = await inspectStackPaste(secondStackPasteId);
+    assert(redoneStackPaste.topRootId === secondStackPasteId && redoneStackPaste.isolation === "isolate", `Redo did not restore frontmost stacking: ${JSON.stringify(redoneStackPaste)}`);
+
+    const stackingExportPromise = page.waitForEvent("download");
+    await exportDocument(page);
+    const stackingExport = await stackingExportPromise;
+    const stackingExportPath = await stackingExport.path();
+    assert(stackingExportPath, "The stacking fixture export did not produce a file.");
+    const stackingExportHtml = await readFile(stackingExportPath, "utf8");
+    assert(stackingExportHtml.includes("isolation: isolate") && stackingExportHtml.includes(`data-editor-id="${secondStackPasteId}"`), "Export lost the pasted stacking context.");
+    await page.locator("#file-input").setInputFiles(stackingExportPath);
+    await page.locator(`[data-layer-id="${secondStackPasteId}"]`).waitFor();
+    const reimportedStackPaste = await inspectStackPaste(secondStackPasteId);
+    assert(reimportedStackPaste.topRootId === secondStackPasteId && reimportedStackPaste.isolation === "isolate", `Re-import lost frontmost stacking: ${JSON.stringify(reimportedStackPaste)}`);
+
     assert(errors.length === 0, `Browser runtime errors:\n${errors.join("\n")}`);
     process.stdout.write(`${JSON.stringify({
       ok: true,
@@ -1356,6 +1494,7 @@ async function run() {
       buildFirstPreviewAndExport: true,
       documentRootGroupMultiselection: true,
       actualSiblingGroupDrag: true,
+      clipboardFrontmostStackingContext: true,
     }, null, 2)}\n`);
   } finally {
     await browser.close();

@@ -1,6 +1,6 @@
-# Last Mile Studio
+# AfterPrompt — Visually refine what AI generates.
 
-Last Mile Studio 是一个面向 AI 生成 HTML、HTML Slide 和 SVG 的“最后一公里”可视化编辑器。它直接编辑真实 DOM / SVG 节点，并持续生成可读、可导出的标准源代码；没有把页面栅格化，也没有把 Canvas 状态当作唯一数据源。
+AfterPrompt 是一个面向 AI 生成 HTML、HTML Slide 和 SVG 的可视化精修编辑器。它直接编辑真实 DOM / SVG 节点，并持续生成可读、可导出的标准源代码；没有把页面栅格化，也没有把 Canvas 状态当作唯一数据源。
 
 当前版本是可运行的 MVP（`0.4.0`），已经完成 Phase 1–4，并提供 local-first 视觉片段、组件保存与复用主链路：
 
@@ -105,7 +105,7 @@ CHROME_PATH=/path/to/chrome npm run test:browser
 ### 选择、变换与属性
 
 - 点击画布或图层树选择节点；Ctrl / Shift 点击多选；Alt 点击选择父级；
-- 非文字编辑状态下，`Ctrl/Cmd+C` 将选区复制到应用内临时片段剪贴板，`Ctrl/Cmd+V` 粘贴最新片段并按 16 px 连续偏移；输入框和代码编辑器仍使用系统原生剪贴板；
+- 非文字编辑状态下，`Ctrl/Cmd+C` 将选区复制到应用内临时片段剪贴板，`Ctrl/Cmd+V` 粘贴最新片段并按 16 px 连续偏移；HTML 粘贴根会作为独立绘制组置于当前页面最前方，组内子级保留原有层次；输入框和代码编辑器仍使用系统原生剪贴板；
 - Moveable 驱动的拖动、缩放、旋转、吸附控制框；
 - SVG `path`、`polygon`、`polyline`、`line`、`text` 与分组等无原生宽高节点使用固定点变换缩放；
 - X、Y、W、H、旋转角度的精确输入；
@@ -349,4 +349,12 @@ src/
 
 ## License
 
-本项目代码使用 MIT License。参考目录中的第三方项目保持各自许可证；本实现没有复制它们的源码。
+AfterPrompt 自 2026-07-20 起对项目自有代码和文档采用
+[Apache License 2.0](LICENSE)。它允许使用、修改和商业分发，同时要求保留
+相关声明，并明确处理贡献者专利授权；旧 MIT 版本的授权历史见
+[RELICENSING.md](RELICENSING.md)。
+
+“AfterPrompt”名称、Logo、图标及其他品牌标识不随代码授权，具体边界见
+[TRADEMARKS.md](TRADEMARKS.md)。内嵌字体和第三方依赖继续遵循各自许可证，
+清单见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。用户导入、编辑或
+导出的内容不会因此自动改用项目许可证。

@@ -165,6 +165,7 @@ export interface VisualFragmentInsertOptions {
   placement: VisualFragmentPlacement;
   linked: boolean;
   targetSourcePath?: string;
+  rootZIndex?: number;
 }
 
 export interface VisualFragmentInsertPlan {
@@ -173,6 +174,7 @@ export interface VisualFragmentInsertPlan {
   parentId: string;
   placement: VisualFragmentPlacement;
   linked: boolean;
+  rootZIndex?: number;
   content: string;
   plannedContentType: VisualFragmentStructuredContentType;
   styles: string;

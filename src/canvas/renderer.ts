@@ -47,6 +47,9 @@ const editorCss = `
     margin: 0 !important;
     overflow: hidden;
   }
+`;
+
+const editorInteractionCss = `
   [data-editor-id] {
     cursor: default;
   }
@@ -160,8 +163,9 @@ const buildPreviewCss = `
   [data-editor-build-view="group"] [data-editor-build-relation="future"] { opacity: .18 !important; }
 `;
 
-function styleElement(text: string): HTMLStyleElement {
+function styleElement(text: string, transient = false): HTMLStyleElement {
   const style = document.createElement("style");
+  if (transient) style.setAttribute("data-editor-transient-style", "");
   style.textContent = text;
   return style;
 }
@@ -345,7 +349,8 @@ export class CanvasRenderer {
     if ("adoptedStyleSheets" in this.shadow) this.shadow.adoptedStyleSheets = [];
     this.shadow.replaceChildren();
     this.shadow.append(styleElement(editorCss));
-    this.shadow.append(styleElement(buildPreviewCss));
+    this.shadow.append(styleElement(editorInteractionCss, true));
+    this.shadow.append(styleElement(buildPreviewCss, true));
 
     if (model.kind === "html") this.renderHtml(model, activePageId, options);
     else this.renderSvg(model);
@@ -625,6 +630,17 @@ export class CanvasRenderer {
 
   element(elementId: string): Element | null {
     return this.previewRoot ? getElementByEditorId(this.previewRoot, elementId) : null;
+  }
+
+  nextTopZIndex(rootId: string): number {
+    const root = this.element(rootId);
+    if (!root) return 1;
+    let maximum = 0;
+    for (const element of [root, ...Array.from(root.querySelectorAll("*"))]) {
+      const value = Number.parseInt(getComputedStyle(element).zIndex, 10);
+      if (Number.isFinite(value)) maximum = Math.max(maximum, value);
+    }
+    return Math.min(2_147_483_647, maximum + 1);
   }
 
   modelElement(elementId: string): Element | null {

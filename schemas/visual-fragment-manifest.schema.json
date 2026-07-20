@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://last-mile-studio.local/schemas/visual-fragment-manifest.schema.json",
-  "title": "Last Mile Studio Visual Fragment Manifest",
+  "title": "AfterPrompt Visual Fragment Manifest",
   "type": "object",
   "additionalProperties": false,
   "required": [

@@ -26,7 +26,7 @@ export function sanitizeCss(css: string, warnings: string[]): string {
   const importPattern = /@import\s+(?:url\()?[^;]+;?/gi;
   if (importPattern.test(result)) {
     warnings.push("已禁用 CSS @import；请通过项目目录导入本地样式。 ");
-    result = result.replace(importPattern, "/* @import removed by Last Mile Studio */");
+    result = result.replace(importPattern, "/* @import removed by AfterPrompt */");
   }
   result = result.replace(/expression\s*\([^)]*\)/gi, "/* expression removed */");
   result = result.replace(/url\s*\(\s*(['\"]?)\s*javascript:[^)]*\)/gi, "none");

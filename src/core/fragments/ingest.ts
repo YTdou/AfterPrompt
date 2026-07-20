@@ -119,7 +119,7 @@ export function createRasterVisualFragment(
         sourceProject: options.sourceProject ?? fileName,
         sourceDocument: fileName,
         createdAt: new Date().toISOString(),
-        generator: "Last Mile Studio",
+        generator: "AfterPrompt",
       },
       version: "1.0.0",
       tags: options.tags ?? [info.mimeType === "image/png" ? "png" : "jpg"],
