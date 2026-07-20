@@ -169,6 +169,16 @@ async function run() {
     assert((await page.locator("#export-document-label").textContent()) === "导出 HTML", "The export menu did not reflect the active HTML document type.");
     assert(await page.locator("#export-selection-action").isDisabled(), "Selection export is enabled without a selection.");
     assert(await page.locator("[data-layer-id]").count() >= 12, "Layer tree is unexpectedly empty.");
+    assert(await page.locator("#import-menu > summary .ui-chevron[aria-hidden='true']").count() === 1, "The import menu is missing its accessible SVG chevron.");
+    assert(await page.locator("#export-menu > summary .ui-chevron[aria-hidden='true']").count() === 1, "The export menu is missing its accessible SVG chevron.");
+    const rootLayerLeadingSpace = await page.locator("[data-layer-id]").first().evaluate((row) => {
+      const name = row.querySelector("[data-layer-name]");
+      if (!(name instanceof HTMLElement)) return Number.POSITIVE_INFINITY;
+      return name.getBoundingClientRect().left - row.getBoundingClientRect().left;
+    });
+    assert(rootLayerLeadingSpace <= 64, `Layer names still reserve excessive leading space (${rootLayerLeadingSpace}px).`);
+    assert(await page.locator("[data-layer-toggle] .ui-chevron[aria-hidden='true']").count() > 0, "Layer disclosure controls are missing SVG chevrons.");
+    assert(await page.locator("[data-layout-toggle='layers'] .ui-chevron[aria-hidden='true']").count() === 1, "The layers panel toggle is missing its SVG chevron.");
 
     progress("checking the default collapsed source bar and canvas space");
     assert(await page.locator(".studio-shell").evaluate((element) => element.classList.contains("is-code-collapsed")), "The source bar is not collapsed by default.");
@@ -466,11 +476,18 @@ async function run() {
       return style.borderTopWidth === "3px" && style.borderTopStyle === "solid";
     });
 
+    const shadowDetails = page.locator("[data-shadow-details]");
+    assert(!(await shadowDetails.evaluate((details) => details.open)), "Shadow fine controls are expanded by default.");
+    assert(await page.locator("[data-shadow-preset]").count() === 5, "Shadow presets are not available in the collapsed state.");
     await page.locator('[data-shadow-preset="floating"]').click();
     await page.waitForFunction(() => {
       const title = document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="title-001"]');
       return title && getComputedStyle(title).boxShadow !== "none";
     });
+    const shadowSummary = shadowDetails.locator(":scope > summary");
+    await shadowSummary.focus();
+    await shadowSummary.press("Enter");
+    assert(await shadowDetails.evaluate((details) => details.open), "Shadow fine controls cannot be expanded from the keyboard.");
     const shadowX = page.locator('[data-shadow-part="x"]');
     await shadowX.fill("6");
     await shadowX.press("Tab");

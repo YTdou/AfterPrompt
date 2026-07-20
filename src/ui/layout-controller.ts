@@ -15,6 +15,7 @@ interface LayoutControllerOptions {
 }
 
 const STORAGE_KEY = "last-mile-studio:layout:v1";
+const CHEVRON_ICON = `<svg class="ui-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 6.25 3.5 3.5 3.5-3.5"/></svg>`;
 const COLLAPSED_RAIL = 32;
 const MIN_CANVAS_WIDTH = 360;
 const LIMITS = {
@@ -225,9 +226,9 @@ export class EditorLayoutController {
     canvasPanel.classList.toggle("is-pages-collapsed", this.state.pagesCollapsed);
     pagesPanel.classList.toggle("is-collapsed", this.state.pagesCollapsed);
 
-    this.updateToggle("layers", this.state.layersCollapsed, this.state.layersCollapsed ? "›" : "‹");
-    this.updateToggle("inspector", this.state.inspectorCollapsed, this.state.inspectorCollapsed ? "‹" : "›");
-    this.updateToggle("pages", this.state.pagesCollapsed, this.state.pagesCollapsed ? "⌄" : "⌃");
+    this.updateToggle("layers", this.state.layersCollapsed, this.state.layersCollapsed ? "right" : "left");
+    this.updateToggle("inspector", this.state.inspectorCollapsed, this.state.inspectorCollapsed ? "left" : "right");
+    this.updateToggle("pages", this.state.pagesCollapsed, this.state.pagesCollapsed ? "down" : "up");
     this.updateSeparator("layers", layersWidth, LIMITS.layers.min, LIMITS.layers.max);
     this.updateSeparator("inspector", inspectorWidth, LIMITS.inspector.min, LIMITS.inspector.max);
     this.updateSeparator("pages", pagesHeight, LIMITS.pages.min, LIMITS.pages.max);
@@ -235,9 +236,10 @@ export class EditorLayoutController {
     this.notifyLayoutChange(region !== "build");
   }
 
-  private updateToggle(region: LayoutRegion, collapsed: boolean, symbol: string): void {
+  private updateToggle(region: LayoutRegion, collapsed: boolean, direction: "up" | "right" | "down" | "left"): void {
     const button = this.get<HTMLButtonElement>(`[data-layout-toggle="${region}"]`);
-    button.textContent = symbol;
+    button.innerHTML = CHEVRON_ICON;
+    button.dataset.chevronDirection = direction;
     button.setAttribute("aria-expanded", String(!collapsed));
     button.title = collapsed ? "展开面板" : "折叠面板";
   }

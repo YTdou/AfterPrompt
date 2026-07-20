@@ -67,6 +67,19 @@ function escapeHtml(value: string): string {
   })[character]!);
 }
 
+const chevronIcon = `<svg class="ui-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 6.25 3.5 3.5 3.5-3.5"/></svg>`;
+const layerGripIcon = `<svg class="layer-grip-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="5" cy="4" r="1"/><circle cx="11" cy="4" r="1"/><circle cx="5" cy="8" r="1"/><circle cx="11" cy="8" r="1"/><circle cx="5" cy="12" r="1"/><circle cx="11" cy="12" r="1"/></svg>`;
+
+function layerStateIcon(visible: boolean, locked: boolean): string {
+  if (!visible) {
+    return `<svg class="layer-state-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.25 8s2-3.5 5.75-3.5S13.75 8 13.75 8s-2 3.5-5.75 3.5S2.25 8 2.25 8Z"/><path d="m3 3 10 10"/></svg>`;
+  }
+  if (locked) {
+    return `<svg class="layer-state-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="7" width="9" height="6.5" rx="1.5"/><path d="M5.5 7V5.25a2.5 2.5 0 0 1 5 0V7"/></svg>`;
+  }
+  return `<svg class="layer-state-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.25 8s2-3.5 5.75-3.5S13.75 8 13.75 8s-2 3.5-5.75 3.5S2.25 8 2.25 8Z"/><circle cx="8" cy="8" r="1.75"/></svg>`;
+}
+
 function numeric(value: string, fallback = 0): number {
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -136,14 +149,17 @@ function shadowEditorMarkup(computedShadow: string): string {
   return `<div class="shadow-editor" data-shadow-editor>
     <div class="shadow-presets">${presets}</div>
     ${complex ? `<p class="shadow-notice">当前为多层或 inset 阴影；在选择预设前保持原值。</p>` : ""}
-    <div class="shadow-controls">
-      ${control("x", "水平", -32, 32)}
-      ${control("y", "垂直", -32, 32)}
-      ${control("blur", "模糊", 0, 64)}
-      ${control("spread", "扩散", -32, 32)}
-      <label class="shadow-color"><span>颜色</span><input type="color" value="${value.color}" data-shadow-part="color" /><output>${value.color}</output></label>
-      <label class="shadow-control"><span>透明度</span><input type="range" min="0" max="1" step="0.05" value="${value.opacity}" data-shadow-part="opacity" /><output data-shadow-output="opacity">${Math.round(value.opacity * 100)}%</output></label>
-    </div>
+    <details class="shadow-details" data-shadow-details>
+      <summary><span>阴影精细调节</span><small>位置、模糊与颜色</small></summary>
+      <div class="shadow-controls">
+        ${control("x", "水平", -32, 32)}
+        ${control("y", "垂直", -32, 32)}
+        ${control("blur", "模糊", 0, 64)}
+        ${control("spread", "扩散", -32, 32)}
+        <label class="shadow-color"><span>颜色</span><input type="color" value="${value.color}" data-shadow-part="color" /><output>${value.color}</output></label>
+        <label class="shadow-control"><span>透明度</span><input type="range" min="0" max="1" step="0.05" value="${value.opacity}" data-shadow-part="opacity" /><output data-shadow-output="opacity">${Math.round(value.opacity * 100)}%</output></label>
+      </div>
+    </details>
   </div>`;
 }
 
@@ -199,7 +215,7 @@ const appTemplate = `
       </div>
       <div class="toolbar toolbar-primary">
         <details id="import-menu" class="io-menu" data-io-menu>
-          <summary class="button primary">导入 <span aria-hidden="true">⌄</span></summary>
+          <summary class="button primary">导入 ${chevronIcon}</summary>
           <div class="io-menu-panel" role="menu" aria-label="导入选项">
             <div class="io-menu-key-hint" aria-hidden="true">↑↓ 浏览 · Home / End 跳转 · Esc 关闭</div>
             <section>
@@ -229,7 +245,7 @@ const appTemplate = `
       <div class="toolbar toolbar-export">
         <button id="preview-presentation" class="button">演示预览</button>
         <details id="export-menu" class="io-menu io-menu-end" data-io-menu>
-          <summary class="button primary">导出 <span aria-hidden="true">⌄</span></summary>
+          <summary class="button primary">导出 ${chevronIcon}</summary>
           <div class="io-menu-panel" role="menu" aria-label="导出选项">
             <div class="io-menu-key-hint" aria-hidden="true">↑↓ 浏览 · Home / End 跳转 · Esc 关闭</div>
             <section>
@@ -1365,15 +1381,15 @@ export class EditorApp {
     this.layerFocusId = fallbackFocusId;
     const renderNode = (node: ElementTreeNode, depth: number): string => {
       const selected = this.selectedIds.includes(node.id) ? " is-selected" : "";
-      const icon = node.visible ? (node.locked ? "🔒" : "◇") : "◌";
+      const icon = layerStateIcon(node.visible, node.locked);
       const collapsed = node.children.length > 0 && this.collapsedLayerIds.has(node.id);
       return `<li role="none" data-layer-node="${escapeHtml(node.id)}">
         <div class="layer-row${selected}" data-layer-id="${escapeHtml(node.id)}" style="--depth:${depth}" title="${escapeHtml(node.id)}" role="treeitem" tabindex="${node.id === fallbackFocusId ? "0" : "-1"}" aria-selected="${selected ? "true" : "false"}"${node.children.length ? ` aria-expanded="${collapsed ? "false" : "true"}"` : ""}>
-          <button type="button" tabindex="-1" class="layer-disclosure${collapsed ? " is-collapsed" : ""}" data-layer-toggle="${escapeHtml(node.id)}" aria-label="${collapsed ? "展开" : "折叠"} ${escapeHtml(node.name)}"${node.children.length ? "" : " disabled"}>⌄</button>
-          <button type="button" tabindex="-1" class="layer-drag-handle" data-layer-drag-handle="${escapeHtml(node.id)}" aria-label="拖动 ${escapeHtml(node.name)}" title="拖动以排序、缩进或提升一级"${depth === 0 ? " disabled" : ""}>⠿</button>
+          <button type="button" tabindex="-1" class="layer-disclosure${collapsed ? " is-collapsed" : ""}" data-layer-toggle="${escapeHtml(node.id)}" aria-label="${collapsed ? "展开" : "折叠"} ${escapeHtml(node.name)}"${node.children.length ? "" : " disabled"}>${chevronIcon}</button>
           <span class="layer-icon">${icon}</span>
           <span class="layer-name" data-layer-name="${escapeHtml(node.id)}">${escapeHtml(node.name)}</span>
           <span class="layer-tag">${escapeHtml(node.tag)}</span>
+          <button type="button" tabindex="-1" class="layer-drag-handle" data-layer-drag-handle="${escapeHtml(node.id)}" aria-label="拖动 ${escapeHtml(node.name)}" title="拖动以排序、缩进或提升一级"${depth === 0 ? " disabled" : ""}>${layerGripIcon}</button>
         </div>
         ${node.children.length && !collapsed ? `<ul role="group">${node.children.map((child) => renderNode(child, depth + 1)).join("")}</ul>` : ""}
       </li>`;
