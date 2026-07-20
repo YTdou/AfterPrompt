@@ -13,3 +13,5 @@ exports/
 /problem/
 *.log
 .DS_Store
+/prompts/
+/UI-kit/
