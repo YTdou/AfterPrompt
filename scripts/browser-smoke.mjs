@@ -390,6 +390,35 @@ async function run() {
     assert((await shadowText(page, "title-001")) === "Energy-Proportional LLM Inference", "HTML title selection did not map to the Shadow DOM node.");
     assert(await page.locator('#inspector-content input[type="color"][data-prop="color"]').inputValue() === "#15213b", "The text-color swatch does not reflect the selected element's computed color.");
 
+    progress("checking decimal geometry and ratio locking");
+    const widthInput = page.locator('[data-prop="width"]');
+    const heightInput = page.locator('[data-prop="height"]');
+    const initialWidth = Number(await widthInput.inputValue());
+    const initialHeight = Number(await heightInput.inputValue());
+    await heightInput.fill(String(initialHeight + 10.4));
+    await heightInput.press("Tab");
+    await page.waitForFunction((expectedWidth) => Number(document.querySelector('[data-prop="width"]')?.value) === expectedWidth, initialWidth);
+    assert(Number(await page.locator('[data-prop="height"]').inputValue()) === Math.round((initialHeight + 10.4) * 10) / 10, "Decimal height was not retained.");
+    assert((await page.locator(".cm-content").innerText()).includes(`height: ${Math.round((initialHeight + 10.4) * 10) / 10}px`), "Decimal geometry did not synchronize to source code.");
+
+    await page.locator("#keep-ratio").check();
+    const ratioWidth = Number(await page.locator('[data-prop="width"]').inputValue());
+    const ratioHeight = Number(await page.locator('[data-prop="height"]').inputValue());
+    await page.locator('[data-prop="width"]').fill(String(ratioWidth + 20.3));
+    await page.locator('[data-prop="width"]').press("Tab");
+    assert(await page.locator("#keep-ratio").isChecked(), "Ratio lock UI state was lost after inspector rerender.");
+    const lockedWidth = Number(await page.locator('[data-prop="width"]').inputValue());
+    const lockedHeight = Number(await page.locator('[data-prop="height"]').inputValue());
+    assert(Math.abs(lockedWidth / lockedHeight - ratioWidth / ratioHeight) < 0.01, `Ratio lock did not preserve geometry (${ratioWidth}x${ratioHeight} -> ${lockedWidth}x${lockedHeight}).`);
+    await page.locator("#keep-ratio").uncheck();
+
+    await page.locator('[data-prop="height"]').fill("");
+    await page.locator('[data-prop="height"]').press("Tab");
+    assert(Number(await page.locator('[data-prop="height"]').inputValue()) === lockedHeight, "Invalid geometry silently replaced the previous height.");
+
+    await page.locator("#undo").click();
+    await page.locator("#undo").click();
+
     const textEditor = page.locator('textarea[data-prop="text"]');
     await textEditor.fill("Browser smoke title");
     await textEditor.press("Tab");
@@ -876,6 +905,26 @@ async function run() {
     await page.waitForFunction(() => document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="svg-title"]')?.getAttribute("stroke-width") === "4");
 
     await page.locator('[data-layer-id="arrow-mark"]').click();
+    const polygonBeforeInspector = await page.locator('#canvas-host [data-editor-id="arrow-mark"]').boundingBox();
+    assert(polygonBeforeInspector, "Polygon has no bounds before inspector resize.");
+    const polygonInspectorWidth = Number(await page.locator('[data-prop="width"]').inputValue());
+    await page.locator('[data-prop="width"]').fill(String(polygonInspectorWidth + 24.3));
+    await page.locator('[data-prop="width"]').press("Tab");
+    await page.waitForFunction(() => {
+      const polygon = document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="arrow-mark"]');
+      return polygon && Math.abs(Number(polygon.getAttribute("data-editor-scale-x")) - 1) > 0.01;
+    });
+    const polygonAfterInspector = await page.locator('#canvas-host [data-editor-id="arrow-mark"]').boundingBox();
+    assert(polygonAfterInspector && polygonAfterInspector.width / polygonBeforeInspector.width > 1.4,
+      `Polygon inspector width did not scale the shape (${JSON.stringify(polygonBeforeInspector)} -> ${JSON.stringify(polygonAfterInspector)}).`);
+    assert(Math.abs(polygonAfterInspector.height - polygonBeforeInspector.height) <= 1,
+      `Unlocked polygon width changed its height (${polygonBeforeInspector.height} -> ${polygonAfterInspector.height}).`);
+    await page.locator("#undo").click();
+    await page.waitForFunction(() => {
+      const polygon = document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="arrow-mark"]');
+      return polygon && Math.abs(Number(polygon.getAttribute("data-editor-scale-x") || 1) - 1) <= 0.01;
+    });
+
     const scaleHandle = page.locator(".moveable-control-box .moveable-se");
     await scaleHandle.waitFor({ state: "visible" });
     const scaleHandleBox = await scaleHandle.boundingBox();

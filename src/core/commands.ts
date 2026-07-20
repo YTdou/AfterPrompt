@@ -153,6 +153,30 @@ export function setElementSize(element: Element, kind: DocumentKind, width: numb
   }
 }
 
+function setElementWidth(element: Element, kind: DocumentKind, width: number): void {
+  const safeWidth = Math.max(1, width);
+  if (kind === "html") {
+    elementStyle(element).width = `${safeWidth}px`;
+    return;
+  }
+  if (element.localName === "circle") element.setAttribute("r", String(safeWidth / 2));
+  else if (element.localName === "ellipse") element.setAttribute("rx", String(safeWidth / 2));
+  else if (["rect", "image", "svg"].includes(element.localName)) element.setAttribute("width", String(safeWidth));
+  else element.setAttribute("data-editor-width", String(safeWidth));
+}
+
+function setElementHeight(element: Element, kind: DocumentKind, height: number): void {
+  const safeHeight = Math.max(1, height);
+  if (kind === "html") {
+    elementStyle(element).height = `${safeHeight}px`;
+    return;
+  }
+  if (element.localName === "circle") element.setAttribute("r", String(safeHeight / 2));
+  else if (element.localName === "ellipse") element.setAttribute("ry", String(safeHeight / 2));
+  else if (["rect", "image", "svg"].includes(element.localName)) element.setAttribute("height", String(safeHeight));
+  else element.setAttribute("data-editor-height", String(safeHeight));
+}
+
 export function setElementVisible(element: Element, kind: DocumentKind, visible: boolean): void {
   element.setAttribute("data-editor-visible", String(visible));
   if (kind === "html") {
@@ -247,8 +271,9 @@ export function applyElementChanges(element: Element, kind: DocumentKind, change
     });
   }
   if (changes.width !== undefined || changes.height !== undefined) {
-    const bounds = readDeclaredBounds(element, kind);
-    setElementSize(element, kind, changes.width ?? bounds.width, changes.height ?? bounds.height);
+    if (changes.width !== undefined && changes.height !== undefined) setElementSize(element, kind, changes.width, changes.height);
+    else if (changes.width !== undefined) setElementWidth(element, kind, changes.width);
+    else if (changes.height !== undefined) setElementHeight(element, kind, changes.height);
   }
 }
 

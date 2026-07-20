@@ -11,6 +11,8 @@ import {
   getTransformValues,
   moveElementBy,
   readDeclaredBounds,
+  setElementScale,
+  setElementScaleOrigin,
   setElementTranslation,
   setElementLocked,
   setElementVisible,
@@ -68,6 +70,14 @@ function escapeHtml(value: string): string {
 function numeric(value: string, fallback = 0): number {
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function geometryValue(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+function geometryText(value: number): string {
+  return String(geometryValue(value));
 }
 
 export function colorValue(value: string): string {
@@ -486,6 +496,7 @@ export class EditorApp {
   private thumbnailObserver: IntersectionObserver | null = null;
   private readonly thumbnailRenderers = new Map<number, CanvasRenderer>();
   private readonly inspectorGroups = this.restoreInspectorGroups();
+  private keepRatio = false;
 
   constructor(private readonly host: HTMLElement) {
     host.innerHTML = appTemplate;
@@ -789,6 +800,10 @@ export class EditorApp {
     this.get("#add-shape").addEventListener("click", () => this.addNewElement("shape"));
 
     this.get("#inspector-content").addEventListener("input", (event) => {
+      const target = event.target as HTMLInputElement;
+      if (target.matches('[data-prop="x"], [data-prop="y"], [data-prop="width"], [data-prop="height"], [data-prop="rotation"]')) {
+        target.setCustomValidity("");
+      }
       if ((event.target as Element).closest("[data-shadow-part]")) this.previewShadowFromInspector();
     });
     this.get("#inspector-content").addEventListener("change", (event) => {
@@ -1748,14 +1763,14 @@ export class EditorApp {
         <label class="field"><span>CSS class</span><input data-prop="className" value="${escapeHtml(modelElement.getAttribute("class") ?? "")}" /></label>
       </section>
       <section class="inspector-section" data-inspector-pane="design">
-        <div class="section-title-row"><h3>几何</h3><label class="checkbox"><input id="keep-ratio" type="checkbox" /> 锁定比例</label></div>
+        <div class="section-title-row"><h3>几何</h3><label class="checkbox"><input id="keep-ratio" type="checkbox"${this.keepRatio ? " checked" : ""} /> 锁定比例</label></div>
         <div class="field-grid four">
-          <label class="field"><span>X</span><input data-prop="x" type="number" step="1" value="${bounds.x.toFixed(1)}" /></label>
-          <label class="field"><span>Y</span><input data-prop="y" type="number" step="1" value="${bounds.y.toFixed(1)}" /></label>
-          <label class="field"><span>W</span><input data-prop="width" type="number" min="1" step="1" value="${bounds.width.toFixed(1)}" /></label>
-          <label class="field"><span>H</span><input data-prop="height" type="number" min="1" step="1" value="${bounds.height.toFixed(1)}" /></label>
+          <label class="field"><span>X</span><input data-prop="x" type="number" step="0.1" value="${geometryText(bounds.x)}" /></label>
+          <label class="field"><span>Y</span><input data-prop="y" type="number" step="0.1" value="${geometryText(bounds.y)}" /></label>
+          <label class="field"><span>W</span><input data-prop="width" type="number" min="1" step="0.1" value="${geometryText(bounds.width)}" /></label>
+          <label class="field"><span>H</span><input data-prop="height" type="number" min="1" step="0.1" value="${geometryText(bounds.height)}" /></label>
         </div>
-        <label class="field"><span>旋转角度</span><input data-prop="rotation" type="number" step="1" value="${transform.rotation.toFixed(1)}" /></label>
+        <label class="field"><span>旋转角度</span><input data-prop="rotation" type="number" step="0.1" value="${geometryText(transform.rotation)}" /></label>
       </section>
       ${isText ? `<section class="inspector-section" data-inspector-pane="design">
         <h3>文本</h3>
@@ -1795,7 +1810,10 @@ export class EditorApp {
       </section>
     `;
     const ratio = host.querySelector<HTMLInputElement>("#keep-ratio");
-    ratio?.addEventListener("change", () => this.transform.setKeepRatio(Boolean(ratio.checked)));
+    ratio?.addEventListener("change", () => {
+      this.keepRatio = Boolean(ratio.checked);
+      this.transform.setKeepRatio(this.keepRatio);
+    });
     const alignSelect = host.querySelector<HTMLSelectElement>('[data-prop="textAlign"]');
     if (alignSelect) alignSelect.value = computed.textAlign;
     const objectFit = host.querySelector<HTMLSelectElement>('[data-prop="objectFit"]');
@@ -2231,11 +2249,47 @@ export class EditorApp {
     const bounds = this.renderer.bounds(id) ?? { x: 0, y: 0, width: 0, height: 0 };
     const targetKind = kindForElement(element, this.model.kind);
     const renderedBorderStyle = targetKind === "html" ? getComputedStyle(this.renderer.element(id)!).borderStyle : "";
+    const geometryProps = new Set(["x", "y", "width", "height", "rotation"]);
+    const geometryNumber = input instanceof HTMLInputElement ? input.valueAsNumber : Number.NaN;
+    if (geometryProps.has(prop) && (!Number.isFinite(geometryNumber) || (["width", "height"].includes(prop) && geometryNumber < 1))) {
+      input.setCustomValidity(prop === "width" || prop === "height" ? "请输入不小于 1 的有效数字。" : "请输入有效数字。");
+      input.reportValidity();
+      const previous = prop === "x" ? bounds.x
+        : prop === "y" ? bounds.y
+          : prop === "width" ? bounds.width
+            : prop === "height" ? bounds.height
+              : getTransformValues(element).rotation;
+      input.value = geometryText(previous);
+      return;
+    }
+    input.setCustomValidity("");
     this.commitMutation(`Update ${prop}`, () => {
-      if (prop === "x") moveElementBy(element, targetKind, numeric(value) - bounds.x, 0);
-      else if (prop === "y") moveElementBy(element, targetKind, 0, numeric(value) - bounds.y);
-      else if (prop === "width" || prop === "height") this.model.apply({ action: "updateElement", elementId: id, changes: { [prop]: Math.max(1, numeric(value, 1)) } });
-      else if (prop === "rotation") this.model.apply({ action: "rotateElement", elementId: id, angle: numeric(value) });
+      if (prop === "x") moveElementBy(element, targetKind, geometryNumber - bounds.x, 0);
+      else if (prop === "y") moveElementBy(element, targetKind, 0, geometryNumber - bounds.y);
+      else if (prop === "width" || prop === "height") {
+        const next = geometryValue(Math.max(1, geometryNumber));
+        const ratio = bounds.height > 0 ? bounds.width / bounds.height : 1;
+        let width = prop === "width" ? next : geometryValue(bounds.width);
+        let height = prop === "height" ? next : geometryValue(bounds.height);
+        if (element.localName === "circle") width = height = next;
+        else if (this.keepRatio && ratio > 0) {
+          if (prop === "width") height = geometryValue(width / ratio);
+          else width = geometryValue(height * ratio);
+        }
+        const preview = this.renderer.element(id);
+        const nativeSize = targetKind === "html" || ["rect", "image", "svg", "circle", "ellipse"].includes(element.localName);
+        if (nativeSize || !preview || !("getBBox" in preview) || bounds.width <= 0 || bounds.height <= 0) {
+          this.model.apply({ action: "updateElement", elementId: id, changes: { width, height } });
+        } else {
+          const box = (preview as SVGGraphicsElement).getBBox();
+          const transform = getTransformValues(element);
+          const originX = numeric(element.getAttribute("data-editor-scale-origin-x") ?? "", box.x);
+          const originY = numeric(element.getAttribute("data-editor-scale-origin-y") ?? "", box.y);
+          setElementScaleOrigin(element, originX, originY);
+          setElementScale(element, targetKind, transform.scaleX * width / bounds.width, transform.scaleY * height / bounds.height);
+        }
+      }
+      else if (prop === "rotation") this.model.apply({ action: "rotateElement", elementId: id, angle: geometryNumber });
       else if (prop === "fontSize" || prop === "opacity" || prop === "strokeWidth" || prop === "letterSpacing") {
         if (prop === "strokeWidth" && targetKind === "html" && !["none", "hidden", ""].includes(renderedBorderStyle)) {
           (element as HTMLElement).style.borderStyle = renderedBorderStyle;
