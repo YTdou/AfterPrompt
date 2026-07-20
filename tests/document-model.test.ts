@@ -56,6 +56,29 @@ describe("SourceDocument", () => {
     expect(model.serialize()).toContain("data-editor-id=\"title-001\"");
   });
 
+  it("keeps the untouched axis when a decimal size overrides class geometry", () => {
+    const model = SourceDocument.parse(`<!doctype html><html><head><style>.card{width:240px;height:120px}</style></head>
+      <body><div class="card" data-editor-id="card"></div></body></html>`, "card.html");
+    const card = model.find("card") as HTMLElement;
+
+    model.apply({ action: "updateElement", elementId: "card", changes: { height: 140.5 } });
+    expect(card.style.height).toBe("140.5px");
+    expect(card.style.width).toBe("");
+
+    model.apply({ action: "updateElement", elementId: "card", changes: { width: 260.4 } });
+    expect(card.style.width).toBe("260.4px");
+    expect(card.style.height).toBe("140.5px");
+  });
+
+  it("updates one native SVG axis without replacing the other one", () => {
+    const model = SourceDocument.parse(`<svg xmlns="http://www.w3.org/2000/svg"><rect data-editor-id="card" width="80.2" height="40.3" /></svg>`, "card.svg");
+    const card = model.find("card")!;
+
+    model.apply({ action: "updateElement", elementId: "card", changes: { height: 55.6 } });
+    expect(card.getAttribute("width")).toBe("80.2");
+    expect(card.getAttribute("height")).toBe("55.6");
+  });
+
   it("trims explicit layer names and clears an empty display name", () => {
     const model = SourceDocument.parse(slideSource, "ai-slide.html");
     model.apply({ action: "updateElement", elementId: "title-001", changes: { name: "  Main title  " } });

@@ -711,18 +711,36 @@ export class FragmentWorkspace {
     const results = this.get("#fragment-library-results");
     results.setAttribute("aria-busy", "true");
     results.innerHTML = '<div class="fragment-loading" role="status"><strong>正在读取片段</strong><span>检查本地索引与预览资源…</span></div>';
-    const allRecords = await this.library.list();
+    const showReadError = (error: unknown): void => {
+      if (token !== this.renderToken) return;
+      const detail = error instanceof Error ? error.message : String(error);
+      results.setAttribute("aria-busy", "false");
+      results.innerHTML = `<div class="fragment-error" role="alert"><strong>无法读取片段</strong><span>${escapeHtml(detail)}</span><p>请检查本地目录权限，然后关闭并重新打开片段库。</p></div>`;
+    };
+    let allRecords: VisualFragmentLibraryRecord[];
+    try {
+      allRecords = await this.library.list();
+    } catch (error) {
+      showReadError(error);
+      return;
+    }
     const categorySelect = this.get<HTMLSelectElement>("#fragment-category-filter");
     const selectedCategory = categorySelect.value;
     const categories = Array.from(new Set(allRecords.map((record) => record.manifest.category).filter(Boolean))).sort();
     categorySelect.innerHTML = `<option value="">全部分类</option>${categories.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join("")}`;
     categorySelect.value = categories.includes(selectedCategory) ? selectedCategory : "";
-    const records = await this.library.list({
-      search: this.get<HTMLInputElement>("#fragment-search").value,
-      category: categorySelect.value || undefined,
-      favoritesOnly: this.get<HTMLInputElement>("#fragment-favorite-filter").checked,
-      recentFirst: this.get<HTMLInputElement>("#fragment-recent-filter").checked,
-    });
+    let records: VisualFragmentLibraryRecord[];
+    try {
+      records = await this.library.list({
+        search: this.get<HTMLInputElement>("#fragment-search").value,
+        category: categorySelect.value || undefined,
+        favoritesOnly: this.get<HTMLInputElement>("#fragment-favorite-filter").checked,
+        recentFirst: this.get<HTMLInputElement>("#fragment-recent-filter").checked,
+      });
+    } catch (error) {
+      showReadError(error);
+      return;
+    }
     const packages = await Promise.all(records.map(async (record) => {
       try { return await decodeVisualFragmentPackage(record.packageBytes); } catch { return null; }
     }));

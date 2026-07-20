@@ -216,8 +216,23 @@ async function inspectDom(page) {
       if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
       if (element.getAttribute("aria-hidden") === "true") return false;
       const rect = element.getBoundingClientRect();
-      return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 &&
-        rect.top < innerHeight && rect.left < innerWidth;
+      let visibleLeft = Math.max(0, rect.left);
+      let visibleTop = Math.max(0, rect.top);
+      let visibleRight = Math.min(innerWidth, rect.right);
+      let visibleBottom = Math.min(innerHeight, rect.bottom);
+      for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        const ancestorStyle = getComputedStyle(ancestor);
+        const ancestorRect = ancestor.getBoundingClientRect();
+        if (["auto", "clip", "hidden", "scroll"].includes(ancestorStyle.overflowX)) {
+          visibleLeft = Math.max(visibleLeft, ancestorRect.left);
+          visibleRight = Math.min(visibleRight, ancestorRect.right);
+        }
+        if (["auto", "clip", "hidden", "scroll"].includes(ancestorStyle.overflowY)) {
+          visibleTop = Math.max(visibleTop, ancestorRect.top);
+          visibleBottom = Math.min(visibleBottom, ancestorRect.bottom);
+        }
+      }
+      return rect.width > 0 && rect.height > 0 && visibleRight > visibleLeft && visibleBottom > visibleTop;
     };
 
     const accessibleName = (element) => {

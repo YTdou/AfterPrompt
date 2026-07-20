@@ -19,6 +19,10 @@
   --success: #5fd7a0;
   --warning: #e7cb83;
   --danger: #ff6e78;
+  --surface-success-subtle: #151d19;
+  --border-success-subtle: #3a4a40;
+  --surface-warning-subtle: #211e14;
+  --border-warning-subtle: #61542d;
   --font-ui: "DM Sans", Inter, ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
   --space-1: 4px;
@@ -3309,10 +3313,10 @@ button:hover:not(:disabled) {
 .source-draft-note {
   flex: 0 0 auto;
   padding: 3px 7px;
-  border: 1px solid #61542d;
+  border: 1px solid var(--border-warning-subtle);
   border-radius: var(--radius-control);
   color: var(--warning);
-  background: #211e14;
+  background: var(--surface-warning-subtle);
   font-size: 11px;
   line-height: 14px;
 }
@@ -3329,9 +3333,9 @@ button:hover:not(:disabled) {
 .fragment-save-storage {
   margin: 2px 14px 10px;
   padding: 9px 10px;
-  border-color: #3a4a40;
+  border-color: var(--border-success-subtle);
   border-radius: var(--radius-group);
-  background: #151d19;
+  background: var(--surface-success-subtle);
 }
 
 .fragment-save-storage strong,
@@ -3378,12 +3382,12 @@ button:hover:not(:disabled) {
   min-height: 58px;
   padding: 9px 14px;
   border-bottom-color: var(--border-subtle);
-  background: #151d19;
+  background: var(--surface-success-subtle);
 }
 
 .fragment-storage-panel[data-kind="clipboard"] {
   border-bottom-color: var(--border-subtle);
-  background: #211e14;
+  background: var(--surface-warning-subtle);
 }
 
 .fragment-storage-panel strong,
@@ -3437,7 +3441,8 @@ button:hover:not(:disabled) {
 .fragment-more-actions { max-width: 340px; border-radius: var(--radius-group); }
 
 .fragment-empty,
-.fragment-loading {
+.fragment-loading,
+.fragment-error {
   display: grid;
   place-items: center;
   align-content: center;
@@ -3447,10 +3452,15 @@ button:hover:not(:disabled) {
 }
 
 .fragment-empty strong,
-.fragment-loading strong { color: var(--text-secondary); font-size: 13px; line-height: 18px; }
+.fragment-loading strong,
+.fragment-error strong { color: var(--text-secondary); font-size: 13px; line-height: 18px; }
 .fragment-empty p { max-width: 62ch; font-size: 12px; line-height: 18px; }
 .fragment-loading { gap: 4px; }
 .fragment-loading span { font-size: 11px; line-height: 14px; }
+.fragment-error { gap: 4px; }
+.fragment-error strong { color: var(--danger); }
+.fragment-error span,
+.fragment-error p { max-width: 62ch; margin: 0; font-size: 11px; line-height: 16px; }
 
 .fragment-report-content {
   display: flex;
