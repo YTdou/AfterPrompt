@@ -39,7 +39,7 @@ async function capture(rootHandle) {
   });
 }
 
-function compare(expected, actual, tolerance = 1) {
+function compare(expected, actual) {
   const actualById = new Map(actual.map((item) => [item.id, item]));
   const differences = [];
   for (const baseline of expected) {
@@ -47,7 +47,14 @@ function compare(expected, actual, tolerance = 1) {
     if (!candidate) continue;
     const fields = ["fontFamily", "fontSize", "fontWeight", "letterSpacing", "lineHeight", "lineCount"]
       .filter((field) => baseline[field] !== candidate[field]);
-    for (const field of ["clientWidth", "clientHeight", "scrollWidth", "scrollHeight"]) {
+    for (const [field, tolerance] of Object.entries({
+      clientWidth: 1,
+      clientHeight: 1,
+      scrollWidth: 1,
+      // Chrome builds can round variable-font ink overflow by a few pixels even
+      // when the authored box and line breaks are identical.
+      scrollHeight: 4,
+    })) {
       if (Math.abs(baseline[field] - candidate[field]) > tolerance) fields.push(field);
     }
     if (fields.length) differences.push({ id: baseline.id, fields, editor: baseline, export: candidate });
