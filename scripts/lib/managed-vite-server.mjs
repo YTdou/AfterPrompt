@@ -3,6 +3,23 @@ import { createServer, preview } from "vite";
 const DEFAULT_START_TIMEOUT_MS = 20_000;
 const DEFAULT_CLOSE_TIMEOUT_MS = 10_000;
 
+function escapeWorkflowData(value) {
+  return value.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
+}
+
+function escapeWorkflowProperty(value) {
+  return escapeWorkflowData(value).replaceAll(":", "%3A").replaceAll(",", "%2C");
+}
+
+export function reportCliError(error, title = "Smoke test failed") {
+  const detail = error instanceof Error ? error.stack ?? error.message : String(error);
+  process.stderr.write(`${detail}\n`);
+  if (process.env.GITHUB_ACTIONS === "true") {
+    process.stdout.write(`::error title=${escapeWorkflowProperty(title)}::${escapeWorkflowData(detail.slice(0, 8_000))}\n`);
+  }
+  process.exitCode = 1;
+}
+
 export async function withTimeout(promise, timeoutMs, label) {
   let timer;
   try {

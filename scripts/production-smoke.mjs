@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import process from "node:process";
 import { chromium } from "playwright-core";
-import { startVitePreviewServer, withTimeout } from "./lib/managed-vite-server.mjs";
+import { reportCliError, startVitePreviewServer, withTimeout } from "./lib/managed-vite-server.mjs";
 
 const host = "127.0.0.1";
 const port = process.env.PRODUCTION_SMOKE_PORT ?? "4193";
@@ -54,4 +54,4 @@ async function main() {
   }
 }
 
-main().catch((error) => { process.stderr.write(`${error.stack ?? error}\n`); process.exitCode = 1; });
+main().catch((error) => reportCliError(error, "Production smoke failed"));

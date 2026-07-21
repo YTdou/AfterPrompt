@@ -1,5 +1,5 @@
 import process from "node:process";
-import { isReachable, startViteDevServer, withTimeout } from "./lib/managed-vite-server.mjs";
+import { isReachable, reportCliError, startViteDevServer, withTimeout } from "./lib/managed-vite-server.mjs";
 
 const port = process.env.SERVER_LIFECYCLE_PORT ?? "4197";
 const baseUrl = `http://127.0.0.1:${port}`;
@@ -63,7 +63,4 @@ async function run() {
   })}\n`);
 }
 
-run().catch((error) => {
-  process.stderr.write(`${error.stack ?? error}\n`);
-  process.exitCode = 1;
-});
+run().catch((error) => reportCliError(error, "Server lifecycle failed"));

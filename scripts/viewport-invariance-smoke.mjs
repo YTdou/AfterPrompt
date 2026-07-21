@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { chromium } from "playwright-core";
 import { runtimePresentationLayoutCss } from "../src/core/presentation-layout.ts";
-import { withTimeout } from "./lib/managed-vite-server.mjs";
+import { reportCliError, withTimeout } from "./lib/managed-vite-server.mjs";
 
 const executablePath = process.env.CHROME_PATH ?? [
   "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium",
@@ -38,4 +38,4 @@ async function run() {
   }
 }
 
-run().catch((error) => { process.stderr.write(`${error.stack ?? error}\n`); process.exitCode = 1; });
+run().catch((error) => reportCliError(error, "Viewport invariance failed"));

@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { JSDOM } from "jsdom";
 import { chromium } from "playwright-core";
-import { withTimeout } from "./lib/managed-vite-server.mjs";
+import { reportCliError, withTimeout } from "./lib/managed-vite-server.mjs";
 import { auditPresentationSource } from "../src/core/presentation-audit.ts";
 import { comparePresentationProjections } from "../src/core/presentation-projection.ts";
 
@@ -192,7 +192,4 @@ async function main() {
   if (!output.valid) process.exitCode = 1;
 }
 
-main().catch((error) => {
-  process.stderr.write(`${error?.stack ?? error}\n`);
-  process.exitCode = 1;
-});
+main().catch((error) => reportCliError(error, "Presentation validation failed"));

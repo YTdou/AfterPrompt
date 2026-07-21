@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { chromium } from "playwright-core";
-import { startViteDevServer, withTimeout } from "./lib/managed-vite-server.mjs";
+import { reportCliError, startViteDevServer, withTimeout } from "./lib/managed-vite-server.mjs";
 
 const baseUrl = process.env.STUDIO_BASE_URL ?? "http://127.0.0.1:4173";
 const outputDir = path.resolve(process.env.UI_AUDIT_DIR ?? "artifacts/ui-audit");
@@ -526,6 +526,5 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
+  reportCliError(error, "UI visual audit failed");
 });

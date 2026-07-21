@@ -5,7 +5,7 @@ import JSZip from "jszip";
 import { JSDOM } from "jsdom";
 import { chromium } from "playwright-core";
 import { buildOomRegressionFixture } from "./oom-regression-fixture.mjs";
-import { startViteDevServer, withTimeout } from "./lib/managed-vite-server.mjs";
+import { reportCliError, startViteDevServer, withTimeout } from "./lib/managed-vite-server.mjs";
 
 const baseUrl = process.env.STUDIO_BASE_URL ?? "http://127.0.0.1:4188";
 const executablePath = process.env.CHROME_PATH ?? [
@@ -205,7 +205,4 @@ async function run() {
   }
 }
 
-run().catch((error) => {
-  process.stderr.write(`${error.stack ?? error}\n`);
-  process.exitCode = 1;
-});
+run().catch((error) => reportCliError(error, "OOM regression failed"));

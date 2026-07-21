@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { copyFile, readFile } from "node:fs/promises";
 import process from "node:process";
 import { chromium } from "playwright-core";
-import { startViteDevServer, withTimeout } from "./lib/managed-vite-server.mjs";
+import { reportCliError, startViteDevServer, withTimeout } from "./lib/managed-vite-server.mjs";
 
 const baseUrl = process.env.STUDIO_BASE_URL ?? "http://127.0.0.1:4173";
 const executablePath = process.env.CHROME_PATH ?? [
@@ -1527,7 +1527,4 @@ async function run() {
 }
 
 run()
-  .catch((error) => {
-    process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`);
-    process.exitCode = 1;
-  });
+  .catch((error) => reportCliError(error, "Core browser smoke failed"));
