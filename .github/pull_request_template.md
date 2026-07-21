@@ -6,7 +6,6 @@
 
 - [ ] Standard HTML/SVG remains the canonical artifact where applicable.
 - [ ] Imported scripts are not newly executed in the editing canvas.
-- [ ] `/last-mile-studio/` compatibility is preserved when deployment paths change.
 - [ ] No license or third-party provenance change is hidden in this PR.
 
 ## Evidence

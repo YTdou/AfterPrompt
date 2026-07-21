@@ -27,7 +27,7 @@ For UI behavior, also run `npm run test:browser` with Chrome/Chromium and attach
 
 ## Invariants
 
-Do not introduce byte-identical round-trip claims, execute imported scripts in the editing canvas, silently replace the `/last-mile-studio/` compatibility route, or mix license changes into ordinary feature work. Keep security and compatibility limits explicit.
+Do not introduce byte-identical round-trip claims, execute imported scripts in the editing canvas, or mix license changes into ordinary feature work. Keep security and compatibility limits explicit.
 
 ## Pull requests
 

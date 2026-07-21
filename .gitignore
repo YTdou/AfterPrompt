@@ -14,5 +14,12 @@ exports/
 *.log
 .DS_Store
 /UI-kit/
-/docs/
+/Project.md
+/deploy/
+/docs/DEPLOYMENT.md
+/docs/oss-launch/
 /afterprompt-oss-launch-final/
+/scripts/build-release.sh
+/scripts/production-browser-smoke.mjs
+/scripts/serve-production-smoke.mjs
+/scripts/stage-production.sh

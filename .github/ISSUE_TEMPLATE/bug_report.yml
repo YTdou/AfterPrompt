@@ -20,7 +20,7 @@ body:
     validations: {required: true}
   - type: dropdown
     id: artifact
-    attributes: {label: Artifact type, options: [HTML, HTML slides, SVG, Visual Fragment, Project JSON, CLI, Deployment]}
+    attributes: {label: Artifact type, options: [HTML, HTML slides, SVG, Visual Fragment, Project JSON, CLI]}
     validations: {required: true}
   - type: textarea
     id: environment

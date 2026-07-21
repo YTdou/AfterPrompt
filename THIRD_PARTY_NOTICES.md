@@ -23,9 +23,9 @@ development tree.
 
 Development dependencies include software under MIT, Apache-2.0, BSD,
 ISC, 0BSD, MIT-0, MPL-2.0, and Zlib-compatible terms. The authoritative
-package and version inventory is `package-lock.json`. Release archives built
-by `scripts/build-release.sh` include the upstream license files installed in
-`node_modules` so that binary distributions carry the applicable texts.
+package and version inventory is `package-lock.json`. Distributors are
+responsible for carrying the applicable upstream license texts with binary
+distributions.
 
 ## Bundled fonts
 
@@ -51,4 +51,3 @@ Content imported into, edited by, or exported from AfterPrompt is not
 automatically licensed under the AfterPrompt project license. Users remain
 responsible for having the rights required for their content and embedded
 assets.
-

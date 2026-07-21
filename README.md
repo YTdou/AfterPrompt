@@ -5,7 +5,7 @@
 <p align="center">Edit real DOM/SVG nodes, inspect readable source, and export standard files.</p>
 
 <p align="center">
-  <a href="https://redacted.invalid/last-mile-studio/"><strong>Try the live demo</strong></a> ·
+  <a href="https://redacted.invalid/AfterPrompt/"><strong>Try the live demo</strong></a> ·
   <a href="#quick-start">Run locally</a> ·
   <a href="examples/">Open an example</a> ·
   <a href="docs/ARCHITECTURE.md">Read the architecture</a>
@@ -17,7 +17,7 @@
 
 <p align="center"><b>English</b> · <a href="README.zh-CN.md">简体中文</a></p>
 
-> **MVP · 0.4.0.** The `/AfterPrompt/` route is prepared for deployment; the [current live demo](https://redacted.invalid/last-mile-studio/) remains the verified entry until migration completes.
+> **MVP · 0.4.0.** Core editing, source, export, CLI, and Visual Fragment workflows are available; current limitations are documented below.
 
 ## What is AfterPrompt?
 
@@ -100,10 +100,10 @@ npm run check      # aggregate project gate
 npm run cli -- --help
 ```
 
-Real-browser and specialized checks are available in `package.json`, including `test:browser`, `test:layout-parity`, `test:viewport-invariance`, and `test:production`. Browser checks require a local Chrome/Chromium installation.
+Real-browser and specialized checks are available in `package.json`, including `test:browser`, `test:layout-parity`, and `test:viewport-invariance`. Browser checks require a local Chrome/Chromium installation.
 
-See [Contributing](CONTRIBUTING.md), the [changelog](CHANGELOG.md), and the [deployment guide](docs/DEPLOYMENT.md).
+See [Contributing](CONTRIBUTING.md) and the [changelog](CHANGELOG.md).
 
 ## License and notices
 
-AfterPrompt's existing license terms are in [LICENSE](LICENSE). Third-party packages and bundled font assets keep their own terms; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), [NOTICE](NOTICE), [RELICENSING.md](RELICENSING.md), and [TRADEMARKS.md](TRADEMARKS.md). This launch preparation does not select or change the project license.
+AfterPrompt is licensed under the [Apache License 2.0](LICENSE). Third-party packages and bundled font assets keep their own terms; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), [NOTICE](NOTICE), [RELICENSING.md](RELICENSING.md), and [TRADEMARKS.md](TRADEMARKS.md).
