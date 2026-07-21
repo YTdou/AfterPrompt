@@ -2,7 +2,6 @@
 set -Eeuo pipefail
 
 MODE="${1:-fast}"
-EXPECTED_BRANCH="${EXPECTED_BRANCH:-main}"
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "[ui-gate] not inside a git worktree" >&2
@@ -10,10 +9,6 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 fi
 
 CURRENT_BRANCH="$(git branch --show-current)"
-if [[ "${ALLOW_ANY_BRANCH:-0}" != "1" && "$CURRENT_BRANCH" != "$EXPECTED_BRANCH" ]]; then
-  echo "[ui-gate] expected branch '$EXPECTED_BRANCH', found '$CURRENT_BRANCH'" >&2
-  exit 2
-fi
 
 NODE_MAJOR="$(node -p "Number(process.versions.node.split('.')[0])")"
 if (( NODE_MAJOR < 22 )); then
@@ -63,11 +58,10 @@ case "$MODE" in
   release)
     npm run check
     npm run test:browser
-    npm run test:hotcarbon-export
+    npm run test:presentation-export
     npm run test:layout-parity
     npm run test:viewport-invariance
     npm run test:oom-regression
-    npm run build:production
     npm run test:production
     UI_STRICT=1 \
     UI_VIEWPORTS="1280x800,1440x900,1920x1080" \

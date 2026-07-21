@@ -12,6 +12,7 @@ npm run check
 ```
 
 For UI behavior, also run `npm run test:browser` with Chrome/Chromium and attach a before/after capture when visual output changes.
+The complete release and deployment gate is `npm run ui:gate -- release`.
 
 ## Contribution map
 

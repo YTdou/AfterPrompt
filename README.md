@@ -5,7 +5,7 @@
 <p align="center">Edit real DOM/SVG nodes, inspect readable source, and export standard files.</p>
 
 <p align="center">
-  <a href="https://redacted.invalid/AfterPrompt/"><strong>Try the live demo</strong></a> ·
+  <a href="https://ytdou.github.io/AfterPrompt/"><strong>Try the live demo</strong></a> ·
   <a href="#quick-start">Run locally</a> ·
   <a href="examples/">Open an example</a> ·
   <a href="docs/ARCHITECTURE.md">Read the architecture</a>

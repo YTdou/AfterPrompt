@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Synthetic Presentation Runtime</title>
+    <style>
+      html, body { margin: 0; width: 100%; height: 100%; }
+      .panel { display: none; }
+      .panel.open { display: block; }
+      [data-build] { opacity: 0; }
+      [data-build].revealed { opacity: 1; }
+    </style>
+  </head>
+  <body data-editor-id="runtime-document" data-editor-canvas-width="1280" data-editor-canvas-height="720">
+    <section data-editor-id="runtime-page" data-label="Synthetic slide">
+      <h1 data-editor-id="runtime-title">Public presentation fixture</h1>
+      <p id="runtimeCounter" data-editor-id="runtime-counter">1 / 1</p>
+      <p data-editor-id="runtime-build" data-build="1">Synthetic build content</p>
+    </section>
+    <nav id="deckHud" aria-label="Presentation controls">
+      <button id="helpBtn" type="button" onclick="toggleHelp()">Help</button>
+      <button id="notesBtn" type="button" onclick="toggleNotes()">Notes</button>
+      <button id="fsBtn" type="button" onclick="toggleFullscreen()">Fullscreen</button>
+    </nav>
+    <aside id="helpPanel" class="panel">Synthetic keyboard help</aside>
+    <aside id="notesPanel" class="panel">Synthetic presenter notes</aside>
+    <script>
+      function toggleHelp() { document.getElementById("helpPanel").classList.toggle("open"); }
+      function toggleNotes() { document.getElementById("notesPanel").classList.toggle("open"); }
+      function toggleFullscreen() {
+        if (document.fullscreenElement) document.exitFullscreen();
+        else document.documentElement.requestFullscreen();
+      }
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowRight") {
+          document.querySelector('[data-build="1"]').classList.add("revealed");
+        }
+      });
+    </script>
+  </body>
+</html>

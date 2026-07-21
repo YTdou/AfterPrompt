@@ -5,7 +5,7 @@
 <p align="center">直接编辑真实 DOM/SVG 节点，查看可读源码，并导出标准文件。</p>
 
 <p align="center">
-  <a href="https://redacted.invalid/AfterPrompt/"><strong>在线体验</strong></a> ·
+  <a href="https://ytdou.github.io/AfterPrompt/"><strong>在线体验</strong></a> ·
   <a href="#快速开始">本地运行</a> ·
   <a href="examples/">查看示例</a> ·
   <a href="docs/ARCHITECTURE.md">阅读架构文档</a>

@@ -26,6 +26,5 @@ export default defineConfig({
   },
   test: {
     include: ["tests/**/*.test.ts"],
-    exclude: ["Silex/**", "grapesjs/**", "moveable/**", "VvvebJs/**", "css-shapes-editor/**"],
   },
 });

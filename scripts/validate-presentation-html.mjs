@@ -27,7 +27,6 @@ function executablePath() {
     "/usr/bin/google-chrome-stable",
     "/usr/bin/chromium",
     "/usr/bin/chromium-browser",
-    "/opt/google-chrome",
   ].find(existsSync);
 }
 

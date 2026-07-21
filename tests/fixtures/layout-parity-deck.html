@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Synthetic Layout Parity Deck</title>
+    <style>
+      @font-face {
+        font-family: "LMS Inter";
+        src: url("__INTER_FONT_DATA_URL__") format("woff2");
+        font-style: normal;
+        font-weight: 100 900;
+      }
+      * { box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+      body { font-family: "LMS Inter", sans-serif; }
+      deck-stage { position: relative; display: block; width: 1280px; height: 720px; overflow: hidden; background: #f6f8fc; }
+      deck-stage > section { position: absolute; inset: 0; display: none; padding: 72px 84px; }
+      deck-stage > section[data-deck-active] { display: block; }
+      h1 { width: 720px; margin: 0 0 28px; font-size: 58px; font-weight: 760; line-height: 1.08; letter-spacing: -1.6px; }
+      p { width: 640px; margin: 0 0 18px; font-size: 24px; font-weight: 430; line-height: 1.45; letter-spacing: 0.2px; }
+      .metric { display: block; width: 320px; margin-top: 44px; font-size: 40px; font-weight: 720; line-height: 1.1; }
+      .caption { display: block; width: 320px; margin-top: 8px; font-size: 15px; font-weight: 500; line-height: 1.4; letter-spacing: 0.4px; }
+    </style>
+  </head>
+  <body data-editor-id="parity-document">
+    <deck-stage data-editor-id="parity-deck" width="1280" height="720">
+      <section data-editor-id="parity-page-1" data-label="Opening" data-deck-active>
+        <h1 data-editor-id="parity-title-1">Layout parity</h1>
+        <p data-editor-id="parity-copy-1">Synthetic text with a stable width verifies that editor rendering and direct browser rendering produce identical line breaks.</p>
+        <strong data-editor-id="parity-metric-1" class="metric">3 pages</strong>
+        <small data-editor-id="parity-caption-1" class="caption">Deterministic fixture only</small>
+      </section>
+      <section data-editor-id="parity-page-2" data-label="Typography">
+        <h1 data-editor-id="parity-title-2">Typography remains measurable</h1>
+        <p data-editor-id="parity-copy-2">Font family, weight, size, spacing, line height, client bounds, and scroll bounds are compared for every visible text node.</p>
+        <strong data-editor-id="parity-metric-2" class="metric">Public fixture</strong>
+        <small data-editor-id="parity-caption-2" class="caption">No private document required</small>
+      </section>
+      <section data-editor-id="parity-page-3" data-label="Closing">
+        <h1 data-editor-id="parity-title-3">Clean clones reproduce the gate</h1>
+        <p data-editor-id="parity-copy-3">Every release assertion now depends only on tracked source, synthetic fixtures, declared dependencies, and an explicitly selected browser.</p>
+        <strong data-editor-id="parity-metric-3" class="metric">1 shared contract</strong>
+        <small data-editor-id="parity-caption-3" class="caption">Editor and exported HTML</small>
+      </section>
+    </deck-stage>
+    <script>
+      customElements.define("deck-stage", class extends HTMLElement {
+        connectedCallback() { this.goTo(0); }
+        goTo(index) {
+          Array.from(this.querySelectorAll(":scope > section")).forEach((page, pageIndex) => {
+            if (pageIndex === index) page.setAttribute("data-deck-active", "");
+            else page.removeAttribute("data-deck-active");
+          });
+        }
+      });
+    </script>
+  </body>
+</html>

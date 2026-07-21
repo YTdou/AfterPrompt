@@ -16,7 +16,6 @@ const executablePath = process.env.CHROME_PATH ?? [
   "/usr/bin/google-chrome-stable",
   "/usr/bin/chromium",
   "/usr/bin/chromium-browser",
-  "/opt/google-chrome",
 ].find(existsSync);
 
 const defaultViewports = [

@@ -2,9 +2,9 @@ import { existsSync } from "node:fs";
 import { chromium } from "playwright-core";
 import { runtimePresentationLayoutCss } from "../src/core/presentation-layout.ts";
 
-const executablePath = [
+const executablePath = process.env.CHROME_PATH ?? [
   "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium",
-  "/usr/bin/chromium-browser", "/opt/google-chrome",
+  "/usr/bin/chromium-browser",
 ].find(existsSync);
 function assert(condition, message) { if (!condition) throw new Error(message); }
 
