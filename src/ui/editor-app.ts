@@ -54,6 +54,7 @@ import { FragmentWorkspace, type FragmentWorkspaceContext } from "./fragment-wor
 import { EditorLayoutController } from "./layout-controller";
 
 type InspectorGroup = "design" | "build" | "advanced";
+type CanvasScrollAxis = "x" | "y";
 
 const INSPECTOR_GROUP_STORAGE_KEY = "last-mile-studio:inspector-group:v1";
 
@@ -392,7 +393,13 @@ const appTemplate = `
           <div id="canvas-transform" class="canvas-transform">
             <div id="canvas-host" class="canvas-host" aria-label="Editable visual canvas"></div>
           </div>
-          <div class="canvas-hint">滚轮缩放 · Space/中键拖动画布 · 方向键微调</div>
+          <div class="canvas-scrollbar canvas-scrollbar-horizontal" data-canvas-scrollbar="x" role="scrollbar" aria-label="水平移动画布视图" aria-orientation="horizontal" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" tabindex="0">
+            <div class="canvas-scrollbar-thumb"></div>
+          </div>
+          <div class="canvas-scrollbar canvas-scrollbar-vertical" data-canvas-scrollbar="y" role="scrollbar" aria-label="垂直移动画布视图" aria-orientation="vertical" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" tabindex="0">
+            <div class="canvas-scrollbar-thumb"></div>
+          </div>
+          <div class="canvas-hint">拖动滑块或双指/滚轮平移 · Ctrl/Cmd+滚轮缩放 · Space/中键拖动</div>
         </div>
         <div class="canvas-status" aria-label="文档与同步状态">
           <span id="document-status" data-label="文档"></span>
@@ -856,6 +863,11 @@ export class EditorApp {
     const viewport = this.get("#canvas-viewport");
     viewport.addEventListener("wheel", (event) => this.handleWheel(event), { passive: false });
     viewport.addEventListener("pointerdown", (event) => this.beginPan(event));
+    this.host.querySelectorAll<HTMLElement>("[data-canvas-scrollbar]").forEach((scrollbar) => {
+      const axis = scrollbar.dataset.canvasScrollbar as CanvasScrollAxis;
+      scrollbar.addEventListener("pointerdown", (event) => this.beginCanvasScrollbarDrag(event, axis));
+      scrollbar.addEventListener("keydown", (event) => this.handleCanvasScrollbarKeyDown(event, axis));
+    });
     viewport.addEventListener("pointermove", (event) => {
       const rect = viewport.getBoundingClientRect();
       this.fragmentCursor = {
@@ -867,7 +879,7 @@ export class EditorApp {
     window.addEventListener("keyup", (event) => {
       if (event.code === "Space") this.spacePressed = false;
     });
-    window.addEventListener("resize", () => this.transform.update());
+    window.addEventListener("resize", () => this.updateCanvasTransform());
   }
 
   private closeIoMenus(): void {
@@ -2422,10 +2434,54 @@ export class EditorApp {
     this.updateCanvasTransform();
   }
 
+  private canvasPanBounds(axis: CanvasScrollAxis): { min: number; max: number } {
+    const viewport = this.get("#canvas-viewport");
+    const viewportSize = axis === "x" ? viewport.clientWidth : viewport.clientHeight;
+    const canvasSize = (axis === "x" ? this.model.canvas.width : this.model.canvas.height) * this.zoom;
+    const visibleEdge = Math.min(48, viewportSize / 4);
+    return {
+      min: visibleEdge - canvasSize,
+      max: viewportSize - visibleEdge,
+    };
+  }
+
+  private constrainCanvasPan(): void {
+    const x = this.canvasPanBounds("x");
+    const y = this.canvasPanBounds("y");
+    this.pan.x = Math.min(x.max, Math.max(x.min, this.pan.x));
+    this.pan.y = Math.min(y.max, Math.max(y.min, this.pan.y));
+  }
+
+  private updateCanvasScrollbar(axis: CanvasScrollAxis): void {
+    const scrollbar = this.get<HTMLElement>(`[data-canvas-scrollbar="${axis}"]`);
+    const thumb = scrollbar.querySelector<HTMLElement>(".canvas-scrollbar-thumb")!;
+    const viewport = this.get("#canvas-viewport");
+    const viewportSize = axis === "x" ? viewport.clientWidth : viewport.clientHeight;
+    const trackSize = axis === "x" ? scrollbar.clientWidth : scrollbar.clientHeight;
+    const bounds = this.canvasPanBounds(axis);
+    const range = Math.max(0, bounds.max - bounds.min);
+    const thumbSize = Math.min(trackSize, Math.max(28, trackSize * viewportSize / Math.max(1, viewportSize + range)));
+    const travel = Math.max(0, trackSize - thumbSize);
+    const ratio = range > 0 ? (bounds.max - this.pan[axis]) / range : 0;
+    const position = travel * Math.min(1, Math.max(0, ratio));
+
+    if (axis === "x") {
+      thumb.style.width = `${thumbSize}px`;
+      thumb.style.transform = `translateX(${position}px)`;
+    } else {
+      thumb.style.height = `${thumbSize}px`;
+      thumb.style.transform = `translateY(${position}px)`;
+    }
+    scrollbar.setAttribute("aria-valuenow", String(Math.round(ratio * 100)));
+  }
+
   private updateCanvasTransform(): void {
+    this.constrainCanvasPan();
     const transform = this.get("#canvas-transform");
     transform.style.transform = `translate(${this.pan.x}px, ${this.pan.y}px) scale(${this.zoom})`;
     this.get("#zoom-display").textContent = `${Math.round(this.zoom * 100)}%`;
+    this.updateCanvasScrollbar("x");
+    this.updateCanvasScrollbar("y");
     this.transform.setZoom(this.zoom);
   }
 
@@ -2443,9 +2499,90 @@ export class EditorApp {
 
   private handleWheel(event: WheelEvent): void {
     event.preventDefault();
-    const viewport = this.get("#canvas-viewport").getBoundingClientRect();
-    const anchor = { x: event.clientX - viewport.left, y: event.clientY - viewport.top };
-    this.setZoom(this.zoom * Math.exp(-event.deltaY * 0.0015), anchor);
+    const viewport = this.get("#canvas-viewport");
+    if (event.ctrlKey || event.metaKey) {
+      const bounds = viewport.getBoundingClientRect();
+      const anchor = { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
+      this.setZoom(this.zoom * Math.exp(-event.deltaY * 0.0015), anchor);
+      return;
+    }
+
+    const linePixels = 16;
+    const deltaX = event.deltaX * (event.deltaMode === WheelEvent.DOM_DELTA_LINE
+      ? linePixels
+      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? viewport.clientWidth : 1);
+    const deltaY = event.deltaY * (event.deltaMode === WheelEvent.DOM_DELTA_LINE
+      ? linePixels
+      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? viewport.clientHeight : 1);
+    const shiftHorizontal = event.shiftKey && Math.abs(deltaX) < 0.01;
+    this.pan.x -= shiftHorizontal ? deltaY : deltaX;
+    this.pan.y -= shiftHorizontal ? 0 : deltaY;
+    this.updateCanvasTransform();
+  }
+
+  private beginCanvasScrollbarDrag(event: PointerEvent, axis: CanvasScrollAxis): void {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const scrollbar = event.currentTarget as HTMLElement;
+    const thumb = scrollbar.querySelector<HTMLElement>(".canvas-scrollbar-thumb")!;
+    const trackRect = scrollbar.getBoundingClientRect();
+    const thumbSize = axis === "x" ? thumb.offsetWidth : thumb.offsetHeight;
+    const trackSize = axis === "x" ? trackRect.width : trackRect.height;
+    const travel = Math.max(0, trackSize - thumbSize);
+    if (travel <= 0) return;
+
+    const bounds = this.canvasPanBounds(axis);
+    const range = bounds.max - bounds.min;
+    const coordinate = axis === "x" ? event.clientX : event.clientY;
+    const trackStart = axis === "x" ? trackRect.left : trackRect.top;
+    const onThumb = event.target instanceof Element && Boolean(event.target.closest(".canvas-scrollbar-thumb"));
+    if (!onThumb) {
+      const offset = Math.min(travel, Math.max(0, coordinate - trackStart - thumbSize / 2));
+      this.pan[axis] = bounds.max - offset / travel * range;
+      this.updateCanvasTransform();
+    }
+
+    const startCoordinate = coordinate;
+    const startPan = this.pan[axis];
+    const move = (moveEvent: PointerEvent): void => {
+      moveEvent.preventDefault();
+      const nextCoordinate = axis === "x" ? moveEvent.clientX : moveEvent.clientY;
+      this.pan[axis] = startPan - (nextCoordinate - startCoordinate) / travel * range;
+      this.updateCanvasTransform();
+    };
+    const end = (): void => {
+      scrollbar.removeEventListener("pointermove", move);
+      scrollbar.removeEventListener("pointerup", end);
+      scrollbar.removeEventListener("pointercancel", end);
+      if (scrollbar.hasPointerCapture(event.pointerId)) scrollbar.releasePointerCapture(event.pointerId);
+    };
+    scrollbar.addEventListener("pointermove", move);
+    scrollbar.addEventListener("pointerup", end);
+    scrollbar.addEventListener("pointercancel", end);
+    scrollbar.setPointerCapture(event.pointerId);
+  }
+
+  private handleCanvasScrollbarKeyDown(event: KeyboardEvent, axis: CanvasScrollAxis): void {
+    const bounds = this.canvasPanBounds(axis);
+    const viewport = this.get("#canvas-viewport");
+    const pageStep = (axis === "x" ? viewport.clientWidth : viewport.clientHeight) * 0.8;
+    const arrowBackward = axis === "x" ? "ArrowLeft" : "ArrowUp";
+    const arrowForward = axis === "x" ? "ArrowRight" : "ArrowDown";
+    let next: number | null = null;
+
+    if (event.key === "Home") next = bounds.max;
+    else if (event.key === "End") next = bounds.min;
+    else if (event.key === arrowBackward) next = this.pan[axis] + (event.shiftKey ? 80 : 24);
+    else if (event.key === arrowForward) next = this.pan[axis] - (event.shiftKey ? 80 : 24);
+    else if (event.key === "PageUp") next = this.pan[axis] + pageStep;
+    else if (event.key === "PageDown") next = this.pan[axis] - pageStep;
+    if (next === null) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    this.pan[axis] = next;
+    this.updateCanvasTransform();
   }
 
   private beginPan(event: PointerEvent): void {

@@ -594,6 +594,56 @@ async function run() {
     assert(await page.locator("#canvas-transform").getAttribute("style") !== canvasTransformBeforePan, "Space-pan did not move the canvas.");
     await page.locator("#fit-canvas").click();
 
+    const readViewportTransform = () => page.locator("#canvas-transform").evaluate((element) => {
+      const matrix = new DOMMatrix(getComputedStyle(element).transform);
+      return { x: matrix.m41, y: matrix.m42, scale: matrix.a };
+    });
+    const horizontalScrollbar = page.locator('[data-canvas-scrollbar="x"]');
+    const verticalScrollbar = page.locator('[data-canvas-scrollbar="y"]');
+    assert(await horizontalScrollbar.isVisible(), "Horizontal canvas scrollbar is not visible.");
+    assert(await verticalScrollbar.isVisible(), "Vertical canvas scrollbar is not visible.");
+    assert((await horizontalScrollbar.locator(".canvas-scrollbar-thumb").boundingBox())?.width >= 28, "Horizontal canvas scrollbar thumb is not usable.");
+    assert((await verticalScrollbar.locator(".canvas-scrollbar-thumb").boundingBox())?.height >= 28, "Vertical canvas scrollbar thumb is not usable.");
+
+    const wheelPanElementTransform = await page.locator('#canvas-host [data-editor-id="accent-block-001"]').getAttribute("data-editor-translate-x");
+    const verticalThumbBeforeWheel = await verticalScrollbar.locator(".canvas-scrollbar-thumb").getAttribute("style");
+    const wheelStart = await readViewportTransform();
+    await page.locator("#canvas-viewport").dispatchEvent("wheel", { deltaX: 0, deltaY: 48, deltaMode: 0 });
+    const verticalWheel = await readViewportTransform();
+    assert(Math.abs(verticalWheel.y - (wheelStart.y - 48)) < 1, "Vertical wheel did not pan the canvas vertically.");
+    assert(Math.abs(verticalWheel.x - wheelStart.x) < 1, "Vertical wheel unexpectedly moved the canvas horizontally.");
+    assert(Math.abs(verticalWheel.scale - wheelStart.scale) < 0.001, "Unmodified wheel unexpectedly zoomed the canvas.");
+    assert(await verticalScrollbar.locator(".canvas-scrollbar-thumb").getAttribute("style") !== verticalThumbBeforeWheel, "Vertical scrollbar thumb did not follow wheel panning.");
+
+    await page.locator("#canvas-viewport").dispatchEvent("wheel", { deltaX: 32, deltaY: 0, deltaMode: 0 });
+    const horizontalWheel = await readViewportTransform();
+    assert(Math.abs(horizontalWheel.x - (verticalWheel.x - 32)) < 1, "Horizontal trackpad wheel did not pan the canvas horizontally.");
+    assert(Math.abs(horizontalWheel.y - verticalWheel.y) < 1, "Horizontal trackpad wheel unexpectedly moved the canvas vertically.");
+
+    await page.locator("#canvas-viewport").dispatchEvent("wheel", { deltaX: 0, deltaY: 24, deltaMode: 0, shiftKey: true });
+    const shiftedWheel = await readViewportTransform();
+    assert(Math.abs(shiftedWheel.x - (horizontalWheel.x - 24)) < 1, "Shift+wheel did not provide horizontal canvas panning.");
+    assert(Math.abs(shiftedWheel.y - horizontalWheel.y) < 1, "Shift+wheel unexpectedly moved the canvas vertically.");
+
+    await page.locator("#canvas-viewport").dispatchEvent("wheel", { deltaX: 0, deltaY: -80, deltaMode: 0, ctrlKey: true, clientX: 300, clientY: 240 });
+    const zoomedWheel = await readViewportTransform();
+    assert(zoomedWheel.scale > shiftedWheel.scale, "Ctrl+wheel did not zoom the canvas.");
+
+    const beforeHorizontalScrollbarDrag = await readViewportTransform();
+    await dragBy(page, horizontalScrollbar.locator(".canvas-scrollbar-thumb"), 24, 0);
+    const afterHorizontalScrollbarDrag = await readViewportTransform();
+    assert(afterHorizontalScrollbarDrag.x < beforeHorizontalScrollbarDrag.x, "Dragging the horizontal scrollbar did not move the canvas left.");
+
+    const beforeVerticalScrollbarDrag = await readViewportTransform();
+    await dragBy(page, verticalScrollbar.locator(".canvas-scrollbar-thumb"), 0, 24);
+    const afterVerticalScrollbarDrag = await readViewportTransform();
+    assert(afterVerticalScrollbarDrag.y < beforeVerticalScrollbarDrag.y, "Dragging the vertical scrollbar did not move the canvas up.");
+    assert(
+      await page.locator('#canvas-host [data-editor-id="accent-block-001"]').getAttribute("data-editor-translate-x") === wheelPanElementTransform,
+      "Viewport scrolling changed the selected element transform.",
+    );
+    await page.locator("#fit-canvas").click();
+
     progress("checking consolidated import/export menus and the temporary fragment clipboard");
     assert(await page.locator("#import-menu > summary").count() === 1, "The top bar does not expose exactly one import entry.");
     assert(await page.locator("#export-menu > summary").count() === 1, "The top bar does not expose exactly one export entry.");
