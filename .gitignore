@@ -14,3 +14,5 @@ exports/
 *.log
 .DS_Store
 /UI-kit/
+/docs/
+/afterprompt-oss-launch-final/

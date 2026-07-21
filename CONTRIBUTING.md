@@ -1,43 +1,40 @@
 # Contributing to AfterPrompt
 
-Thank you for contributing. This project uses the Apache License 2.0 for its
-own source code and documentation unless a file is clearly marked otherwise.
+Thank you for contributing. Keep changes focused, preserve standard HTML/SVG as the canonical artifact, and include evidence appropriate to the area changed.
 
-## Contribution license
+## Setup and checks
 
-Unless you explicitly state otherwise in writing, a contribution intentionally
-submitted for inclusion in AfterPrompt is provided under the Apache License
-2.0, without additional terms. You retain the copyright in your contribution.
+Use Node.js 22 or newer and npm:
 
-Every commit must include a Developer Certificate of Origin sign-off:
-
-```text
-Signed-off-by: Your Legal Name <your-email@example.com>
+```bash
+npm install
+npm run check
 ```
 
-Add it with `git commit -s`. By signing off, you certify the Developer
-Certificate of Origin 1.1: <https://developercertificate.org/>.
+For UI behavior, also run `npm run test:browser` with Chrome/Chromium and attach a before/after capture when visual output changes.
 
-## Rights and provenance
+## Contribution map
 
-Only submit material that you wrote or that you have the right to contribute.
-Do not submit source code, prompts, fonts, images, templates, icons, or other
-assets copied from an incompatible or unknown source.
+| Contribution | Primary location | Required evidence |
+|---|---|---|
+| Canvas or transforms | `src/canvas/`, `src/ui/` | focused tests + real before/after capture |
+| Document semantics | `src/core/document-model.ts`, `src/core/commands.ts` | unit/round-trip tests |
+| Slides and builds | `src/core/presentation*.ts` | presentation tests + preview/export check |
+| CLI or agent commands | `src/cli/`, shared command layer | command example + tests |
+| Visual Fragments | `src/core/fragments/`, `schemas/` | schema/compatibility tests |
+| Docs or translation | `README*`, `docs/` | local-link and canonical-language review |
+| Examples | `examples/` | opens, edits, and exports successfully |
 
-When a contribution contains third-party material:
+## Invariants
 
-1. identify its source and exact version;
-2. preserve its copyright and license notices;
-3. record modifications where the upstream license requires it; and
-4. update `THIRD_PARTY_NOTICES.md` and include the full license text when it is
-   not already present.
+Do not introduce byte-identical round-trip claims, execute imported scripts in the editing canvas, silently replace the `/last-mile-studio/` compatibility route, or mix license changes into ordinary feature work. Keep security and compatibility limits explicit.
 
-AI-assisted contributions must receive the same provenance, security, and
-license review as manually written contributions. Do not submit output that
-reproduces identifiable third-party material without compatible permission.
+## Pull requests
 
-## Brand assets
+Explain the user-visible result, scope, compatibility impact, tests run, and known limits. Keep generated build output and private fixtures out of the diff. Small, reviewable commits are preferred.
 
-A code contribution does not grant rights in the AfterPrompt name or branding.
-See `TRADEMARKS.md`.
+## Contribution license and provenance
 
+Unless explicitly stated otherwise in writing, a contribution intentionally submitted for inclusion is provided under the repository's existing license terms. Every commit must include a Developer Certificate of Origin sign-off via `git commit -s`.
+
+Submit only material you have the right to contribute. Identify third-party source and version, retain required notices, and update `THIRD_PARTY_NOTICES.md` when appropriate. AI-assisted contributions require the same provenance, security, and license review as manually authored work. Brand rights remain governed by `TRADEMARKS.md`.
