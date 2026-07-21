@@ -1,3 +1,4 @@
+# Dependencies, generated builds, caches, and output
 node_modules/
 dist/
 coverage/
@@ -5,14 +6,21 @@ coverage/
 .release/
 exports/
 /artifacts/
-/reference/
-/.agents/
-.agents/
-/.codex/
-.codex/
-/problem/
 *.log
 .DS_Store
+
+# Canonical local-only work areas
+/AGENTS.md
+/.agents/
+/.codex/
+/internal/
+/logs/
+/scratch/
+/tmp/
+/reference/
+/problem/
+
+# Existing private project material retained in this workspace
 /UI-kit/
 /Project.md
 /deploy/
@@ -23,3 +31,4 @@ exports/
 /scripts/production-browser-smoke.mjs
 /scripts/serve-production-smoke.mjs
 /scripts/stage-production.sh
+/Problems/
