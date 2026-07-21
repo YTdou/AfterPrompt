@@ -1,0 +1,20 @@
+name: Feature request
+description: Propose a bounded workflow improvement
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes: {label: Problem, description: What post-generation workflow is blocked today?}
+    validations: {required: true}
+  - type: textarea
+    id: artifact
+    attributes: {label: Example artifact, description: Describe a safe HTML, slide, SVG, fragment, or CLI case.}
+    validations: {required: true}
+  - type: textarea
+    id: outcome
+    attributes: {label: Desired outcome, description: Define observable success without assuming an implementation.}
+    validations: {required: true}
+  - type: textarea
+    id: limits
+    attributes: {label: Compatibility and safety considerations, description: Note source, export, security, or route implications.}

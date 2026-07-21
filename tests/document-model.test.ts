@@ -350,9 +350,9 @@ describe("SourceDocument", () => {
     expect(model.serialize()).not.toContain("data-editor-build-");
   });
 
-  it("recognizes the real HotCarbon Build regression baseline", () => {
-    const source = readFileSync(new URL("../reference/artifacts/HotCarbon_Oral_Slides_SelfContained.html", import.meta.url), "utf8");
-    const model = SourceDocument.parse(source, "HotCarbon_Oral_Slides_SelfContained.html");
+  it("recognizes the checked-in multi-page Build regression baseline", () => {
+    const source = readFileSync(new URL("./fixtures/build-regression-baseline.html", import.meta.url), "utf8");
+    const model = SourceDocument.parse(source, "build-regression-baseline.html");
     const sequences = model.pages().map(({ index }) => model.buildSequence(index));
 
     expect(model.pages()).toHaveLength(23);

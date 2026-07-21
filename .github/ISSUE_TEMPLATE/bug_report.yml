@@ -1,0 +1,30 @@
+name: Bug report
+description: Report a reproducible AfterPrompt defect
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Do not include private documents or security vulnerabilities. Use the security policy for private reporting."
+  - type: textarea
+    id: summary
+    attributes: {label: Summary, description: What happened and what did you expect?}
+    validations: {required: true}
+  - type: textarea
+    id: reproduce
+    attributes: {label: Reproduction, description: Provide minimal steps and a safe fixture or example path.}
+    validations: {required: true}
+  - type: input
+    id: commit
+    attributes: {label: Version or commit}
+    validations: {required: true}
+  - type: dropdown
+    id: artifact
+    attributes: {label: Artifact type, options: [HTML, HTML slides, SVG, Visual Fragment, Project JSON, CLI, Deployment]}
+    validations: {required: true}
+  - type: textarea
+    id: environment
+    attributes: {label: Environment, description: OS, Node.js version, browser, and command used.}
+  - type: textarea
+    id: evidence
+    attributes: {label: Evidence, description: Logs, screenshots, exported diff, or failing test without secrets.}
