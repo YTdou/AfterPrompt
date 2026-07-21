@@ -176,11 +176,11 @@ printf 'Nginx route patch: %s\n' "$PATCH_RESULT"
 nginx -t
 systemctl reload nginx.service
 wait_for_http_status \
-  "http://127.0.0.1/last-mile-studio/index.html" \
+  "http://127.0.0.1/AfterPrompt/index.html" \
   "200" \
   "$SERVER_IP"
 wait_for_http_status \
-  "http://127.0.0.1/last-mile-studio/" \
+  "http://127.0.0.1/AfterPrompt/" \
   "200" \
   "$SERVER_IP"
 
@@ -249,7 +249,7 @@ systemctl daemon-reload
 systemctl enable --now last-mile-studio-certbot-renew.timer
 
 wait_for_https_status \
-  "https://$SERVER_IP/last-mile-studio/healthz" \
+  "https://$SERVER_IP/AfterPrompt/healthz" \
   "200"
 
 ROUTE_AFTER="$STAGING_ROOT/route-after-bootstrap.txt"
@@ -267,6 +267,6 @@ chown -R "$DEPLOY_USER:$DEPLOY_GROUP" "$BACKUP_DIR" "$ROUTE_AFTER"
 trap - ERR
 
 printf 'AfterPrompt bootstrap completed.\n'
-printf 'Endpoint: https://%s/last-mile-studio/\n' "$SERVER_IP"
+printf 'Endpoint: https://%s/AfterPrompt/\n' "$SERVER_IP"
 printf 'Nginx backup directory: %s\n' "$BACKUP_DIR"
 printf 'Certificate timer: last-mile-studio-certbot-renew.timer\n'

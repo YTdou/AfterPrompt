@@ -5,7 +5,7 @@ import process from "node:process";
 
 const host = "127.0.0.1";
 const port = Number(process.env.PRODUCTION_SMOKE_PORT ?? "4175");
-const basePath = "/last-mile-studio/";
+const basePath = "/AfterPrompt/";
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
 const distRoot = path.join(repositoryRoot, "dist");
 const securityConfigPath = path.join(repositoryRoot, "deploy/nginx/last-mile-studio-security-headers.conf");
@@ -58,12 +58,18 @@ const server = createServer(async (request, response) => {
     }
 
     const requestUrl = new URL(request.url, `http://${host}:${port}`);
-    if (requestUrl.pathname === "/last-mile-studio/healthz") {
+    if (requestUrl.pathname === "/AfterPrompt/healthz") {
       const body = Buffer.from("ok");
       response.setHeader("Content-Type", "text/plain; charset=utf-8");
       response.setHeader("Content-Length", body.byteLength);
       response.writeHead(200);
       response.end(request.method === "HEAD" ? undefined : body);
+      return;
+    }
+
+    if (requestUrl.pathname === "/last-mile-studio" || requestUrl.pathname.startsWith("/last-mile-studio/")) {
+      response.setHeader("Location", basePath);
+      response.writeHead(308).end();
       return;
     }
 

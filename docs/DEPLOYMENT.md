@@ -5,7 +5,7 @@
 The production endpoint is:
 
 ```text
-https://47.237.77.35/last-mile-studio/
+https://47.237.77.35/AfterPrompt/
 ```
 
 The application is a static Vite build. Nginx serves versioned releases directly; Node.js and `vite preview` are not production runtime dependencies.
@@ -21,7 +21,7 @@ The application is a static Vite build. Nginx serves versioned releases directly
             └── assets/
 ```
 
-The existing HTTP routes `/`, `/espur/`, `/modelselect/`, and `/healthz` remain owned by the existing Nginx server block. The bootstrap adds one isolated include for the ACME challenge and `/last-mile-studio/` redirect.
+The existing HTTP routes `/`, `/espur/`, `/modelselect/`, and `/healthz` remain owned by the existing Nginx server block. The bootstrap adds one isolated include for the ACME challenge and `/AfterPrompt/` redirect; the legacy `/last-mile-studio/` path redirects to the canonical `/AfterPrompt/` path.
 
 ## First deployment
 
@@ -65,8 +65,9 @@ The bootstrap:
 Alibaba Cloud's security group must also allow inbound TCP 443. The host firewall configuration cannot override a cloud security-group denial.
 
 ## Subsequent releases
+Build and stage the new release in the same way. To migrate an existing installation from the legacy public path, run the staged deploy/migrate-public-path.sh through sudo in an interactive SSH session. It backs up Nginx, validates the new canonical /AfterPrompt/ route, and restores the prior configuration on failure.
 
-Build and stage the new release in the same way. After staging, activate it without sudo:
+After staging and any required path migration, activate it without sudo:
 
 ```bash
 ssh zkm@47.237.77.35 \
@@ -77,8 +78,8 @@ ssh zkm@47.237.77.35 \
 Then run:
 
 ```bash
-curl --fail --head https://47.237.77.35/last-mile-studio/
-STUDIO_BASE_URL=https://47.237.77.35/last-mile-studio/ npm run test:browser
+curl --fail --head https://47.237.77.35/AfterPrompt/
+STUDIO_BASE_URL=https://47.237.77.35/AfterPrompt/ npm run test:browser
 ```
 
 No release is deleted automatically. This preserves an auditable rollback set.
@@ -105,7 +106,7 @@ Rollback only changes the `current` symlink. Static hashed assets from older rel
 ## Operational checks
 
 ```bash
-curl --fail https://47.237.77.35/last-mile-studio/healthz
+curl --fail https://47.237.77.35/AfterPrompt/healthz
 systemctl status nginx --no-pager
 systemctl status last-mile-studio-certbot-renew.timer --no-pager
 systemctl list-timers last-mile-studio-certbot-renew.timer --no-pager

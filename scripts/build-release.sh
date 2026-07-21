@@ -27,7 +27,7 @@ npm run check
 log "running the real-browser smoke suite"
 STUDIO_BASE_URL="${BROWSER_SMOKE_BASE_URL:-http://127.0.0.1:4174}" npm run test:browser
 
-log "building the /last-mile-studio/ production artifact"
+log "building the /AfterPrompt/ production artifact"
 npm run build:production
 
 log "running the built artifact with the production path and security headers"
@@ -38,8 +38,8 @@ if [[ -n "$(find dist -type f -name '*.map' -print -quit)" ]]; then
   exit 1
 fi
 
-if ! grep -q '/last-mile-studio/assets/' dist/index.html; then
-  printf 'Production index.html does not reference /last-mile-studio/assets/.\n' >&2
+if ! grep -q '/AfterPrompt/assets/' dist/index.html; then
+  printf 'Production index.html does not reference /AfterPrompt/assets/.\n' >&2
   exit 1
 fi
 
@@ -98,7 +98,7 @@ printf \
   "$ARCHIVE_SHA256" \
   > "$RELEASE_DIR/release.env"
 printf \
-  '{\n  "application": "last-mile-studio",\n  "release_id": "%s",\n  "git_commit": "%s",\n  "tracked_worktree_dirty": %s,\n  "base_path": "/last-mile-studio/",\n  "archive": "%s",\n  "sha256": "%s",\n  "source_maps": false\n}\n' \
+  '{\n  "application": "last-mile-studio",\n  "release_id": "%s",\n  "git_commit": "%s",\n  "tracked_worktree_dirty": %s,\n  "base_path": "/AfterPrompt/",\n  "archive": "%s",\n  "sha256": "%s",\n  "source_maps": false\n}\n' \
   "$RELEASE_ID" \
   "$(git rev-parse HEAD)" \
   "$TRACKED_DIRTY" \

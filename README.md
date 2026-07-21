@@ -30,7 +30,7 @@ npm run dev
 ```bash
 npm run dev          # 开发服务器
 npm run build        # 严格类型检查并生成 dist/
-npm run build:production # 为 /last-mile-studio/ 生成无 source map 的生产制品
+npm run build:production # 为 /AfterPrompt/ 生成无 source map 的生产制品
 npm run test         # 核心自动化测试
 npm run test:browser # 可选：用本机 Chrome/Chromium 跑真实 UI 冒烟测试
 npm run check        # 核心测试 + 生产构建

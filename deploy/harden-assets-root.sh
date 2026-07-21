@@ -13,8 +13,9 @@ TARGET_CONFIG="/etc/nginx/conf.d/last-mile-studio-https.conf"
 SOURCE_CONFIG="$SCRIPT_DIR/nginx/last-mile-studio-https.conf"
 BACKUP_CONFIG="$TARGET_CONFIG.pre-strict-assets-$(date -u +%Y%m%dT%H%M%SZ)"
 
-ASSET_PATH="$(sed -n 's#.*src="\(/last-mile-studio/assets/[^"?]*\.js\)".*#\1#p' "$APP_ROOT/index.html" | head -n 1)"
-if [[ -z "$ASSET_PATH" || ! -f "/var/www/last-mile-studio/current$ASSET_PATH" ]]; then
+ASSET_PATH="$(sed -n 's#.*src="\(/AfterPrompt/assets/[^"?]*\.js\)".*#\1#p' "$APP_ROOT/index.html" | head -n 1)"
+ASSET_RELATIVE="$(printf '%s' "$ASSET_PATH" | sed 's#^/AfterPrompt/##')"
+if [[ -z "$ASSET_PATH" || ! -f "$APP_ROOT/$ASSET_RELATIVE" ]]; then
   printf 'Could not resolve the current JavaScript asset from index.html.\n' >&2
   exit 1
 fi
