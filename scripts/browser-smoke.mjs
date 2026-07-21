@@ -1,51 +1,19 @@
-import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { copyFile, readFile } from "node:fs/promises";
 import process from "node:process";
 import { chromium } from "playwright-core";
+import { startViteDevServer, withTimeout } from "./lib/managed-vite-server.mjs";
 
 const baseUrl = process.env.STUDIO_BASE_URL ?? "http://127.0.0.1:4173";
-const parsedBaseUrl = new URL(baseUrl);
 const executablePath = process.env.CHROME_PATH ?? [
   "/usr/bin/google-chrome",
   "/usr/bin/google-chrome-stable",
   "/usr/bin/chromium",
   "/usr/bin/chromium-browser",
 ].find(existsSync);
-let server;
 
 function progress(message) {
   process.stdout.write(`[browser-smoke] ${message}\n`);
-}
-
-async function reachable() {
-  try {
-    const response = await fetch(baseUrl);
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
-async function ensureServer() {
-  if (await reachable()) return;
-  if (parsedBaseUrl.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(parsedBaseUrl.hostname)) {
-    throw new Error(`The external smoke target is unreachable: ${baseUrl}`);
-  }
-  const port = parsedBaseUrl.port || "80";
-  server = spawn("npm", ["run", "dev", "--", "--host", parsedBaseUrl.hostname, "--port", port, "--strictPort", "--force"], {
-    cwd: process.cwd(),
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  let output = "";
-  server.stdout.on("data", (chunk) => { output += chunk; });
-  server.stderr.on("data", (chunk) => { output += chunk; });
-  for (let attempt = 0; attempt < 80; attempt += 1) {
-    if (await reachable()) return;
-    if (server.exitCode !== null) throw new Error(`Vite exited before becoming ready.\n${output}`);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error(`Timed out waiting for ${baseUrl}.\n${output}`);
 }
 
 function assert(condition, message) {
@@ -111,14 +79,18 @@ async function exportDocument(page) {
 
 async function run() {
   if (!executablePath) throw new Error("Chrome/Chromium was not found. Set CHROME_PATH to its executable.");
-  await ensureServer();
-  const browser = await chromium.launch({
-    executablePath,
-    headless: true,
-    args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+  const server = await startViteDevServer({
+    baseUrl,
+    reuseExisting: Boolean(process.env.STUDIO_BASE_URL),
   });
-  const errors = [];
+  let browser;
   try {
+    browser = await chromium.launch({
+      executablePath,
+      headless: true,
+      args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+    });
+    const errors = [];
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
     await page.addInitScript(() => {
       const files = new Map();
@@ -949,7 +921,7 @@ async function run() {
     progress("checking direct SVG insertion and directory-backed PNG/JPEG imports");
     const svgBytes = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80"><g id="raw-layer"><rect width="40" height="20" fill="#315efb"/><text x="4" y="50">Raw SVG</text></g></svg>');
     const selectionBeforeRawSvg = await page.locator("#selection-status").textContent();
-    const rawSvgChooserPromise = page.waitForEvent("filechooser");
+    const rawSvgChooserPromise = page.waitForEvent("filechooser", { timeout: 20_000 });
     await chooseIoAction(page, "#import-menu", "#insert-fragment-action");
     const rawSvgChooser = await rawSvgChooserPromise;
     await rawSvgChooser.setFiles({ name: "raw-mark.svg", mimeType: "image/svg+xml", buffer: svgBytes });
@@ -977,13 +949,13 @@ async function run() {
         jpg: canvas.toDataURL("image/jpeg", 0.9).split(",")[1],
       };
     });
-    const pngChooserPromise = page.waitForEvent("filechooser");
+    const pngChooserPromise = page.waitForEvent("filechooser", { timeout: 20_000 });
     await page.locator("#fragment-import").click();
     const pngChooser = await pngChooserPromise;
     await pngChooser.setFiles({ name: "pixel.png", mimeType: "image/png", buffer: Buffer.from(rasterData.png, "base64") });
     const pngCard = page.locator('.fragment-card:has-text("pixel")').first();
     await pngCard.waitFor();
-    const jpgChooserPromise = page.waitForEvent("filechooser");
+    const jpgChooserPromise = page.waitForEvent("filechooser", { timeout: 20_000 });
     await page.locator("#fragment-import").click();
     const jpgChooser = await jpgChooserPromise;
     await jpgChooser.setFiles({ name: "photo.jpeg", mimeType: "image/jpeg", buffer: Buffer.from(rasterData.jpg, "base64") });
@@ -1062,7 +1034,7 @@ async function run() {
       return polygon && Math.abs(Number(polygon.getAttribute("data-editor-scale-x")) - 1) > 0.05;
     });
     await page.waitForTimeout(250);
-    const downloadPromise = page.waitForEvent("download");
+    const downloadPromise = page.waitForEvent("download", { timeout: 20_000 });
     await exportDocument(page);
     const svgDownload = await downloadPromise;
     const svgDownloadPath = await svgDownload.path();
@@ -1315,7 +1287,7 @@ async function run() {
     await previewFrame.locator("#lms-status").filter({ hasText: "3 / 4 · Initial" }).waitFor();
     await page.locator("#close-presentation").click();
 
-    const slidesDownloadPromise = page.waitForEvent("download");
+    const slidesDownloadPromise = page.waitForEvent("download", { timeout: 20_000 });
     await exportDocument(page);
     const slidesDownload = await slidesDownloadPromise;
     const slidesDownloadPath = await slidesDownload.path();
@@ -1332,7 +1304,7 @@ async function run() {
     assert(await page.locator("#canvas-host").evaluate((host) => !host.shadowRoot?.querySelector("#lms-stage")), "Re-importing exported HTML exposed the player shell instead of the canonical document.");
     await page.locator("#duplicate-page").click();
     await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("page 2/5"));
-    const secondRoundDownloadPromise = page.waitForEvent("download");
+    const secondRoundDownloadPromise = page.waitForEvent("download", { timeout: 20_000 });
     await exportDocument(page);
     const secondRoundDownload = await secondRoundDownloadPromise;
     const secondRoundPath = await secondRoundDownload.path();
@@ -1470,7 +1442,7 @@ async function run() {
     const redoneStackPaste = await inspectStackPaste(secondStackPasteId);
     assert(redoneStackPaste.topRootId === secondStackPasteId && redoneStackPaste.isolation === "isolate", `Redo did not restore frontmost stacking: ${JSON.stringify(redoneStackPaste)}`);
 
-    const stackingExportPromise = page.waitForEvent("download");
+    const stackingExportPromise = page.waitForEvent("download", { timeout: 20_000 });
     await exportDocument(page);
     const stackingExport = await stackingExportPromise;
     const stackingExportPath = await stackingExport.path();
@@ -1546,7 +1518,11 @@ async function run() {
       clipboardFrontmostStackingContext: true,
     }, null, 2)}\n`);
   } finally {
-    await browser.close();
+    try {
+      if (browser) await withTimeout(browser.close(), 10_000, "Browser smoke Chromium shutdown");
+    } finally {
+      await server.close();
+    }
   }
 }
 
@@ -1554,7 +1530,4 @@ run()
   .catch((error) => {
     process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`);
     process.exitCode = 1;
-  })
-  .finally(() => {
-    if (server && server.exitCode === null) server.kill("SIGTERM");
   });

@@ -1,7 +1,7 @@
-import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import process from "node:process";
 import { chromium } from "playwright-core";
+import { startVitePreviewServer, withTimeout } from "./lib/managed-vite-server.mjs";
 
 const host = "127.0.0.1";
 const port = process.env.PRODUCTION_SMOKE_PORT ?? "4193";
@@ -15,40 +15,23 @@ const executablePath = process.env.CHROME_PATH ?? [
 
 function assert(condition, message) { if (!condition) throw new Error(message); }
 
-async function waitUntilReachable(server, output) {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    try {
-      const response = await fetch(baseUrl);
-      if (response.ok) return;
-    } catch {
-      // The preview server may still be starting.
-    }
-    if (server.exitCode !== null) throw new Error(`Vite preview exited before becoming ready.\n${output.value}`);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error(`Timed out waiting for ${baseUrl}.\n${output.value}`);
-}
-
 async function main() {
   if (!executablePath) throw new Error("Chrome/Chromium was not found. Set CHROME_PATH to its executable.");
-  const output = { value: "" };
-  const server = spawn("npm", ["run", "preview", "--", "--host", host, "--port", port, "--strictPort"], {
-    cwd: process.cwd(),
-    env: { ...process.env, DEPLOY_BASE_PATH: "/AfterPrompt/" },
-    stdio: ["ignore", "pipe", "pipe"],
+  const server = await startVitePreviewServer({
+    baseUrl,
+    basePath: "/AfterPrompt/",
+    reuseExisting: Boolean(process.env.PRODUCTION_BASE_URL),
   });
-  server.stdout.on("data", (chunk) => { output.value += chunk; });
-  server.stderr.on("data", (chunk) => { output.value += chunk; });
 
   let browser;
   try {
-    await waitUntilReachable(server, output);
     browser = await chromium.launch({
       executablePath,
       headless: true,
       args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
     });
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    page.setDefaultTimeout(20_000);
     const failures = [];
     page.on("pageerror", (error) => failures.push(error.stack ?? error.message));
     page.on("response", (response) => {
@@ -63,8 +46,11 @@ async function main() {
     assert(failures.length === 0, `Production smoke observed browser failures:\n${failures.join("\n")}`);
     process.stdout.write(`${JSON.stringify({ ok: true, baseUrl, assets: true, editor: true })}\n`);
   } finally {
-    await browser?.close();
-    if (server.exitCode === null) server.kill("SIGTERM");
+    try {
+      if (browser) await withTimeout(browser.close(), 10_000, "Production smoke Chromium shutdown");
+    } finally {
+      await server.close();
+    }
   }
 }
 

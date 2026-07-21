@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { chromium } from "playwright-core";
 import { runtimePresentationLayoutCss } from "../src/core/presentation-layout.ts";
+import { withTimeout } from "./lib/managed-vite-server.mjs";
 
 const executablePath = process.env.CHROME_PATH ?? [
   "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium",
@@ -33,7 +34,7 @@ async function run() {
     assert(JSON.stringify(wide) === JSON.stringify(compact), `Viewport changed authored layout: ${JSON.stringify({ wide, compact })}`);
     process.stdout.write(`${JSON.stringify({ ok: true, viewportInvariant: true, wide, compact })}\n`);
   } finally {
-    await browser.close();
+    await withTimeout(browser.close(), 10_000, "Viewport invariance Chromium shutdown");
   }
 }
 

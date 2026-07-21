@@ -1,28 +1,15 @@
-import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { chromium } from "playwright-core";
+import { startViteDevServer, withTimeout } from "./lib/managed-vite-server.mjs";
 
 const baseUrl = process.env.STUDIO_BASE_URL ?? "http://127.0.0.1:4182";
-const port = new URL(baseUrl).port || "80";
 const executablePath = process.env.CHROME_PATH ?? [
   "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium",
   "/usr/bin/chromium-browser",
 ].find(existsSync);
-let server;
 
 function assert(condition, message) { if (!condition) throw new Error(message); }
-async function reachable() { try { return (await fetch(baseUrl)).ok; } catch { return false; } }
-async function startServer() {
-  if (await reachable()) return;
-  server = spawn("npm", ["run", "dev", "--", "--host", "127.0.0.1", "--port", port, "--strictPort", "--force"], { cwd: process.cwd(), stdio: "ignore" });
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (await reachable()) return;
-    if (server.exitCode !== null) throw new Error("Vite exited before becoming ready.");
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error(`Timed out waiting for ${baseUrl}`);
-}
 
 async function capture(rootHandle) {
   return rootHandle.evaluate((root) => {
@@ -70,10 +57,15 @@ function compare(expected, actual, tolerance = 1) {
 
 async function run() {
   assert(executablePath, "Chrome/Chromium was not found.");
-  await startServer();
-  const browser = await chromium.launch({ executablePath, headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"] });
+  const server = await startViteDevServer({
+    baseUrl,
+    reuseExisting: Boolean(process.env.STUDIO_BASE_URL),
+  });
+  let browser;
   try {
+    browser = await chromium.launch({ executablePath, headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"] });
     const editor = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+    editor.setDefaultTimeout(40_000);
     await editor.goto(baseUrl, { waitUntil: "networkidle" });
     const fixturePath = "tests/fixtures/layout-parity-deck.html";
     const pageCount = 3;
@@ -108,6 +100,7 @@ async function run() {
     await editor.close();
 
     const exported = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+    exported.setDefaultTimeout(40_000);
     await exported.setContent(fixtureSource, { waitUntil: "load", timeout: 40_000 });
     await exported.evaluate(() => document.fonts.ready);
     const exportedFontReady = await exported.evaluate(() => document.fonts.check('58px "LMS Inter"'));
@@ -125,8 +118,11 @@ async function run() {
 
     process.stdout.write(`${JSON.stringify({ ok: true, pages: pageCount, comparedTextNodes: editorSnapshots.length, lineDifferences: 0, geometryDifferences: 0 })}\n`);
   } finally {
-    await browser.close();
-    if (server && server.exitCode === null) server.kill("SIGTERM");
+    try {
+      if (browser) await withTimeout(browser.close(), 10_000, "Layout parity Chromium shutdown");
+    } finally {
+      await server.close();
+    }
   }
 }
 

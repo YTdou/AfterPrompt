@@ -57,6 +57,7 @@ case "$MODE" in
     ;;
   release)
     npm run check
+    npm run test:server-lifecycle
     npm run test:browser
     npm run test:presentation-export
     npm run test:layout-parity

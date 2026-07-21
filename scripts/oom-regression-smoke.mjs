@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import process from "node:process";
@@ -6,6 +5,7 @@ import JSZip from "jszip";
 import { JSDOM } from "jsdom";
 import { chromium } from "playwright-core";
 import { buildOomRegressionFixture } from "./oom-regression-fixture.mjs";
+import { startViteDevServer, withTimeout } from "./lib/managed-vite-server.mjs";
 
 const baseUrl = process.env.STUDIO_BASE_URL ?? "http://127.0.0.1:4188";
 const executablePath = process.env.CHROME_PATH ?? [
@@ -14,7 +14,6 @@ const executablePath = process.env.CHROME_PATH ?? [
   "/usr/bin/chromium",
   "/usr/bin/chromium-browser",
 ].find(existsSync);
-let server;
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -40,37 +39,6 @@ async function chooseIoAction(page, menuId, actionSelector) {
   await page.locator(actionSelector).click();
 }
 
-async function reachable() {
-  try {
-    return (await fetch(baseUrl)).ok;
-  } catch {
-    return false;
-  }
-}
-
-async function ensureServer() {
-  if (await reachable()) return;
-  const url = new URL(baseUrl);
-  const npmExecPath = process.env.npm_execpath;
-  const command = npmExecPath ? process.execPath : "npm";
-  const args = npmExecPath
-    ? [npmExecPath, "run", "dev", "--", "--host", url.hostname, "--port", url.port, "--strictPort", "--force"]
-    : ["run", "dev", "--", "--host", url.hostname, "--port", url.port, "--strictPort", "--force"];
-  server = spawn(command, args, {
-    cwd: process.cwd(),
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  let output = "";
-  server.stdout.on("data", (chunk) => { output += chunk; });
-  server.stderr.on("data", (chunk) => { output += chunk; });
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (await reachable()) return;
-    if (server.exitCode !== null) throw new Error(`Vite exited before becoming ready.\n${output}`);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error(`Timed out waiting for ${baseUrl}.\n${output}`);
-}
-
 async function saveAndExportFragment(page, elementId, name) {
   await page.locator(`[data-layer-id="${elementId}"]`).click();
   const renderedStructure = await page.locator("#canvas-host").evaluate((host, id) => {
@@ -86,7 +54,7 @@ async function saveAndExportFragment(page, elementId, name) {
   await page.locator("#fragment-save-dialog").waitFor({ state: "visible" });
   await page.locator("#fragment-name").fill(name);
   await page.locator("#fragment-type").selectOption("component");
-  const downloadPromise = page.waitForEvent("download");
+  const downloadPromise = page.waitForEvent("download", { timeout: 60_000 });
   await page.locator("#fragment-save-submit").click();
   await page.locator("#fragment-save-dialog").waitFor({ state: "hidden", timeout: 60_000 });
   const download = await downloadPromise;
@@ -115,27 +83,31 @@ async function run() {
   const fixture = buildOomRegressionFixture();
   const originalBytes = Buffer.byteLength(fixture.source);
   assert(originalBytes > 8 * 1024 * 1024, `Deterministic OOM fixture is too small: ${originalBytes}.`);
-  await ensureServer();
-  const browser = await chromium.launch({
-    executablePath,
-    headless: true,
-    args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+  const server = await startViteDevServer({
+    baseUrl,
+    reuseExisting: Boolean(process.env.STUDIO_BASE_URL),
   });
-  const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
-  page.setDefaultTimeout(60_000);
-  const errors = [];
-  const failures = [];
-  const check = (condition, message) => {
-    if (!condition) failures.push(message);
-  };
-  page.on("pageerror", (error) => errors.push(error.stack ?? error.message));
-  page.on("console", (message) => {
-    if (message.type() === "error" && !message.text().includes("Failed to load resource")) errors.push(message.text());
-  });
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Performance.enable");
-
+  let browser;
   try {
+    browser = await chromium.launch({
+      executablePath,
+      headless: true,
+      args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+    });
+    const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+    page.setDefaultTimeout(60_000);
+    const errors = [];
+    const failures = [];
+    const check = (condition, message) => {
+      if (!condition) failures.push(message);
+    };
+    page.on("pageerror", (error) => errors.push(error.stack ?? error.message));
+    page.on("console", (message) => {
+      if (message.type() === "error" && !message.text().includes("Failed to load resource")) errors.push(message.text());
+    });
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Performance.enable");
+
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await page.locator("#file-input").setInputFiles({
       name: fixture.sourceName,
@@ -202,7 +174,7 @@ async function run() {
     await cdp.send("HeapProfiler.collectGarbage");
     const metrics = await cdp.send("Performance.getMetrics");
     const metric = Object.fromEntries(metrics.metrics.map(({ name, value }) => [name, value]));
-    const downloadPromise = page.waitForEvent("download");
+    const downloadPromise = page.waitForEvent("download", { timeout: 60_000 });
     await chooseIoAction(page, "#export-menu", "#export-document-action");
     const exportedPath = await (await downloadPromise).path();
     assert(exportedPath, "Optimized HTML export produced no file.");
@@ -225,13 +197,15 @@ async function run() {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     assert(failures.length === 0, `Regression checks failed:\n- ${failures.join("\n- ")}`);
   } finally {
-    await browser.close();
-    if (server) server.kill("SIGTERM");
+    try {
+      if (browser) await withTimeout(browser.close(), 10_000, "OOM regression Chromium shutdown");
+    } finally {
+      await server.close();
+    }
   }
 }
 
 run().catch((error) => {
-  if (server) server.kill("SIGTERM");
   process.stderr.write(`${error.stack ?? error}\n`);
   process.exitCode = 1;
 });

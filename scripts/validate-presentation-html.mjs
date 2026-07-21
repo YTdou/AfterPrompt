@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { JSDOM } from "jsdom";
 import { chromium } from "playwright-core";
+import { withTimeout } from "./lib/managed-vite-server.mjs";
 import { auditPresentationSource } from "../src/core/presentation-audit.ts";
 import { comparePresentationProjections } from "../src/core/presentation-projection.ts";
 
@@ -146,7 +147,7 @@ async function browserProjection(source, useBrowser) {
     });
     return { status: "ok", ...result };
   } finally {
-    await browser.close();
+    await withTimeout(browser.close(), 10_000, "Presentation validation Chromium shutdown");
   }
 }
 

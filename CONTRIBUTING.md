@@ -13,6 +13,7 @@ npm run check
 
 For UI behavior, also run `npm run test:browser` with Chrome/Chromium and attach a before/after capture when visual output changes.
 The complete release and deployment gate is `npm run ui:gate -- release`.
+CI runs the same checks as named, time-bounded jobs so failures identify the affected browser or build suite; `npm run test:server-lifecycle` verifies that local Vite test servers shut down on both success and failure paths.
 
 ## Contribution map
 

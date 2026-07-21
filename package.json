@@ -13,6 +13,7 @@
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run",
     "test:browser": "node scripts/browser-smoke.mjs",
+    "test:server-lifecycle": "node scripts/server-lifecycle-smoke.mjs",
     "test:oom-regression": "node scripts/oom-regression-smoke.mjs",
     "validate:presentation": "node --import tsx scripts/validate-presentation-html.mjs",
     "test:presentation-export": "node --import tsx scripts/presentation-export-smoke.mjs generate && node --import tsx scripts/presentation-export-smoke.mjs verify",

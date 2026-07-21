@@ -1,13 +1,12 @@
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { chromium } from "playwright-core";
+import { startViteDevServer, withTimeout } from "./lib/managed-vite-server.mjs";
 
 const baseUrl = process.env.STUDIO_BASE_URL ?? "http://127.0.0.1:4173";
-const parsedBaseUrl = new URL(baseUrl);
 const outputDir = path.resolve(process.env.UI_AUDIT_DIR ?? "artifacts/ui-audit");
 const strict = process.env.UI_STRICT === "1";
 
@@ -42,48 +41,9 @@ const scenarioNames = (process.env.UI_SCENARIOS ??
   .filter(Boolean);
 
 const viewports = parseViewports(process.env.UI_VIEWPORTS);
-let server;
 
 function log(message) {
   process.stdout.write(`[ui-audit] ${message}\n`);
-}
-
-async function reachable() {
-  try {
-    const response = await fetch(baseUrl);
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
-async function ensureServer() {
-  if (await reachable()) return;
-  if (parsedBaseUrl.protocol !== "http:" ||
-      !["127.0.0.1", "localhost"].includes(parsedBaseUrl.hostname)) {
-    throw new Error(`External UI audit target is unreachable: ${baseUrl}`);
-  }
-
-  const port = parsedBaseUrl.port || "80";
-  server = spawn(
-    "npm",
-    ["run", "dev", "--", "--host", parsedBaseUrl.hostname, "--port", port, "--strictPort", "--force"],
-    { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] },
-  );
-
-  let output = "";
-  server.stdout.on("data", (chunk) => { output += chunk; });
-  server.stderr.on("data", (chunk) => { output += chunk; });
-
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (await reachable()) return;
-    if (server.exitCode !== null) {
-      throw new Error(`Vite exited before becoming ready.\n${output}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-
-  throw new Error(`Timed out waiting for ${baseUrl}.\n${output}`);
 }
 
 async function chooseIoAction(page, menuSelector, actionSelector) {
@@ -497,7 +457,7 @@ async function runScenario(browser, viewport, scenarioName) {
   });
 
   const screenshotHash = await sha256(screenshotPath);
-  await context.close();
+  await withTimeout(context.close(), 10_000, `UI audit context shutdown (${viewport.name}/${scenarioName})`);
 
   return {
     viewport,
@@ -515,53 +475,57 @@ async function main() {
   }
 
   await mkdir(outputDir, { recursive: true });
-  await ensureServer();
-
-  const browser = await chromium.launch({
-    executablePath,
-    headless: true,
-    args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+  const server = await startViteDevServer({
+    baseUrl,
+    reuseExisting: Boolean(process.env.STUDIO_BASE_URL),
   });
-
-  const results = [];
+  let browser;
   try {
+    browser = await chromium.launch({
+      executablePath,
+      headless: true,
+      args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+    });
+    const results = [];
     for (const viewport of viewports) {
       for (const scenarioName of scenarioNames) {
         log(`running ${viewport.name} / ${scenarioName}`);
         results.push(await runScenario(browser, viewport, scenarioName));
       }
     }
+
+    const summary = {
+      generatedAt: new Date().toISOString(),
+      baseUrl,
+      strict,
+      executablePath,
+      viewports,
+      scenarios: scenarioNames,
+      resultCount: results.length,
+      criticalCount: results.reduce((sum, result) => sum + result.critical.length, 0),
+      warningCount: results.reduce((sum, result) => sum + result.warnings.length, 0),
+      results,
+    };
+
+    const reportPath = path.join(outputDir, "report.json");
+    await writeFile(reportPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+
+    log(`report: ${path.relative(process.cwd(), reportPath)}`);
+    log(`critical=${summary.criticalCount} warnings=${summary.warningCount}`);
+
+    if (summary.criticalCount > 0 || (strict && summary.warningCount > 0)) {
+      process.exitCode = 1;
+    }
   } finally {
-    await browser.close();
-    if (server && server.exitCode === null) server.kill("SIGTERM");
-  }
-
-  const summary = {
-    generatedAt: new Date().toISOString(),
-    baseUrl,
-    strict,
-    executablePath,
-    viewports,
-    scenarios: scenarioNames,
-    resultCount: results.length,
-    criticalCount: results.reduce((sum, result) => sum + result.critical.length, 0),
-    warningCount: results.reduce((sum, result) => sum + result.warnings.length, 0),
-    results,
-  };
-
-  const reportPath = path.join(outputDir, "report.json");
-  await writeFile(reportPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
-
-  log(`report: ${path.relative(process.cwd(), reportPath)}`);
-  log(`critical=${summary.criticalCount} warnings=${summary.warningCount}`);
-
-  if (summary.criticalCount > 0 || (strict && summary.warningCount > 0)) {
-    process.exitCode = 1;
+    try {
+      if (browser) await withTimeout(browser.close(), 10_000, "UI audit Chromium shutdown");
+    } finally {
+      await server.close();
+    }
   }
 }
 
 main().catch((error) => {
-  if (server && server.exitCode === null) server.kill("SIGTERM");
   console.error(error);
   process.exitCode = 1;
 });

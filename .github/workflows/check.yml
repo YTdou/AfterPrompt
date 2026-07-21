@@ -8,22 +8,118 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  check:
+  quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - run: npm run ui:gate -- release
+      - name: Install dependencies
+        run: npm ci
+        timeout-minutes: 5
+      - name: Unit tests, type checking, and build
+        run: npm run check
+        timeout-minutes: 10
+
+  browser-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+        timeout-minutes: 5
+      - name: Server lifecycle regression
+        run: npm run test:server-lifecycle
+        timeout-minutes: 5
+      - name: Core browser workflow
+        run: npm run test:browser
+        timeout-minutes: 10
+      - name: Presentation export
+        run: npm run test:presentation-export
+        timeout-minutes: 5
+
+  browser-regression:
+    name: browser-regression (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: layout-parity
+            script: test:layout-parity
+            strict: "0"
+          - name: viewport-invariance
+            script: test:viewport-invariance
+            strict: "0"
+          - name: oom-regression
+            script: test:oom-regression
+            strict: "0"
+          - name: production
+            script: test:production
+            strict: "0"
+          - name: ui-audit
+            script: ui:audit
+            strict: "1"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+        timeout-minutes: 5
+      - name: Run ${{ matrix.name }}
+        run: npm run ${{ matrix.script }}
+        timeout-minutes: 10
+        env:
+          UI_STRICT: ${{ matrix.strict }}
+          UI_VIEWPORTS: 1280x800,1440x900,1920x1080
+          UI_SCENARIOS: default,selected,deck,deck-collapsed,svg,code,fragment-library,presentation
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-${{ matrix.name }}-${{ github.run_attempt }}
+          path: artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  check:
+    if: always()
+    needs: [quality, browser-core, browser-regression]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Verify all release checks
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          BROWSER_CORE_RESULT: ${{ needs['browser-core'].result }}
+          BROWSER_REGRESSION_RESULT: ${{ needs['browser-regression'].result }}
+        run: |
+          test "$QUALITY_RESULT" = success
+          test "$BROWSER_CORE_RESULT" = success
+          test "$BROWSER_REGRESSION_RESULT" = success
 
   pages-build:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       pages: write
@@ -34,8 +130,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - run: npm run build:production
+      - name: Install dependencies
+        run: npm ci
+        timeout-minutes: 5
+      - name: Build production site
+        run: npm run build:production
+        timeout-minutes: 10
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
       - name: Upload GitHub Pages artifact
@@ -47,6 +147,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: pages-build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       pages: write
       id-token: write
