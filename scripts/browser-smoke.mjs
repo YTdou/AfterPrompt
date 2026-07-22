@@ -11,6 +11,7 @@ const executablePath = process.env.CHROME_PATH ?? [
   "/usr/bin/chromium",
   "/usr/bin/chromium-browser",
 ].find(existsSync);
+const defaultHtmlTitle = "Visually refine what AI generates.";
 
 function progress(message) {
   process.stdout.write(`[browser-smoke] ${message}\n`);
@@ -25,6 +26,17 @@ async function shadowText(page, id) {
     const host = document.querySelector("#canvas-host");
     return host?.shadowRoot?.querySelector(`[data-editor-id="${elementId}"]`)?.textContent ?? null;
   }, id);
+}
+
+async function sourceContains(page, value) {
+  const source = page.locator(".cm-content");
+  if ((await source.innerText()).includes(value)) return true;
+  const locate = page.locator("#locate-code");
+  if (await locate.isVisible() && await locate.isEnabled()) {
+    await locate.click();
+    await page.waitForTimeout(50);
+  }
+  return (await source.innerText()).includes(value);
 }
 
 async function dragBy(page, locator, deltaX, deltaY) {
@@ -298,12 +310,12 @@ async function run() {
       const host = document.querySelector("#canvas-host");
       return host?.shadowRoot?.querySelector('[data-editor-id="title-001"]')?.textContent === "Inline canvas title";
     });
-    assert((await page.locator(".cm-content").innerText()).includes("Inline canvas title"), "Inline text edit did not synchronize to source code.");
+    assert(await sourceContains(page, "Inline canvas title"), "Inline text edit did not synchronize to source code.");
     await page.locator("#undo").click();
-    await page.waitForFunction(() => {
+    await page.waitForFunction((expectedTitle) => {
       const host = document.querySelector("#canvas-host");
-      return host?.shadowRoot?.querySelector('[data-editor-id="title-001"]')?.textContent === "Energy-Proportional LLM Inference";
-    });
+      return host?.shadowRoot?.querySelector('[data-editor-id="title-001"]')?.textContent === expectedTitle;
+    }, defaultHtmlTitle);
 
     await page.locator('#canvas-host [data-editor-id="title-001"]').dblclick();
     await inlineEditor.fill("Blur committed title");
@@ -313,15 +325,15 @@ async function run() {
       return host?.shadowRoot?.querySelector('[data-editor-id="title-001"]')?.textContent === "Blur committed title";
     });
     await page.locator("#undo").click();
-    await page.waitForFunction(() => {
+    await page.waitForFunction((expectedTitle) => {
       const host = document.querySelector("#canvas-host");
-      return host?.shadowRoot?.querySelector('[data-editor-id="title-001"]')?.textContent === "Energy-Proportional LLM Inference";
-    });
+      return host?.shadowRoot?.querySelector('[data-editor-id="title-001"]')?.textContent === expectedTitle;
+    }, defaultHtmlTitle);
 
     await page.locator('#canvas-host [data-editor-id="title-001"]').dblclick();
     await inlineEditor.fill("Cancelled inline title");
     await page.locator('#canvas-host .editor-inline-actions button[type="button"]').click();
-    assert((await shadowText(page, "title-001")) === "Energy-Proportional LLM Inference", "Cancelling an inline text edit changed the source document.");
+    assert((await shadowText(page, "title-001")) === defaultHtmlTitle, "Cancelling an inline text edit changed the source document.");
 
     await page.locator('#canvas-host [data-editor-id="title-001"]').dblclick();
     await inlineEditor.fill("Enter committed title");
@@ -331,10 +343,10 @@ async function run() {
       return host?.shadowRoot?.querySelector('[data-editor-id="title-001"]')?.textContent === "Enter committed title";
     });
     await page.locator("#undo").click();
-    await page.waitForFunction(() => {
+    await page.waitForFunction((expectedTitle) => {
       const host = document.querySelector("#canvas-host");
-      return host?.shadowRoot?.querySelector('[data-editor-id="title-001"]')?.textContent === "Energy-Proportional LLM Inference";
-    });
+      return host?.shadowRoot?.querySelector('[data-editor-id="title-001"]')?.textContent === expectedTitle;
+    }, defaultHtmlTitle);
 
     progress("checking HTML drag and resize");
     await page.locator('[data-layer-id="hero-image-001"]').click();
@@ -350,7 +362,7 @@ async function run() {
       const value = host?.shadowRoot?.querySelector('[data-editor-id="hero-image-001"]')?.getAttribute("data-editor-translate-x");
       return value !== null && value !== undefined && Math.abs(Number(value)) > 1;
     });
-    assert((await page.locator(".cm-content").innerText()).includes("data-editor-translate-x"), "Drag did not synchronize to source code.");
+    assert(await sourceContains(page, "data-editor-translate-x"), "Drag did not synchronize to source code.");
 
     const resizeHandle = page.locator(".moveable-control-box .moveable-se");
     await resizeHandle.waitFor({ state: "visible" });
@@ -367,12 +379,12 @@ async function run() {
       return host?.shadowRoot?.querySelector('[data-editor-id="hero-image-001"]')?.style.width ?? "";
     });
     assert(Boolean(resizedWidth) && Math.abs(Number.parseFloat(resizedWidth) - 480) > 1, `Resize did not change inline width (received ${resizedWidth || "empty"}).`);
-    assert((await page.locator(".cm-content").innerText()).includes("width:"), "Resize did not synchronize to source code.");
+    assert(await sourceContains(page, "width:"), "Resize did not synchronize to source code.");
 
     await page.locator('[data-layer-id="title-001"]').click();
     assert(await page.locator("#export-selection-action").isEnabled(), "Selection export did not enable after selecting an element.");
     await page.locator('[data-prop="text"]').waitFor();
-    assert((await shadowText(page, "title-001")) === "Energy-Proportional LLM Inference", "HTML title selection did not map to the Shadow DOM node.");
+    assert((await shadowText(page, "title-001")) === defaultHtmlTitle, "HTML title selection did not map to the Shadow DOM node.");
     assert(await page.locator('#inspector-content input[type="color"][data-prop="color"]').inputValue() === "#15213b", "The text-color swatch does not reflect the selected element's computed color.");
 
     progress("checking decimal geometry and ratio locking");
@@ -384,7 +396,7 @@ async function run() {
     await heightInput.press("Tab");
     await page.waitForFunction((expectedWidth) => Number(document.querySelector('[data-prop="width"]')?.value) === expectedWidth, initialWidth);
     assert(Number(await page.locator('[data-prop="height"]').inputValue()) === Math.round((initialHeight + 10.4) * 10) / 10, "Decimal height was not retained.");
-    assert((await page.locator(".cm-content").innerText()).includes(`height: ${Math.round((initialHeight + 10.4) * 10) / 10}px`), "Decimal geometry did not synchronize to source code.");
+    assert(await sourceContains(page, `height: ${Math.round((initialHeight + 10.4) * 10) / 10}px`), "Decimal geometry did not synchronize to source code.");
 
     await page.locator("#keep-ratio").check();
     const ratioWidth = Number(await page.locator('[data-prop="width"]').inputValue());
@@ -409,13 +421,13 @@ async function run() {
     await textEditor.press("Tab");
     await page.waitForFunction(() => document.querySelector("#sync-status")?.textContent === "代码已同步");
     assert((await shadowText(page, "title-001")) === "Browser smoke title", "Inspector text edit did not reach the canvas.");
-    assert((await page.locator(".cm-content").innerText()).includes("Browser smoke title"), "Visual edit did not reach the code view.");
+    assert(await sourceContains(page, "Browser smoke title"), "Visual edit did not reach the code view.");
 
     await page.locator("#undo").click();
-    await page.waitForFunction(() => {
+    await page.waitForFunction((expectedTitle) => {
       const host = document.querySelector("#canvas-host");
-      return host?.shadowRoot?.querySelector('[data-editor-id="title-001"]')?.textContent === "Energy-Proportional LLM Inference";
-    });
+      return host?.shadowRoot?.querySelector('[data-editor-id="title-001"]')?.textContent === expectedTitle;
+    }, defaultHtmlTitle);
 
     progress("checking friendly typography, stroke, and shadow controls");
     const fontSelect = page.locator('[data-prop="fontCatalog"]');
@@ -1221,7 +1233,7 @@ async function run() {
     await page.waitForFunction(() => document.querySelector("#build-status")?.textContent === "Build 2 / 2");
     assert((await shadowText(page, "demo-copy-1"))?.includes("Edit real HTML"), "Undo did not restore Build content and observation context.");
     await page.locator("#redo").click();
-    assert((await page.locator(".cm-content").innerText()).includes("Build 2 edited copy"), "Redo did not restore the Build-state text edit in source.");
+    assert(await sourceContains(page, "Build 2 edited copy"), "Redo did not restore the Build-state text edit in source.");
 
     await page.locator('[data-activity-view="pages"]').click();
     const thumbnailText = await page.locator('[data-thumbnail-host="1"]').evaluate((host) => host.shadowRoot?.textContent ?? "");
@@ -1262,7 +1274,7 @@ async function run() {
 
     await page.locator("#canvas-preset").selectOption("1024x768");
     await page.waitForFunction(() => document.querySelector("#canvas-width")?.value === "1024" && document.querySelector("#canvas-height")?.value === "768");
-    assert((await page.locator(".cm-content").innerText()).includes('width="1024"'), "The 4:3 preset did not update deck metadata in source code.");
+    assert(await sourceContains(page, 'width="1024"'), "The 4:3 preset did not update deck metadata in source code.");
 
     await page.locator("#preview-presentation").click();
     await page.locator("#preview-choice-dialog").waitFor({ state: "visible" });
