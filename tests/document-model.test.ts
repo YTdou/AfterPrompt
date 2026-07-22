@@ -41,14 +41,29 @@ describe("SourceDocument", () => {
     expect(model.warnings.join(" ")).toContain("已移除");
   });
 
+  it("ships a multi-page HTML slide example with Build groups", () => {
+    const model = SourceDocument.parse(slideSource, "ai-slide.html");
+    const pages = model.pages();
+
+    expect(pages.length).toBeGreaterThanOrEqual(3);
+    expect(pages.slice(0, 3).map(({ label }) => label)).toEqual([
+      "Overview",
+      "Source in the loop",
+      "From draft to final",
+    ]);
+    expect(pages.every(({ index }) => model.buildSequence(index).steps.length > 0)).toBe(true);
+    expect(model.buildSequence(0).steps).toEqual([1, 2, 3, 4, 5]);
+    expect(model.find("metric-card-003")).not.toBeNull();
+  });
+
   it("applies local HTML commands by stable element ID", () => {
     const model = SourceDocument.parse(slideSource, "ai-slide.html");
-    model.apply({ action: "replaceText", elementId: "title-001", text: "Energy-Aware Serving" });
+    model.apply({ action: "replaceText", elementId: "title-001", text: "Source-First Delivery" });
     model.apply({ action: "moveElementBy", elementId: "hero-image-001", dx: 100, dy: 5 });
     model.apply({ action: "updateElement", elementId: "accent-block-001", changes: { backgroundColor: "#244a86", borderRadius: 30 } });
     model.apply({ action: "deleteElement", elementId: "icon-001" });
 
-    expect(model.find("title-001")?.textContent).toBe("Energy-Aware Serving");
+    expect(model.find("title-001")?.textContent).toBe("Source-First Delivery");
     expect(getTransformValues(model.find("hero-image-001")!).x).toBe(100);
     expect(getTransformValues(model.find("hero-image-001")!).y).toBe(5);
     expect((model.find("accent-block-001") as HTMLElement).style.backgroundColor).toBe("rgb(36, 74, 134)");

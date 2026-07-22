@@ -3,40 +3,178 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Energy-Proportional LLM Inference</title>
+    <title>AfterPrompt — Source-first visual editor</title>
     <style>
       :root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #15213b; }
       * { box-sizing: border-box; }
-      body { position: relative; margin: 0; overflow: hidden; background: #f4f7ff; }
+      html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+      body { position: relative; background: #f4f7ff; }
+      .slides { position: relative; display: block; width: 1280px; height: 720px; overflow: hidden; }
+      .slides > section { position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden; }
+
       .orb { position: absolute; border-radius: 999px; filter: blur(2px); opacity: .55; }
-      .eyebrow { position: absolute; left: 84px; top: 60px; margin: 0; color: #4f6da8; font-size: 16px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
-      h1 { position: absolute; left: 80px; top: 106px; width: 650px; margin: 0; font-size: 62px; line-height: 1.03; letter-spacing: -.045em; }
-      .lead { position: absolute; left: 84px; top: 334px; width: 570px; margin: 0; color: #52617f; font-size: 22px; line-height: 1.48; }
-      .detail { position: absolute; left: 84px; top: 464px; width: 520px; margin: 0; color: #78859f; font-size: 16px; line-height: 1.5; }
-      .metric { position: absolute; display: flex; align-items: baseline; gap: 10px; left: 84px; top: 582px; }
-      .metric strong { color: #3b69dc; font-size: 46px; letter-spacing: -.04em; }
-      .metric span { color: #66738e; font-size: 15px; }
-      .hero-image { position: absolute; left: 720px; top: 130px; width: 480px; height: 332px; object-fit: cover; border-radius: 28px; box-shadow: 0 28px 70px rgba(48, 67, 116, .25); }
-      .accent-block { position: absolute; left: 764px; top: 514px; width: 360px; height: 104px; border-radius: 24px; background: #172653; box-shadow: 0 16px 42px rgba(31, 49, 99, .2); }
-      .accent-block p { margin: 21px 70px 0 24px; color: #dfe8ff; font-size: 16px; line-height: 1.35; }
-      .icon { position: absolute; right: 20px; top: 24px; width: 48px; height: 48px; }
+      .grid { position: absolute; inset: 0; opacity: .3; background-image: linear-gradient(rgba(94, 136, 255, .12) 1px, transparent 1px), linear-gradient(90deg, rgba(94, 136, 255, .12) 1px, transparent 1px); background-size: 48px 48px; }
+      .kicker { position: absolute; left: 84px; top: 58px; margin: 0; color: #4f6da8; font-size: 16px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
+      .page-number { position: absolute; right: 62px; bottom: 42px; color: rgba(38, 54, 88, .38); font-size: 17px; font-weight: 750; letter-spacing: .08em; }
+      h1, h2 { margin: 0; letter-spacing: -.045em; }
+      .lead, .copy { margin: 0; color: #52617f; font-size: 22px; line-height: 1.48; }
+
+      .title-slide { background: #f4f7ff; }
+      .title-slide .orb-blue { width: 360px; height: 360px; left: -180px; top: -170px; background: #b7cbff; }
+      .title-slide .orb-purple { width: 420px; height: 420px; right: -210px; bottom: -240px; background: #d8c8ff; }
+      .title-slide h1 { position: absolute; left: 80px; top: 104px; width: 610px; font-size: 62px; line-height: 1.03; }
+      .title-slide .lead { position: absolute; left: 84px; top: 292px; width: 560px; }
+      .title-slide .detail { position: absolute; left: 84px; top: 398px; width: 540px; margin: 0; color: #78859f; font-size: 16px; line-height: 1.5; }
+      .topic-tags { position: absolute; left: 84px; top: 470px; display: flex; gap: 9px; }
+      .topic-tags span { padding: 8px 12px; border: 1px solid #cbd7f2; border-radius: 999px; color: #4b6397; background: rgba(255, 255, 255, .62); font-size: 13px; font-weight: 700; }
+      .hero-frame { position: absolute; left: 720px; top: 116px; width: 480px; height: 324px; overflow: hidden; border-radius: 28px; background: #e6edff; box-shadow: 0 28px 70px rgba(48, 67, 116, .25); }
+      .hero-image { width: 100%; height: 100%; }
+      .hero-caption { position: absolute; right: 18px; bottom: 16px; left: 18px; padding: 10px 13px; border: 1px solid rgba(255, 255, 255, .5); border-radius: 12px; color: #eef3ff; background: rgba(23, 38, 83, .78); font-size: 12px; line-height: 1.35; }
+      .metric-row { position: absolute; left: 84px; top: 536px; display: flex; gap: 12px; width: 588px; }
+      .metric-card { flex: 1; min-height: 104px; padding: 16px 17px; border: 1px solid #d7e0f4; border-radius: 18px; background: rgba(255, 255, 255, .74); box-shadow: 0 12px 28px rgba(63, 84, 137, .08); }
+      .metric-card strong { display: block; color: #3b69dc; font-size: 25px; letter-spacing: -.04em; }
+      .metric-card span { display: block; margin-top: 5px; color: #66738e; font-size: 12px; line-height: 1.35; }
+      .accent-block { position: absolute; left: 720px; top: 516px; width: 480px; height: 126px; padding: 20px 70px 18px 24px; border-radius: 24px; background: #172653; box-shadow: 0 16px 42px rgba(31, 49, 99, .2); }
+      .accent-block .accent-label { display: block; margin-bottom: 6px; color: #82e2bf; font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+      .accent-block p { margin: 0; color: #dfe8ff; font-size: 16px; line-height: 1.35; }
+      .icon { position: absolute; right: 20px; top: 35px; width: 48px; height: 48px; }
+
+      .analysis-slide { background: #f8faff; }
+      .analysis-slide .orb { width: 520px; height: 520px; right: -260px; top: -180px; background: #dbe5ff; }
+      .analysis-slide h2 { position: absolute; left: 80px; top: 116px; width: 560px; font-size: 56px; line-height: 1.05; }
+      .analysis-slide .copy { position: absolute; left: 84px; top: 286px; width: 520px; }
+      .analysis-slide .annotation { position: absolute; left: 84px; top: 410px; width: 490px; padding-left: 16px; border-left: 3px solid #79e0b9; color: #516383; font-size: 16px; line-height: 1.5; }
+      .chart-card { position: absolute; right: 80px; top: 112px; width: 470px; height: 330px; padding: 25px 27px; border: 1px solid #d7e0f4; border-radius: 24px; background: #fff; box-shadow: 0 22px 52px rgba(63, 84, 137, .12); }
+      .chart-heading { margin: 0 0 25px; color: #263b68; font-size: 17px; font-weight: 800; }
+      .bar-row { display: grid; grid-template-columns: 100px 1fr 54px; align-items: center; gap: 12px; margin: 22px 0; color: #657493; font-size: 13px; }
+      .bar-row strong { color: #263b68; font-size: 14px; text-align: right; }
+      .bar-track { height: 13px; overflow: hidden; border-radius: 999px; background: #edf1fb; }
+      .bar-fill { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #5e88ff, #79e0b9); }
+      .chart-note { position: absolute; right: 27px; bottom: 23px; left: 27px; color: #8a96ad; font-size: 12px; }
+      .insight-grid { position: absolute; left: 80px; right: 80px; bottom: 84px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+      .insight-card { min-height: 128px; padding: 19px 20px; border-radius: 18px; background: #172653; color: #dfe8ff; }
+      .insight-card strong { display: block; margin-bottom: 8px; color: #82e2bf; font-size: 26px; letter-spacing: -.03em; }
+      .insight-card span { display: block; color: #c7d3ec; font-size: 13px; line-height: 1.4; }
+
+      .closing-slide { color: #fff; background: #172653; }
+      .closing-slide .orb { width: 620px; height: 620px; right: -190px; bottom: -330px; background: radial-gradient(circle at 35% 30%, #5e88ff, #694bc0); opacity: .72; }
+      .closing-slide .kicker { color: #82e2bf; }
+      .closing-slide .page-number { color: rgba(232, 239, 255, .52); }
+      .closing-slide h2 { position: absolute; left: 80px; top: 112px; width: 720px; font-size: 58px; line-height: 1.05; }
+      .closing-slide .copy { position: absolute; left: 84px; top: 258px; width: 640px; color: #c9d5ee; }
+      .loop { position: absolute; left: 80px; right: 80px; top: 370px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+      .loop-card { min-height: 154px; padding: 20px; border: 1px solid rgba(174, 194, 239, .28); border-radius: 20px; background: rgba(255, 255, 255, .08); }
+      .loop-card .step { display: block; margin-bottom: 20px; color: #82e2bf; font-size: 12px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+      .loop-card strong { display: block; margin-bottom: 8px; color: #fff; font-size: 21px; letter-spacing: -.02em; }
+      .loop-card p { margin: 0; color: #c9d5ee; font-size: 13px; line-height: 1.4; }
+      .final-note { position: absolute; right: 80px; bottom: 42px; color: #dfe8ff; font-size: 13px; font-weight: 700; }
     </style>
   </head>
   <body data-editor-id="slide-001" data-editor-name="Slide" data-editor-canvas-width="1280" data-editor-canvas-height="720">
-    <div data-editor-id="orb-blue" class="orb" style="width: 360px; height: 360px; left: -180px; top: -170px; background: #b7cbff;"></div>
-    <div data-editor-id="orb-purple" class="orb" style="width: 420px; height: 420px; right: -210px; bottom: -240px; background: #d8c8ff;"></div>
-    <p data-editor-id="eyebrow-001" class="eyebrow">Systems research · 2026</p>
-    <h1 data-editor-id="title-001" data-editor-name="Main title">Energy-Proportional LLM Inference</h1>
-    <p data-editor-id="lead-001" class="lead">Match GPU energy use to real inference demand without sacrificing service-level objectives.</p>
-    <p data-editor-id="detail-001" class="detail">A source-first slide generated by AI, then refined through precise visual operations. Every object remains a real DOM or SVG node.</p>
-    <div data-editor-id="metric-001" class="metric"><strong>31%</strong><span>lower idle energy in the example workload</span></div>
-    <img data-editor-id="hero-image-001" data-editor-name="GPU illustration" class="hero-image" src="assets/energy-illustration.svg" alt="Stylized GPU energy illustration" />
-    <div data-editor-id="accent-block-001" data-editor-name="Takeaway card" class="accent-block">
-      <p data-editor-id="takeaway-001">Edit the message, not the whole slide.</p>
-      <svg data-editor-id="icon-001" class="icon" viewBox="0 0 48 48" aria-label="Energy icon">
-        <circle data-editor-id="icon-ring-001" cx="24" cy="24" r="21" fill="none" stroke="#789eff" stroke-width="2" />
-        <path data-editor-id="icon-bolt-001" d="M27 7 15 27h9l-3 14 13-22h-9z" fill="#79e0b9" />
-      </svg>
-    </div>
+    <main data-editor-id="deck-root-001" class="slides" aria-label="AfterPrompt source-first product overview">
+      <section data-editor-id="page-001" data-label="Overview" class="title-slide">
+        <div data-editor-id="orb-blue-001" class="orb orb-blue"></div>
+        <div data-editor-id="orb-purple-001" class="orb orb-purple"></div>
+        <div data-editor-id="grid-001" class="grid"></div>
+        <p data-editor-id="eyebrow-001" class="kicker">AfterPrompt · product overview</p>
+        <span data-editor-id="page-number-001" class="page-number">01 / 03</span>
+        <h1 data-editor-id="title-001" data-editor-name="Main title" data-build="1">Visually refine what AI generates.</h1>
+        <p data-editor-id="lead-001" class="lead" data-build="2">A source-first visual editor for AI-generated HTML, slides, and SVG.</p>
+        <p data-editor-id="detail-001" class="detail" data-build="2">Select real document nodes, tune the visual result, and keep the readable source in the loop from first draft to final export.</p>
+        <div data-editor-id="topic-tags-001" class="topic-tags" data-build="2">
+          <span data-editor-id="topic-tag-001">HTML</span>
+          <span data-editor-id="topic-tag-002">SVG</span>
+          <span data-editor-id="topic-tag-003">source-first</span>
+        </div>
+        <div data-editor-id="hero-frame-001" class="hero-frame" data-build="3">
+          <svg data-editor-id="hero-image-001" data-editor-name="Editor preview" class="hero-image" viewBox="0 0 480 324" role="img" aria-label="AfterPrompt editor preview">
+            <rect data-editor-id="hero-bg-001" width="480" height="324" fill="#f4f7ff" />
+            <rect data-editor-id="hero-sidebar-001" width="82" height="324" fill="#172653" />
+            <circle data-editor-id="hero-logo-001" cx="28" cy="28" r="13" fill="#79e0b9" />
+            <path data-editor-id="hero-logo-mark-001" d="M23 28h10M28 23v10" stroke="#172653" stroke-width="2" stroke-linecap="round" />
+            <rect data-editor-id="hero-nav-001" x="18" y="65" width="46" height="8" rx="4" fill="#8ea8e8" />
+            <rect data-editor-id="hero-nav-002" x="18" y="88" width="36" height="8" rx="4" fill="#526da9" />
+            <rect data-editor-id="hero-nav-003" x="18" y="111" width="43" height="8" rx="4" fill="#526da9" />
+            <rect data-editor-id="hero-canvas-001" x="105" y="25" width="350" height="274" rx="14" fill="#ffffff" stroke="#d7e0f4" />
+            <rect data-editor-id="hero-toolbar-001" x="105" y="25" width="350" height="30" rx="14" fill="#edf2ff" />
+            <rect data-editor-id="hero-toolbar-line-001" x="124" y="37" width="75" height="7" rx="3.5" fill="#8da5df" />
+            <circle data-editor-id="hero-toolbar-dot-001" cx="429" cy="40" r="5" fill="#79e0b9" />
+            <rect data-editor-id="hero-card-001" x="132" y="81" width="156" height="92" rx="10" fill="#dce6ff" />
+            <rect data-editor-id="hero-card-002" x="307" y="81" width="117" height="12" rx="6" fill="#263b68" />
+            <rect data-editor-id="hero-card-003" x="307" y="106" width="92" height="8" rx="4" fill="#a6b6d7" />
+            <rect data-editor-id="hero-card-004" x="307" y="124" width="70" height="8" rx="4" fill="#a6b6d7" />
+            <rect data-editor-id="hero-selection-001" x="125" y="73" width="170" height="108" rx="12" fill="none" stroke="#5e88ff" stroke-width="2" stroke-dasharray="6 4" />
+            <circle data-editor-id="hero-selection-handle-001" cx="210" cy="73" r="5" fill="#5e88ff" />
+            <rect data-editor-id="hero-source-001" x="132" y="209" width="292" height="10" rx="5" fill="#dbe5ff" />
+            <rect data-editor-id="hero-source-002" x="132" y="229" width="220" height="10" rx="5" fill="#e7ecf8" />
+            <rect data-editor-id="hero-source-003" x="132" y="249" width="258" height="10" rx="5" fill="#e7ecf8" />
+            <rect data-editor-id="hero-build-001" x="362" y="265" width="62" height="19" rx="9.5" fill="#172653" />
+            <circle data-editor-id="hero-build-dot-001" cx="375" cy="274.5" r="3.5" fill="#79e0b9" />
+            <rect data-editor-id="hero-build-line-001" x="384" y="271" width="28" height="7" rx="3.5" fill="#dfe8ff" />
+          </svg>
+          <span data-editor-id="hero-caption-001" class="hero-caption">Real DOM on canvas · readable source · visual control.</span>
+        </div>
+        <div data-editor-id="metric-001" class="metric-row" data-build="4">
+          <div data-editor-id="metric-card-001" class="metric-card"><strong>HTML</strong><span>standard pages and slide decks</span></div>
+          <div data-editor-id="metric-card-002" class="metric-card"><strong>SVG</strong><span>native shapes stay editable</span></div>
+          <div data-editor-id="metric-card-003" class="metric-card"><strong>Build</strong><span>page order and reveal steps</span></div>
+        </div>
+        <div data-editor-id="accent-block-001" data-editor-name="Takeaway card" class="accent-block" data-build="5">
+          <span data-editor-id="accent-label-001" class="accent-label">Product promise</span>
+          <p data-editor-id="takeaway-001">Turn an AI draft into a human-controlled, standard file.</p>
+          <svg data-editor-id="icon-001" class="icon" viewBox="0 0 48 48" aria-label="Editable source icon">
+            <circle data-editor-id="icon-ring-001" cx="24" cy="24" r="21" fill="none" stroke="#789eff" stroke-width="2" />
+            <path data-editor-id="icon-mark-001" d="m15 25 6 6 12-14" fill="none" stroke="#79e0b9" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </div>
+      </section>
+
+      <section data-editor-id="page-002" data-label="Source in the loop" class="analysis-slide">
+        <div data-editor-id="analysis-orb-001" class="orb"></div>
+        <p data-editor-id="eyebrow-002" class="kicker">01 · Source in the loop</p>
+        <span data-editor-id="page-number-002" class="page-number">02 / 03</span>
+        <h2 data-editor-id="title-002" data-editor-name="Workflow title" data-build="1">One document, three ways to work.</h2>
+        <p data-editor-id="copy-002" class="copy" data-build="2">Bring a standard artifact into the editor, make precise visual changes on real DOM/SVG nodes, and keep the underlying source available at every step.</p>
+        <p data-editor-id="annotation-002" class="annotation" data-build="2">The canvas is a view of the document—not a screenshot or an opaque replacement.</p>
+        <div data-editor-id="chart-002" class="chart-card" data-build="3">
+          <p data-editor-id="chart-heading-002" class="chart-heading">What stays editable</p>
+          <div data-editor-id="bar-row-001" class="bar-row"><span>HTML</span><span class="bar-track"><span data-editor-id="bar-fill-001" class="bar-fill" style="width: 94%;"></span></span><strong>nodes</strong></div>
+          <div data-editor-id="bar-row-002" class="bar-row"><span>SVG</span><span class="bar-track"><span data-editor-id="bar-fill-002" class="bar-fill" style="width: 78%;"></span></span><strong>shapes</strong></div>
+          <div data-editor-id="bar-row-003" class="bar-row"><span>Build</span><span class="bar-track"><span data-editor-id="bar-fill-003" class="bar-fill" style="width: 62%;"></span></span><strong>steps</strong></div>
+          <span data-editor-id="chart-note-002" class="chart-note">One shared document model powers canvas, source, preview, and export.</span>
+        </div>
+        <div data-editor-id="insight-grid-002" class="insight-grid" data-build="4">
+          <div data-editor-id="insight-card-001" class="insight-card"><strong>Import</strong><span>Open HTML, SVG, local projects, or saved visual projects.</span></div>
+          <div data-editor-id="insight-card-002" class="insight-card"><strong>Refine</strong><span>Select real nodes, edit text and styles, and manage pages and Build.</span></div>
+          <div data-editor-id="insight-card-003" class="insight-card"><strong>Inspect</strong><span>Apply source changes explicitly and keep invalid drafts off the canvas.</span></div>
+        </div>
+      </section>
+
+      <section data-editor-id="page-003" data-label="From draft to final" class="closing-slide">
+        <div data-editor-id="closing-orb-001" class="orb"></div>
+        <p data-editor-id="eyebrow-003" class="kicker">02 · From draft to final</p>
+        <span data-editor-id="page-number-003" class="page-number">03 / 03</span>
+        <h2 data-editor-id="title-003" data-editor-name="Closing title" data-build="1">Keep the result standard and under control.</h2>
+        <p data-editor-id="copy-003" class="copy" data-build="2">AfterPrompt keeps the visual pass reversible and the deliverable readable, so the final artifact remains standard HTML or SVG.</p>
+        <div data-editor-id="loop-003" class="loop">
+          <article data-editor-id="loop-card-001" class="loop-card" data-build="3">
+            <span data-editor-id="loop-step-001" class="step">Step 01</span>
+            <strong data-editor-id="loop-title-001">Import</strong>
+            <p data-editor-id="loop-copy-001">Open the generated HTML, SVG, or local project.</p>
+          </article>
+          <article data-editor-id="loop-card-002" class="loop-card" data-build="4">
+            <span data-editor-id="loop-step-002" class="step">Step 02</span>
+            <strong data-editor-id="loop-title-002">Refine</strong>
+            <p data-editor-id="loop-copy-002">Adjust the visual result on stable editor IDs.</p>
+          </article>
+          <article data-editor-id="loop-card-003" class="loop-card" data-build="5">
+            <span data-editor-id="loop-step-003" class="step">Step 03</span>
+            <strong data-editor-id="loop-title-003">Deliver</strong>
+            <p data-editor-id="loop-copy-003">Preview or export standard files with source in view.</p>
+          </article>
+        </div>
+        <p data-editor-id="final-note-003" class="final-note" data-build="6">Standard HTML · readable source · reversible edits</p>
+      </section>
+    </main>
   </body>
 </html>

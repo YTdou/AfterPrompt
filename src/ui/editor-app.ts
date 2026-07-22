@@ -524,6 +524,7 @@ export class EditorApp {
   constructor(private readonly host: HTMLElement) {
     host.innerHTML = appTemplate;
     this.model = SourceDocument.parse(defaultHtml, "ai-slide.html");
+    this.setAllBuildsComplete();
     this.history = new History(
       this.createSnapshot(),
       snapshotsEqual,
@@ -951,6 +952,17 @@ export class EditorApp {
 
   private activePageKey(): string {
     return this.model.pages()[this.activePageIndex]?.id ?? "__document__";
+  }
+
+  private setAllBuildsComplete(): void {
+    const pages = this.model.pages();
+    if (!pages.length) {
+      this.buildStepsByPage.set("__document__", this.model.buildSequence(0).maxStep);
+      return;
+    }
+    pages.forEach(({ id, index }) => {
+      this.buildStepsByPage.set(id, this.model.buildSequence(index).maxStep);
+    });
   }
 
   private activeBuildStep(sequence = this.model.buildSequence(this.activePageIndex)): number {
@@ -2007,10 +2019,10 @@ export class EditorApp {
   private loadExample(kind: string): void {
     if (kind === "svg") this.loadSource(defaultSvg, "shapes.svg", "examples/shapes.svg", new ProjectAssets());
     else if (kind === "deck") this.loadSource(defaultDeck, "multi-page-deck.html", "examples/multi-page-deck.html", exampleAssets());
-    else this.loadSource(defaultHtml, "ai-slide.html", "examples/ai-slide.html", exampleAssets());
+    else this.loadSource(defaultHtml, "ai-slide.html", "examples/ai-slide.html", exampleAssets(), undefined, [], true);
   }
 
-  private loadSource(source: string, sourceName: string, sourcePath: string, assets: ProjectAssets, canvas?: { width: number; height: number }, operations: OperationLogEntry[] = []): void {
+  private loadSource(source: string, sourceName: string, sourcePath: string, assets: ProjectAssets, canvas?: { width: number; height: number }, operations: OperationLogEntry[] = [], initialBuildsCompleted = false): void {
     try {
       const model = SourceDocument.parse(source, sourceName, undefined, canvas);
       this.assets.dispose();
@@ -2023,6 +2035,7 @@ export class EditorApp {
       this.pendingLayerRevealId = null;
       this.activePageIndex = 0;
       this.buildStepsByPage.clear();
+      if (initialBuildsCompleted) this.setAllBuildsComplete();
       this.buildViewMode = "playback";
       this.history.reset(this.createSnapshot(), "Loaded document");
       this.renderDocument(true);
