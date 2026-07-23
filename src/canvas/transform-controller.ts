@@ -32,6 +32,13 @@ export class TransformController {
   private moveableIsGroup = false;
   private kind: DocumentKind = "html";
   private dragGesture: { startX: number; startY: number; activated: boolean } | null = null;
+  private svgDrag: {
+    pointerId: number;
+    startX: number;
+    startY: number;
+    activated: boolean;
+    targets: Array<{ element: Element; transform: TransformValues }>;
+  } | null = null;
   private readonly dragThresholdPx = 4;
   private resizeStart = new Map<string, {
     bounds: { width: number; height: number };
@@ -44,6 +51,11 @@ export class TransformController {
     private readonly renderer: CanvasRenderer,
     private readonly callbacks: TransformCallbacks,
   ) {
+    this.container.addEventListener("pointerdown", this.beginSvgTargetDrag, { capture: true });
+    this.container.addEventListener("pointermove", this.updateSvgTargetDrag, { capture: true });
+    this.container.addEventListener("pointerup", this.finishSvgTargetDrag, { capture: true });
+    this.container.addEventListener("pointercancel", this.finishSvgTargetDrag, { capture: true });
+    this.container.addEventListener("mousedown", this.blockMoveableMouseDown, { capture: true });
     this.moveable = this.createMoveable();
     this.installEvents();
     this.container.addEventListener("mousedown", this.beginMoveableTargetDrag, { capture: true });
@@ -144,14 +156,74 @@ export class TransformController {
   }
 
   destroy(): void {
+    this.container.removeEventListener("pointerdown", this.beginSvgTargetDrag, { capture: true });
+    this.container.removeEventListener("pointermove", this.updateSvgTargetDrag, { capture: true });
+    this.container.removeEventListener("pointerup", this.finishSvgTargetDrag, { capture: true });
+    this.container.removeEventListener("pointercancel", this.finishSvgTargetDrag, { capture: true });
+    this.container.removeEventListener("mousedown", this.blockMoveableMouseDown, { capture: true });
     this.container.removeEventListener("mousedown", this.beginMoveableTargetDrag, { capture: true });
     this.container.removeEventListener("pointerdown", this.beginGenericSvgResize, { capture: true });
     this.moveable.destroy();
   }
 
+  private beginSvgTargetDrag = (event: PointerEvent): void => {
+    if (event.button !== 0 || !event.isPrimary || this.selectedIds.length !== 1) return;
+    if (event.composedPath().some((node) => node instanceof Element && node.classList.contains("moveable-control"))) return;
+    const selectedTarget = this.renderer.element(this.selectedIds[0]!);
+    if (!(selectedTarget instanceof SVGElement) || !event.composedPath().includes(selectedTarget)) return;
+    this.svgDrag = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      activated: false,
+      targets: this.bothTargets(selectedTarget).map((element) => ({ element, transform: getTransformValues(element) })),
+    };
+    this.container.setPointerCapture(event.pointerId);
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  };
+
+  private updateSvgTargetDrag = (event: PointerEvent): void => {
+    const drag = this.svgDrag;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const zoom = this.moveable.zoom ?? 1;
+    const deltaX = (event.clientX - drag.startX) * zoom;
+    const deltaY = (event.clientY - drag.startY) * zoom;
+    if (!drag.activated) {
+      if (Math.hypot(deltaX, deltaY) < this.dragThresholdPx) return;
+      drag.activated = true;
+      this.callbacks.onStart("Move element");
+    }
+    for (const target of drag.targets) {
+      setElementTranslation(target.element, this.kindOf(target.element), target.transform.x + deltaX, target.transform.y + deltaY);
+    }
+    this.callbacks.onChange();
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  private finishSvgTargetDrag = (event: PointerEvent): void => {
+    const drag = this.svgDrag;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    this.svgDrag = null;
+    if (this.container.hasPointerCapture(event.pointerId)) this.container.releasePointerCapture(event.pointerId);
+    if (drag.activated) this.callbacks.onEnd("Move element");
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  private blockMoveableMouseDown = (event: MouseEvent): void => {
+    if (!this.svgDrag || event.button !== 0) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  };
+
   private beginMoveableTargetDrag = (event: MouseEvent): void => {
     if (event.button !== 0) return;
-    const editableTarget = event.composedPath().find((node) => node instanceof Element && node.hasAttribute("data-editor-id"));
+    const selectedTarget = this.selectedIds.length === 1 ? this.renderer.element(this.selectedIds[0]!) : null;
+    const editableTarget = selectedTarget && event.composedPath().includes(selectedTarget)
+      ? selectedTarget
+      : event.composedPath().find((node) => node instanceof Element && node.hasAttribute("data-editor-id"));
     if (editableTarget instanceof Element) this.moveable.dragStart(event, editableTarget);
   };
 

@@ -200,7 +200,7 @@ export function auditPresentationDocument(
 
   const shouldWarnLegacy = options.warnIfContractMissing ?? true;
   if (!contract && !parsed.error && shouldWarnLegacy && kind === "html" && isPresentationLike(document)) {
-    issues.push(issue("WARNING", "contract-absent", "文件没有编辑契约，按 legacy compatibility mode 导入；导出时会生成 v1 contract。"));
+    issues.push(issue("WARNING", "contract-absent", "文件没有编辑契约，按旧版兼容模式导入；导出时会生成 v1 契约。"));
   }
 
   auditStableIds(document, projection, contract, issues);

@@ -51,6 +51,7 @@ import {
 import type { Bounds, BuildViewMode, DocumentKind, DocumentPage, DocumentSnapshot, ElementTreeNode, OperationLogEntry, PageBuildSequence } from "../core/types";
 import { SourceCodeEditor } from "./code-editor";
 import { FragmentWorkspace, type FragmentWorkspaceContext } from "./fragment-workspace";
+import { UiLocalizer, type UiLocale } from "./i18n";
 import { EditorLayoutController } from "./layout-controller";
 
 type InspectorGroup = "design" | "build" | "advanced";
@@ -244,6 +245,10 @@ const appTemplate = `
         <button id="redo" class="icon-button" title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="重做">↷</button>
       </div>
       <div class="toolbar toolbar-export">
+        <div class="language-switcher" role="group" aria-label="语言">
+          <button type="button" data-locale-switch="zh-CN" aria-pressed="false" data-l10n-skip>中文</button>
+          <button type="button" data-locale-switch="en" aria-pressed="false" data-l10n-skip>EN</button>
+        </div>
         <button id="preview-presentation" class="button">演示预览</button>
         <details id="export-menu" class="io-menu io-menu-end" data-io-menu>
           <summary class="button primary">导出 ${chevronIcon}</summary>
@@ -410,14 +415,14 @@ const appTemplate = `
 
       <aside id="inspector-panel" class="panel inspector-panel">
         <button class="panel-collapse-toggle" data-layout-toggle="inspector" aria-controls="inspector-panel" aria-label="折叠或展开编排与属性面板"></button>
-        <div class="panel-heading"><div><span class="eyebrow">INSPECTOR</span><h2>检查器</h2></div></div>
+        <div class="panel-heading"><div><h2>检查器</h2></div></div>
         <div class="inspector-tabs" role="group" aria-label="检查器分组">
           <button type="button" data-inspector-group="design" aria-controls="inspector-content">Design</button>
           <button type="button" data-inspector-group="build" aria-controls="build-panel">Build</button>
           <button type="button" data-inspector-group="advanced" aria-controls="inspector-content">Advanced</button>
         </div>
         <section id="build-panel" class="build-panel" hidden>
-          <div class="build-panel-heading"><span class="eyebrow">BUILD SEQUENCE</span><strong>放映顺序编排</strong></div>
+          <div class="build-panel-heading"><strong>放映顺序编排</strong></div>
           <div id="build-selection-controls" class="build-selection-controls"></div>
           <div id="build-groups" class="build-groups"></div>
           <div id="build-warnings" class="build-warnings" hidden></div>
@@ -433,7 +438,7 @@ const appTemplate = `
     <section id="code-drawer" class="code-drawer is-collapsed">
       <div class="code-toolbar">
         <div>
-          <span class="source-identity"><span class="eyebrow">SOURCE</span><strong id="code-file-name">untitled.html</strong></span>
+          <span class="source-identity"><span class="eyebrow">SOURCE</span><strong id="code-file-name" data-l10n-skip>untitled.html</strong></span>
           <span class="source-draft-note">草稿 · 仅“应用代码”后更新画布</span>
           <span id="code-error" class="code-error" role="alert"></span>
         </div>
@@ -519,10 +524,14 @@ export class EditorApp {
   private thumbnailObserver: IntersectionObserver | null = null;
   private readonly thumbnailRenderers = new Map<number, CanvasRenderer>();
   private readonly inspectorGroups = this.restoreInspectorGroups();
+  private readonly localizer: UiLocalizer;
   private keepRatio = false;
 
   constructor(private readonly host: HTMLElement) {
+    this.localizer = new UiLocalizer();
     host.innerHTML = appTemplate;
+    this.localizer.bind(host);
+    this.updateLanguageSwitcher();
     this.model = SourceDocument.parse(defaultHtml, "ai-slide.html");
     this.setAllBuildsComplete();
     this.history = new History(
@@ -539,6 +548,7 @@ export class EditorApp {
         this.model.apply({ action: "replaceText", elementId: id, text });
       }),
       onWarning: (message) => this.showNotice(message),
+      localize: (message) => this.t(message),
     });
 
     this.transform = new TransformController(this.get("#canvas-transform"), this.renderer, {
@@ -556,11 +566,12 @@ export class EditorApp {
         if (canvasGeometryChanged) this.fitCanvas();
         else this.transform.update();
       },
+      localize: (message) => this.t(message),
     });
 
     this.codeEditor = new SourceCodeEditor(this.get("#code-editor"), () => {
       this.codeDirty = true;
-      this.get("#sync-status").textContent = "代码有未应用修改";
+      this.get("#sync-status").textContent = this.t("代码有未应用修改");
       this.get("#sync-status").className = "sync-dirty";
     });
 
@@ -572,7 +583,7 @@ export class EditorApp {
       }),
       toast: (message, error) => this.toast(message, error),
       notice: (message) => this.showNotice(message),
-    });
+    }, this.localizer);
 
     this.bindEvents();
     this.renderDocument(true);
@@ -585,7 +596,34 @@ export class EditorApp {
     return element;
   }
 
+  private t(value: string): string {
+    return this.localizer.t(value);
+  }
+
+  private updateLanguageSwitcher(): void {
+    this.host.querySelectorAll<HTMLButtonElement>("[data-locale-switch]").forEach((button) => {
+      const locale = button.dataset.localeSwitch as UiLocale;
+      button.setAttribute("aria-pressed", String(locale === this.localizer.locale));
+    });
+  }
+
+  private setLocale(locale: UiLocale): void {
+    if (locale === this.localizer.locale) return;
+    this.localizer.setLocale(locale);
+    this.updateLanguageSwitcher();
+    this.layout.refreshLocale();
+    this.fragments.refreshLocale();
+    this.renderer.refreshLocale();
+    this.refreshLocalizedUi();
+    this.get("#sync-status").textContent = this.t(this.codeDirty ? "代码有未应用修改" : "代码已同步");
+    const collapsed = this.get("#code-drawer").classList.contains("is-collapsed");
+    this.get("#toggle-code").textContent = this.t(collapsed ? "展开源码" : "收起源码");
+  }
+
   private bindEvents(): void {
+    this.host.querySelectorAll<HTMLButtonElement>("[data-locale-switch]").forEach((button) => {
+      button.addEventListener("click", () => this.setLocale(button.dataset.localeSwitch as UiLocale));
+    });
     const activityButtons = Array.from(this.host.querySelectorAll<HTMLButtonElement>("[data-activity-view]"));
     activityButtons.forEach((button) => {
       button.addEventListener("click", () => this.switchNavigationView(button.dataset.activityView as NavigationView));
@@ -993,7 +1031,7 @@ export class EditorApp {
     if (syncCode) {
       this.codeEditor.setValue(this.model.serialize());
       this.codeDirty = false;
-      this.get("#sync-status").textContent = "代码已同步";
+      this.get("#sync-status").textContent = this.t("代码已同步");
       this.get("#sync-status").className = "sync-ok";
     }
     this.get<HTMLInputElement>("#canvas-width").value = String(this.model.canvas.width);
@@ -1001,8 +1039,7 @@ export class EditorApp {
     const preset = `${this.model.canvas.width}x${this.model.canvas.height}`;
     this.get<HTMLSelectElement>("#canvas-preset").value = ["1920x1080", "1024x768"].includes(preset) ? preset : "custom";
     this.get("#code-file-name").textContent = this.model.sourceName;
-    const pageStatus = pages.length > 0 ? ` · page ${this.activePageIndex + 1}/${pages.length}` : "";
-    this.get("#document-status").textContent = `${this.model.kind.toUpperCase()} · ${this.model.canvas.width} × ${this.model.canvas.height}${pageStatus} · ${this.model.editableElements().length} elements`;
+    this.renderDocumentStatus(pages);
     const htmlPresentationAvailable = this.model.kind === "html";
     this.get<HTMLButtonElement>("#preview-presentation").disabled = !htmlPresentationAvailable;
     this.get("#undo").toggleAttribute("disabled", !this.history.canUndo);
@@ -1016,6 +1053,27 @@ export class EditorApp {
     this.updateIoMenuState();
     this.renderWarnings();
     this.updateLiveSelectionStatus();
+    this.localizer.bind(this.host);
+  }
+
+  private renderDocumentStatus(pages = this.model.pages()): void {
+    const pageStatus = pages.length > 0 ? ` · ${this.t("页")} ${this.activePageIndex + 1}/${pages.length}` : "";
+    this.get("#document-status").textContent = `${this.model.kind.toUpperCase()} · ${this.model.canvas.width} × ${this.model.canvas.height}${pageStatus} · ${this.model.editableElements().length} ${this.t("elements")}`;
+  }
+
+  private refreshLocalizedUi(): void {
+    const pages = this.model.pages();
+    const sequence = this.model.buildSequence(this.activePageIndex);
+    this.renderDocumentStatus(pages);
+    this.renderPageControl(pages);
+    this.renderBuildControl(sequence);
+    this.renderBuildPanel(sequence);
+    this.renderLayers();
+    this.renderInspector();
+    this.fragments.refreshSelection();
+    this.updateIoMenuState();
+    this.updateLiveSelectionStatus();
+    this.localizer.bind(this.host);
   }
 
   private renderPageControl(pages: DocumentPage[]): void {
@@ -1025,7 +1083,7 @@ export class EditorApp {
     const hasPages = pages.length > 0;
     const pagesTab = this.get<HTMLButtonElement>('[data-activity-view="pages"]');
     pagesTab.disabled = !hasPages;
-    pagesTab.title = hasPages ? "页面" : "当前文档没有多页结构";
+    pagesTab.title = this.t(hasPages ? "页面" : "当前文档没有多页结构");
     if (!hasPages && this.activeNavigationView === "pages") this.switchNavigationView("layers", false);
     control.hidden = !hasPages;
     filmstrip.hidden = !hasPages;
@@ -1036,7 +1094,7 @@ export class EditorApp {
     }
     const select = this.get<HTMLSelectElement>("#page-select");
     select.innerHTML = pages.map((page) =>
-      `<option value="${page.index}">${page.index + 1}. ${escapeHtml(page.label)}</option>`,
+      `<option value="${page.index}" data-l10n-skip>${page.index + 1}. ${escapeHtml(page.label)}</option>`,
     ).join("");
     select.value = String(this.activePageIndex);
     this.get("#page-count").textContent = `${this.activePageIndex + 1} / ${pages.length}`;
@@ -1052,13 +1110,13 @@ export class EditorApp {
     thumbnails.innerHTML = pages.map((page) => {
       const sequence = this.model.buildSequence(page.index);
       return `
-      <button class="page-thumbnail${page.index === this.activePageIndex ? " is-active" : ""}" data-page-index="${page.index}" data-page-id="${escapeHtml(page.id)}" draggable="true" title="${escapeHtml(page.label)}"${page.index === this.activePageIndex ? ' aria-current="page"' : ""}>
+      <button class="page-thumbnail${page.index === this.activePageIndex ? " is-active" : ""}" data-page-index="${page.index}" data-page-id="${escapeHtml(page.id)}" data-l10n-skip draggable="true" title="${escapeHtml(page.label)}"${page.index === this.activePageIndex ? ' aria-current="page"' : ""}>
         <span class="page-thumbnail-number">${page.index + 1}</span>
-        ${sequence.groups.length ? `<span class="page-thumbnail-builds">+${sequence.groups.length} builds</span>` : ""}
+        ${sequence.groups.length ? `<span class="page-thumbnail-builds">+${sequence.groups.length} ${this.t("Build")}</span>` : ""}
         <span class="page-thumbnail-preview" style="width:${previewWidth.toFixed(2)}px;height:${previewHeight.toFixed(2)}px">
           <span class="page-thumbnail-canvas" data-thumbnail-host="${page.index}" style="width:${this.model.canvas.width}px;height:${this.model.canvas.height}px;transform:scale(${scale})"></span>
         </span>
-        <span class="page-thumbnail-label">${escapeHtml(page.label)}</span>
+        <span class="page-thumbnail-label" data-l10n-skip>${escapeHtml(page.label)}</span>
       </button>
     `;
     }).join("");
@@ -1119,8 +1177,8 @@ export class EditorApp {
     const activeStep = this.activeBuildStep(sequence);
     const position = activeStep === 0 ? 0 : Math.max(0, sequence.steps.indexOf(activeStep) + 1);
     this.get("#build-status").textContent = position === 0
-      ? `Initial / ${sequence.groups.length}`
-      : `Build ${position} / ${sequence.groups.length}`;
+      ? `${this.t("Initial")} / ${sequence.groups.length}`
+      : `${this.t("Build")} ${position} / ${sequence.groups.length}`;
     this.get<HTMLButtonElement>("#previous-build").disabled = position === 0;
     this.get<HTMLButtonElement>("#next-build").disabled = position >= sequence.steps.length;
     this.get<HTMLSelectElement>("#build-view-mode").value = this.buildViewMode;
@@ -1143,18 +1201,18 @@ export class EditorApp {
     const selectedOnPage = this.selectedIds.filter((id) => this.model.elementBelongsToPage(id, this.activePageIndex));
     const currentSteps = Array.from(new Set(selectedOnPage.map((id) => this.model.buildStepForElement(id)).filter((step): step is number => step !== null)));
     const selectionSummary = selectedOnPage.length
-      ? `${selectedOnPage.length} selected · ${currentSteps.length === 1 ? `Build ${currentSteps[0]}` : currentSteps.length ? "mixed Build groups" : "Always Visible"}`
-      : "Select elements to assign a Build";
+      ? `${selectedOnPage.length} ${this.t("selected")} · ${currentSteps.length === 1 ? `${this.t("Build")} ${currentSteps[0]}` : currentSteps.length ? this.t("mixed Build groups") : this.t("Always Visible")}`
+      : this.t("Select elements to assign a Build");
     this.get("#build-selection-controls").innerHTML = `
       <div class="build-selection-summary">${escapeHtml(selectionSummary)}</div>
       <div class="build-selection-row">
-        <select id="selected-build-target" aria-label="Selected elements Build target" ${selectedOnPage.length ? "" : "disabled"}>
-          <option value="always">Always Visible</option>
-          ${sequence.groups.map((group, index) => `<option value="${group.step}">Build ${index + 1}</option>`).join("")}
-          <option value="new">New Build at end</option>
+        <select id="selected-build-target" aria-label="${this.t("Selected elements Build target")}" ${selectedOnPage.length ? "" : "disabled"}>
+          <option value="always">${this.t("Always Visible")}</option>
+          ${sequence.groups.map((group, index) => `<option value="${group.step}">${this.t("Build")} ${index + 1}</option>`).join("")}
+          <option value="new">${this.t("New Build at end")}</option>
         </select>
-        <button data-build-action="apply-selected" ${selectedOnPage.length ? "" : "disabled"}>应用</button>
-        <button data-build-action="split-selected" ${selectedOnPage.length ? "" : "disabled"}>拆为新组</button>
+        <button data-build-action="apply-selected" ${selectedOnPage.length ? "" : "disabled"}>${this.t("Apply")}</button>
+        <button data-build-action="split-selected" ${selectedOnPage.length ? "" : "disabled"}>${this.t("Split to new group")}</button>
       </div>
     `;
 
@@ -1165,25 +1223,25 @@ export class EditorApp {
       : 0;
     const groups = this.get("#build-groups");
     groups.innerHTML = `
-      <div class="build-drop-zone" data-build-insert-position="0">Drop here to create Build 1</div>
+      <div class="build-drop-zone" data-build-insert-position="0">${this.t("Drop here to create Build 1")}</div>
       <section class="build-group always-visible-group">
-        <header><strong>Always Visible</strong><span>${alwaysCount} elements</span></header>
+        <header><strong>${this.t("Always Visible")}</strong><span>${alwaysCount} ${this.t("elements")}</span></header>
       </section>
       ${sequence.groups.map((group, index) => `
         <section class="build-group${this.activeBuildStep(sequence) === group.step ? " is-active" : ""}" data-build-group="${group.step}">
           <header data-build-focus="${group.step}" data-build-group-drag="${group.step}" draggable="true">
-            <strong>Build ${index + 1}</strong><span>${group.elementIds.length} elements · data-build=${group.step}</span>
+            <strong>${this.t("Build")} ${index + 1}</strong><span>${group.elementIds.length} ${this.t("elements")} · data-build=${group.step}</span>
             <span class="build-group-actions">
-              <button data-build-action="move-up" data-build-step="${group.step}" ${index === 0 ? "disabled" : ""} title="Move group earlier" aria-label="前移 Build 组">↑</button>
-              <button data-build-action="move-down" data-build-step="${group.step}" ${index === sequence.groups.length - 1 ? "disabled" : ""} title="Move group later" aria-label="后移 Build 组">↓</button>
-              <button data-build-action="merge-previous" data-build-step="${group.step}" ${index === 0 ? "disabled" : ""} title="Merge into previous group">合并</button>
+              <button data-build-action="move-up" data-build-step="${group.step}" ${index === 0 ? "disabled" : ""} title="${this.t("Move group earlier")}" aria-label="${this.t("Move Build group earlier")}">↑</button>
+              <button data-build-action="move-down" data-build-step="${group.step}" ${index === sequence.groups.length - 1 ? "disabled" : ""} title="${this.t("Move group later")}" aria-label="${this.t("Move Build group later")}">↓</button>
+              <button data-build-action="merge-previous" data-build-step="${group.step}" ${index === 0 ? "disabled" : ""} title="${this.t("Merge into previous group")}">${this.t("Merge")}</button>
             </span>
           </header>
           <div class="build-group-elements">
-            ${group.elementIds.map((id) => `<button class="build-element${this.selectedIds.includes(id) ? " is-selected" : ""}" data-build-element-id="${escapeHtml(id)}" draggable="true" title="${escapeHtml(id)}"><span>${escapeHtml(this.buildElementLabel(id))}</span><code>${escapeHtml(id)}</code></button>`).join("")}
+            ${group.elementIds.map((id) => `<button class="build-element${this.selectedIds.includes(id) ? " is-selected" : ""}" data-build-element-id="${escapeHtml(id)}" draggable="true" title="${escapeHtml(id)}"><span data-l10n-skip>${escapeHtml(this.buildElementLabel(id))}</span><code data-l10n-skip>${escapeHtml(id)}</code></button>`).join("")}
           </div>
         </section>
-        <div class="build-drop-zone" data-build-insert-position="${index + 1}">Drop elements here for a new Build</div>
+        <div class="build-drop-zone" data-build-insert-position="${index + 1}">${this.t("Drop elements here for a new Build")}</div>
       `).join("")}
     `;
 
@@ -1198,11 +1256,14 @@ export class EditorApp {
       window.clearTimeout(this.buildWarningTimer);
       this.buildWarningSignature = signature;
       warnings.hidden = false;
-      warnings.innerHTML = sequence.warnings.map((warning) => `<p><strong>${escapeHtml(warning.code)}</strong> ${escapeHtml(warning.message)}</p>`).join("");
+      warnings.innerHTML = sequence.warnings.map((warning) => `<p><strong>${escapeHtml(warning.code)}</strong> ${escapeHtml(this.t(warning.message))}</p>`).join("");
       this.buildWarningTimer = window.setTimeout(() => {
         if (this.buildWarningSignature === signature) warnings.hidden = true;
       }, 6000);
     }
+    this.localizer.bind(this.get("#build-selection-controls"));
+    this.localizer.bind(groups);
+    this.localizer.bind(warnings);
   }
 
   private changeBuild(offset: -1 | 1): void {
@@ -1321,7 +1382,9 @@ export class EditorApp {
     this.selectedIds = [];
     this.history.replaceCurrent(this.createSnapshot());
     this.renderDocument(false);
-    this.toast(`正在编辑第 ${next + 1} 页：${pages[next]!.label}`);
+    this.toast(this.localizer.locale === "en"
+      ? `Editing page ${next + 1}: ${pages[next]!.label}`
+      : `正在编辑第 ${next + 1} 页：${pages[next]!.label}`);
   }
 
   private duplicateActivePage(): void {
@@ -1381,7 +1444,7 @@ export class EditorApp {
     const notice = this.get("#notice-bar");
     window.clearTimeout(this.noticeTimer);
     notice.hidden = false;
-    notice.textContent = message;
+    notice.textContent = this.t(message);
     this.noticeTimer = window.setTimeout(() => {
       notice.hidden = true;
       notice.textContent = "";
@@ -1412,16 +1475,18 @@ export class EditorApp {
       const collapsed = node.children.length > 0 && this.collapsedLayerIds.has(node.id);
       return `<li role="none" data-layer-node="${escapeHtml(node.id)}">
         <div class="layer-row${selected}" data-layer-id="${escapeHtml(node.id)}" style="--depth:${depth}" title="${escapeHtml(node.id)}" role="treeitem" tabindex="${node.id === fallbackFocusId ? "0" : "-1"}" aria-selected="${selected ? "true" : "false"}"${node.children.length ? ` aria-expanded="${collapsed ? "false" : "true"}"` : ""}>
-          <button type="button" tabindex="-1" class="layer-disclosure${collapsed ? " is-collapsed" : ""}" data-layer-toggle="${escapeHtml(node.id)}" aria-label="${collapsed ? "展开" : "折叠"} ${escapeHtml(node.name)}"${node.children.length ? "" : " disabled"}>${chevronIcon}</button>
+          <button type="button" tabindex="-1" class="layer-disclosure${collapsed ? " is-collapsed" : ""}" data-layer-toggle="${escapeHtml(node.id)}" aria-label="${this.t(collapsed ? "展开" : "折叠")} ${escapeHtml(node.name)}"${node.children.length ? "" : " disabled"}>${chevronIcon}</button>
           <span class="layer-icon">${icon}</span>
-          <span class="layer-name" data-layer-name="${escapeHtml(node.id)}">${escapeHtml(node.name)}</span>
-          <span class="layer-tag">${escapeHtml(node.tag)}</span>
-          <button type="button" tabindex="-1" class="layer-drag-handle" data-layer-drag-handle="${escapeHtml(node.id)}" aria-label="拖动 ${escapeHtml(node.name)}" title="拖动以排序、缩进或提升一级"${depth === 0 ? " disabled" : ""}>${layerGripIcon}</button>
+          <span class="layer-name" data-layer-name="${escapeHtml(node.id)}" data-l10n-skip>${escapeHtml(node.name)}</span>
+          <span class="layer-tag" data-l10n-skip>${escapeHtml(node.tag)}</span>
+          <button type="button" tabindex="-1" class="layer-drag-handle" data-layer-drag-handle="${escapeHtml(node.id)}" aria-label="${this.t("拖动 ")}${escapeHtml(node.name)}" title="${this.t("拖动以排序、缩进或提升一级")}"${depth === 0 ? " disabled" : ""}>${layerGripIcon}</button>
         </div>
         ${node.children.length && !collapsed ? `<ul role="group">${node.children.map((child) => renderNode(child, depth + 1)).join("")}</ul>` : ""}
       </li>`;
     };
-    this.get("#layers-tree").innerHTML = `<ul role="tree">${tree.map((node) => renderNode(node, 0)).join("")}</ul>`;
+    const layersTree = this.get("#layers-tree");
+    layersTree.innerHTML = `<ul role="tree">${tree.map((node) => renderNode(node, 0)).join("")}</ul>`;
+    this.localizer.bind(layersTree);
     if (revealId) requestAnimationFrame(() => this.centerLayerRow(revealId, revealBehavior));
   }
 
@@ -1631,7 +1696,7 @@ export class EditorApp {
       drag.valid = false;
       drag.targetId = undefined;
       drag.placement = undefined;
-      drag.reason = "请拖到明确的图层行落点";
+      drag.reason = this.t("请拖到明确的图层行落点");
       return;
     }
     const rect = row.getBoundingClientRect();
@@ -1644,12 +1709,12 @@ export class EditorApp {
       drag.valid = true;
       drag.reason = undefined;
       row.classList.add(`is-drop-${placement}`);
-      row.dataset.layerDropLabel = placement === "inside" ? "作为子级" : placement === "before" ? "插入到前面" : "插入到后面";
+      row.dataset.layerDropLabel = this.t(placement === "inside" ? "作为子级" : placement === "before" ? "插入到前面" : "插入到后面");
     } catch (error) {
       drag.valid = false;
       drag.reason = error instanceof Error ? error.message : String(error);
       row.classList.add("is-drop-invalid");
-      row.dataset.layerDropLabel = "不可放置";
+      row.dataset.layerDropLabel = this.t("不可放置");
     }
   }
 
@@ -1769,11 +1834,13 @@ export class EditorApp {
     const host = this.get("#inspector-content");
     this.updateCanvasContext();
     if (this.selectedIds.length === 0) {
-      host.innerHTML = `<div class="empty-state" data-inspector-pane="design advanced"><span>◇</span><p>尚未选择元素</p><small>从画布或图层中选择元素，Design 与 Advanced 属性会在这里出现。</small></div>`;
+      host.innerHTML = `<div class="empty-state" data-inspector-pane="design advanced"><span>◇</span><p>尚未选择元素</p><small>从画布或图层中选择元素，设计与高级属性会在这里出现。</small></div>`;
+      this.localizer.bind(host);
       return;
     }
     if (this.selectedIds.length > 1) {
-      host.innerHTML = `<div class="multi-selection" data-inspector-pane="design advanced"><span class="element-badge">MULTI</span><strong>${this.selectedIds.length} 个元素</strong><p>${this.selectedIds.map(escapeHtml).join(" · ")}</p><small>拖动选区可整体移动；画布上方已显示对齐与分布命令。单击一个图层可返回单选属性。</small></div>`;
+      host.innerHTML = `<div class="multi-selection" data-inspector-pane="design advanced"><span class="element-badge">MULTI</span><strong>${this.selectedIds.length} 个元素</strong><p data-l10n-skip>${this.selectedIds.map(escapeHtml).join(" · ")}</p><small>拖动选区可整体移动；画布上方已显示对齐与分布命令。单击一个图层可返回单选属性。</small></div>`;
+      this.localizer.bind(host);
       return;
     }
     const id = this.selectedIds[0]!;
@@ -1794,7 +1861,7 @@ export class EditorApp {
     const childId = modelElement.querySelector("[data-editor-id]")?.getAttribute("data-editor-id") ?? "";
     host.innerHTML = `
       <section class="inspector-section identity-card" data-inspector-pane="design">
-        <div><span class="element-badge">${escapeHtml(modelElement.localName)}</span><strong>${escapeHtml(id)}</strong></div>
+        <div><span class="element-badge" data-l10n-skip>${escapeHtml(modelElement.localName)}</span><strong data-l10n-skip>${escapeHtml(id)}</strong></div>
         <div class="identity-navigation">
           <button data-inspector-action="select-parent" title="选择最近的可编辑父级"${parentId ? "" : " disabled"}>选择父级</button>
           <button data-inspector-action="select-child" title="选择第一个可编辑子级"${childId ? "" : " disabled"}>选择子级</button>
@@ -1817,7 +1884,7 @@ export class EditorApp {
       </section>
       ${isText ? `<section class="inspector-section" data-inspector-pane="design">
         <h3>文本</h3>
-        <label class="field stack"><span>内容</span><textarea data-prop="text" rows="4">${escapeHtml(text)}</textarea></label>
+        <label class="field stack"><span>内容</span><textarea data-prop="text" rows="4" data-l10n-skip>${escapeHtml(text)}</textarea></label>
         <div class="field-grid two">
           <label class="field"><span>字体</span><select data-prop="fontCatalog">${fontCatalog.html}</select></label>
           <label class="field"><span>字号</span><input data-prop="fontSize" type="number" min="1" value="${numeric(computed.fontSize, 16)}" /></label>
@@ -1865,6 +1932,7 @@ export class EditorApp {
       const entry = fontEntryById(fontCatalog.selectedId);
       if (entry) void this.refreshFontStatus(id, entry);
     }
+    this.localizer.bind(host);
   }
 
   private restoreInspectorGroups(): Set<InspectorGroup> {
@@ -1910,8 +1978,8 @@ export class EditorApp {
     selectionToolbar.hidden = this.selectedIds.length === 0;
     selectionToolbar.dataset.selectionMode = this.selectedIds.length > 1 ? "multiple" : "single";
     selectionToolbar.querySelector<HTMLElement>(".selection-context-label")!.textContent = this.selectedIds.length > 1
-      ? `${this.selectedIds.length} 个元素`
-      : "单个元素";
+      ? `${this.selectedIds.length} ${this.t("elements selected")}`
+      : this.t("单个元素");
     selectionToolbar.querySelector<HTMLElement>(".selection-distribute-controls")!.hidden = this.selectedIds.length < 2;
   }
 
@@ -1934,7 +2002,7 @@ export class EditorApp {
 
   private updateIoMenuState(): void {
     const extension = this.model.kind === "svg" ? "SVG" : "HTML";
-    this.get("#export-document-label").textContent = `导出 ${extension}`;
+    this.get("#export-document-label").textContent = `${this.t("导出")} ${extension}`;
     this.get<HTMLButtonElement>("#export-selection-action").disabled = this.selectedIds.length === 0;
   }
 
@@ -1960,8 +2028,8 @@ export class EditorApp {
 
   private updateLiveSelectionStatus(): void {
     const status = this.get("#selection-status");
-    if (this.selectedIds.length === 0) status.textContent = "未选择元素";
-    else if (this.selectedIds.length > 1) status.textContent = `${this.selectedIds.length} elements selected`;
+    if (this.selectedIds.length === 0) status.textContent = this.t("未选择元素");
+    else if (this.selectedIds.length > 1) status.textContent = `${this.selectedIds.length} ${this.t("elements selected")}`;
     else {
       const id = this.selectedIds[0]!;
       const bounds = this.renderer.bounds(id);
@@ -2171,14 +2239,14 @@ export class EditorApp {
     const option = Array.from(select.options).find((candidate) => candidate.value === entry.id);
     const fellBack = availability.kind === "bundled" && Boolean(entry.localNames?.length);
     if (option) option.textContent = fellBack
-      ? `${availability.actualLabel}（替代 ${entry.label}）`
-      : availability.kind === "local" ? `${entry.label}（本机）` : entry.label;
+      ? `${availability.actualLabel} (${this.t("替代 ")}${entry.label})`
+      : availability.kind === "local" ? `${entry.label} (${this.t("本机")})` : entry.label;
     status.classList.toggle("is-warning", fellBack);
     status.textContent = fellBack
-      ? `本机未安装 ${entry.label}，实际使用已内嵌的 ${availability.actualLabel}。`
+      ? this.t(`本机未安装 ${entry.label}，实际使用已内嵌的 ${availability.actualLabel}。`)
       : availability.kind === "local"
-        ? `实际使用：${availability.actualLabel}（本机字体）`
-        : `实际使用：${availability.actualLabel}`;
+        ? `${this.t("实际使用：")}${availability.actualLabel} (${this.t("本机字体")})`
+        : `${this.t("实际使用：")}${availability.actualLabel}`;
   }
 
   private async applyFontCatalogEntry(elementId: string, entry: FontCatalogEntry): Promise<void> {
@@ -2187,7 +2255,7 @@ export class EditorApp {
     const model = this.model;
     const sourcePath = this.sourcePath;
     const status = this.host.querySelector<HTMLElement>("[data-font-status]");
-    if (status) status.textContent = `正在载入 ${entry.label}…`;
+    if (status) status.textContent = this.t(`正在载入 ${entry.label}…`);
     try {
       const asset = await loadManagedFontAsset(entry, sourcePath);
       if (this.fontChangeTokens.get(elementId) !== requestToken || this.model !== model) return;
@@ -2296,7 +2364,7 @@ export class EditorApp {
     const geometryProps = new Set(["x", "y", "width", "height", "rotation"]);
     const geometryNumber = input instanceof HTMLInputElement ? input.valueAsNumber : Number.NaN;
     if (geometryProps.has(prop) && (!Number.isFinite(geometryNumber) || (["width", "height"].includes(prop) && geometryNumber < 1))) {
-      input.setCustomValidity(prop === "width" || prop === "height" ? "请输入不小于 1 的有效数字。" : "请输入有效数字。");
+      input.setCustomValidity(this.t(prop === "width" || prop === "height" ? "请输入不小于 1 的有效数字。" : "请输入有效数字。"));
       input.reportValidity();
       const previous = prop === "x" ? bounds.x
         : prop === "y" ? bounds.y
@@ -2704,7 +2772,7 @@ export class EditorApp {
       this.renderDocument(true);
       this.toast("代码已应用到画布");
     } catch (error) {
-      this.get("#code-error").textContent = error instanceof Error ? error.message : String(error);
+      this.get("#code-error").textContent = this.t(error instanceof Error ? error.message : String(error));
       this.toast("代码解析失败；画布保留上一个有效版本", true);
     }
   }
@@ -2724,10 +2792,10 @@ export class EditorApp {
       });
       this.codeEditor.setValue(formatted);
       this.codeDirty = true;
-      this.get("#sync-status").textContent = "格式化结果尚未应用";
+      this.get("#sync-status").textContent = this.t("格式化结果尚未应用");
       this.get("#sync-status").className = "sync-dirty";
     } catch (error) {
-      this.get("#code-error").textContent = error instanceof Error ? error.message : String(error);
+      this.get("#code-error").textContent = this.t(error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -2735,7 +2803,7 @@ export class EditorApp {
     const drawer = this.get("#code-drawer");
     const collapsed = drawer.classList.toggle("is-collapsed");
     this.get(".studio-shell").classList.toggle("is-code-collapsed", collapsed);
-    this.get("#toggle-code").textContent = collapsed ? "展开源码" : "收起源码";
+    this.get("#toggle-code").textContent = this.t(collapsed ? "展开源码" : "收起源码");
     const updateCanvas = (): void => {
       this.fitCanvas();
       this.transform.update();
@@ -2805,7 +2873,7 @@ export class EditorApp {
   private toast(message: string, error = false): void {
     const toast = this.get("#toast");
     window.clearTimeout(this.toastTimer);
-    toast.textContent = message;
+    toast.textContent = this.t(message);
     toast.className = `toast${error ? " is-error" : ""}`;
     toast.hidden = false;
     this.toastTimer = window.setTimeout(() => { toast.hidden = true; }, 2600);

@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/afterprompt-hero.png" alt="AfterPrompt editing an AI-generated HTML slide with a real DOM element selected, document structure visible, and source controls available." width="100%" />
+  <img src="docs/screenshots/afterprompt-hero-en.png" alt="AfterPrompt in English editing an AI-generated HTML slide with document structure and source controls visible." width="100%" />
 </p>
 
 <p align="center"><b>English</b> · <a href="README.zh-CN.md">简体中文</a></p>
@@ -33,6 +33,7 @@ Generate elsewhere → finish visually in AfterPrompt → keep and export standa
 2. **Edit the document, not a screenshot.** Select real DOM/SVG nodes, drag or resize them, adjust text and styles, manage pages and builds, and use Undo/Redo.
 3. **Keep source in the loop.** Visual operations update the document model; source edits are applied explicitly and invalid drafts do not replace the last valid canvas.
 4. **Leave with standard files.** Export HTML or SVG, project JSON, resource ZIPs, structural JSON, or reusable `.vfrag` packages within the documented limits.
+5. **Work in Chinese or English.** The editor follows the browser language on load (Chinese browser locales use Chinese; other locales use English). Use the top-right **中文 / EN** switch for the full editor UI; it does not translate imported document content.
 
 The same document and command model also supports local JSON-command and CLI workflows. See [Command and agent workflows](docs/COMMAND_API.md).
 

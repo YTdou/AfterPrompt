@@ -3,7 +3,57 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="lms-contract-version" content="1" />
     <title>AfterPrompt — Source-first visual editor</title>
+    <script id="lms-editing-contract" type="application/json">
+{
+  "schema": "last-mile-studio/html-editing-contract",
+  "version": 1,
+  "contractRole": "declaration-and-audit-policy",
+  "sourceOfTruth": "canonical-static-dom",
+  "container": {
+    "id": "deck-root-001",
+    "tag": "main",
+    "strategy": ".slides > section",
+    "directPageTag": "section"
+  },
+  "page": {
+    "idAttribute": "data-editor-id",
+    "keyAttribute": "data-key",
+    "kindAttribute": "data-kind"
+  },
+  "kindPolicy": {
+    "mode": "optional",
+    "backupValue": "backup",
+    "ordering": "enforce-only-when-declared"
+  },
+  "build": {
+    "attribute": "data-build",
+    "value": "positive-integer",
+    "runtimeViewAttributes": [
+      "class:revealed",
+      "aria-hidden",
+      "data-lms-build-visible"
+    ]
+  },
+  "editorScriptPolicy": "do-not-execute-source-scripts",
+  "runtimePolicy": {
+    "canonicalStructure": "must-not-change",
+    "allowedScopes": [
+      "active-page-state",
+      "build-visibility",
+      "speaker-notes",
+      "fullscreen",
+      "presentation-controls",
+      "hud"
+    ]
+  },
+  "integrity": {
+    "projectionDigest": "fnv1a32:5212b2e2",
+    "digestScope": "derived-projection"
+  }
+}
+    </script>
     <style>
       :root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #15213b; }
       * { box-sizing: border-box; }
@@ -115,9 +165,9 @@
           <span data-editor-id="hero-caption-001" class="hero-caption">Real DOM on canvas · readable source · visual control.</span>
         </div>
         <div data-editor-id="metric-001" class="metric-row" data-build="4">
-          <div data-editor-id="metric-card-001" class="metric-card"><strong>HTML</strong><span>standard pages and slide decks</span></div>
-          <div data-editor-id="metric-card-002" class="metric-card"><strong>SVG</strong><span>native shapes stay editable</span></div>
-          <div data-editor-id="metric-card-003" class="metric-card"><strong>Build</strong><span>page order and reveal steps</span></div>
+          <div data-editor-id="metric-card-001" class="metric-card"><strong data-editor-id="strong-001">HTML</strong><span data-editor-id="span-001">standard pages and slide decks</span></div>
+          <div data-editor-id="metric-card-002" class="metric-card"><strong data-editor-id="strong-002">SVG</strong><span data-editor-id="span-002">native shapes stay editable</span></div>
+          <div data-editor-id="metric-card-003" class="metric-card"><strong data-editor-id="strong-003">Build</strong><span data-editor-id="span-003">page order and reveal steps</span></div>
         </div>
         <div data-editor-id="accent-block-001" data-editor-name="Takeaway card" class="accent-block" data-build="5">
           <span data-editor-id="accent-label-001" class="accent-label">Product promise</span>
@@ -138,15 +188,15 @@
         <p data-editor-id="annotation-002" class="annotation" data-build="2">The canvas is a view of the document—not a screenshot or an opaque replacement.</p>
         <div data-editor-id="chart-002" class="chart-card" data-build="3">
           <p data-editor-id="chart-heading-002" class="chart-heading">What stays editable</p>
-          <div data-editor-id="bar-row-001" class="bar-row"><span>HTML</span><span class="bar-track"><span data-editor-id="bar-fill-001" class="bar-fill" style="width: 94%;"></span></span><strong>nodes</strong></div>
-          <div data-editor-id="bar-row-002" class="bar-row"><span>SVG</span><span class="bar-track"><span data-editor-id="bar-fill-002" class="bar-fill" style="width: 78%;"></span></span><strong>shapes</strong></div>
-          <div data-editor-id="bar-row-003" class="bar-row"><span>Build</span><span class="bar-track"><span data-editor-id="bar-fill-003" class="bar-fill" style="width: 62%;"></span></span><strong>steps</strong></div>
+          <div data-editor-id="bar-row-001" class="bar-row"><span data-editor-id="span-004">HTML</span><span data-editor-id="span-005" class="bar-track"><span data-editor-id="bar-fill-001" class="bar-fill" style="width: 94%;"></span></span><strong data-editor-id="strong-004">nodes</strong></div>
+          <div data-editor-id="bar-row-002" class="bar-row"><span data-editor-id="span-006">SVG</span><span data-editor-id="span-007" class="bar-track"><span data-editor-id="bar-fill-002" class="bar-fill" style="width: 78%;"></span></span><strong data-editor-id="strong-005">shapes</strong></div>
+          <div data-editor-id="bar-row-003" class="bar-row"><span data-editor-id="span-008">Build</span><span data-editor-id="span-009" class="bar-track"><span data-editor-id="bar-fill-003" class="bar-fill" style="width: 62%;"></span></span><strong data-editor-id="strong-006">steps</strong></div>
           <span data-editor-id="chart-note-002" class="chart-note">One shared document model powers canvas, source, preview, and export.</span>
         </div>
         <div data-editor-id="insight-grid-002" class="insight-grid" data-build="4">
-          <div data-editor-id="insight-card-001" class="insight-card"><strong>Import</strong><span>Open HTML, SVG, local projects, or saved visual projects.</span></div>
-          <div data-editor-id="insight-card-002" class="insight-card"><strong>Refine</strong><span>Select real nodes, edit text and styles, and manage pages and Build.</span></div>
-          <div data-editor-id="insight-card-003" class="insight-card"><strong>Inspect</strong><span>Apply source changes explicitly and keep invalid drafts off the canvas.</span></div>
+          <div data-editor-id="insight-card-001" class="insight-card"><strong data-editor-id="strong-007">Import</strong><span data-editor-id="span-010">Open HTML, SVG, local projects, or saved visual projects.</span></div>
+          <div data-editor-id="insight-card-002" class="insight-card"><strong data-editor-id="strong-008">Refine</strong><span data-editor-id="span-011">Select real nodes, edit text and styles, and manage pages and Build.</span></div>
+          <div data-editor-id="insight-card-003" class="insight-card"><strong data-editor-id="strong-009">Inspect</strong><span data-editor-id="span-012">Apply source changes explicitly and keep invalid drafts off the canvas.</span></div>
         </div>
       </section>
 

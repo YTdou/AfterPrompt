@@ -89,6 +89,15 @@ async function exportDocument(page) {
   await chooseIoAction(page, "#export-menu", "#export-document-action");
 }
 
+async function waitForBuildControls(page, previousDisabled, nextDisabled) {
+  await page.waitForFunction(({ previousDisabled: expectedPrevious, nextDisabled: expectedNext }) => {
+    const previous = document.querySelector("#previous-build");
+    const next = document.querySelector("#next-build");
+    return previous instanceof HTMLButtonElement && next instanceof HTMLButtonElement &&
+      previous.disabled === expectedPrevious && next.disabled === expectedNext;
+  }, { previousDisabled, nextDisabled });
+}
+
 async function run() {
   if (!executablePath) throw new Error("Chrome/Chromium was not found. Set CHROME_PATH to its executable.");
   const server = await startViteDevServer({
@@ -103,7 +112,8 @@ async function run() {
       args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
     });
     const errors = [];
-    const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+    const chineseContext = await browser.newContext({ locale: "zh-CN", viewport: { width: 1600, height: 1000 } });
+    const page = await chineseContext.newPage();
     await page.addInitScript(() => {
       const files = new Map();
       globalThis.__fragmentDirectoryFiles = files;
@@ -150,11 +160,21 @@ async function run() {
     await page.locator("#document-status").waitFor();
     assert(await page.title() === "AfterPrompt — Visually refine what AI generates.", "The browser title does not use the AfterPrompt full name.");
     assert((await page.locator(".brand strong").textContent()) === "AfterPrompt", "The top bar does not use the AfterPrompt short name.");
-    assert((await page.locator(".brand small").textContent()) === "Visually refine what AI generates.", "The AfterPrompt tagline is missing from the top bar.");
+    assert((await page.locator(".brand small").textContent()) === "可视化完善 AI 生成的内容。", "The Chinese top bar tagline is missing.");
     assert((await page.locator(".brand-mark").textContent()) === "AP", "The legacy brand mark is still visible.");
+    assert(await page.locator("html").getAttribute("lang") === "zh-CN", "Chinese browser locale did not select the Chinese editor.");
+    assert(await page.locator('[data-locale-switch="zh-CN"]').getAttribute("aria-pressed") === "true", "Chinese language switch is not active.");
     assert((await page.locator("#document-status").textContent())?.includes("HTML"), "HTML example did not load.");
     assert((await page.locator("#export-document-label").textContent()) === "导出 HTML", "The export menu did not reflect the active HTML document type.");
     assert(await page.locator("#export-selection-action").isDisabled(), "Selection export is enabled without a selection.");
+    assert(await page.locator("#next-build").isDisabled(), "The default HTML sample did not open with all Build steps completed.");
+    const defaultBuildState = await page.evaluate(() => {
+      const root = document.querySelector("#canvas-host")?.shadowRoot;
+      return ["title-001", "lead-001", "accent-block-001"].map((id) =>
+        root?.querySelector(`[data-editor-id="${id}"]`)?.getAttribute("data-editor-build-visibility"),
+      );
+    });
+    assert(JSON.stringify(defaultBuildState) === JSON.stringify(["shown", "shown", "shown"]), "The default HTML sample did not show all completed Build content.");
     assert(await page.locator("[data-layer-id]").count() >= 12, "Layer tree is unexpectedly empty.");
     assert(await page.locator("#import-menu > summary .ui-chevron[aria-hidden='true']").count() === 1, "The import menu is missing its accessible SVG chevron.");
     assert(await page.locator("#export-menu > summary .ui-chevron[aria-hidden='true']").count() === 1, "The export menu is missing its accessible SVG chevron.");
@@ -166,6 +186,25 @@ async function run() {
     assert(rootLayerLeadingSpace <= 64, `Layer names still reserve excessive leading space (${rootLayerLeadingSpace}px).`);
     assert(await page.locator("[data-layer-toggle] .ui-chevron[aria-hidden='true']").count() > 0, "Layer disclosure controls are missing SVG chevrons.");
     assert(await page.locator("[data-layout-toggle='layers'] .ui-chevron[aria-hidden='true']").count() === 1, "The layers panel toggle is missing its SVG chevron.");
+
+    progress("checking system-locale defaults and live language switching");
+    const englishContext = await browser.newContext({ locale: "en-US", viewport: { width: 1600, height: 1000 } });
+    const englishPage = await englishContext.newPage();
+    englishPage.setDefaultTimeout(20_000);
+    await englishPage.goto(baseUrl, { waitUntil: "networkidle" });
+    await englishPage.locator("#document-status").waitFor();
+    const englishStatus = await englishPage.locator("#document-status").textContent();
+    assert(await englishPage.locator("html").getAttribute("lang") === "en", "English browser locale did not select the English editor.");
+    assert((await englishPage.locator(".brand small").textContent()) === "Visually refine what AI generates.", "The English top bar tagline is missing.");
+    assert((await englishPage.locator("#export-document-label").textContent()) === "Export HTML", "The English editor did not localize export.");
+    assert(await englishPage.locator('[data-locale-switch="en"]').getAttribute("aria-pressed") === "true", "English language switch is not active.");
+    await englishPage.locator('[data-locale-switch="zh-CN"]').click();
+    assert(await englishPage.locator("html").getAttribute("lang") === "zh-CN", "Language switch did not update the document language.");
+    assert((await englishPage.locator("#export-document-label").textContent()) === "导出 HTML", "Language switch did not localize export to Chinese.");
+    assert(await englishPage.locator("[data-layer-id]").count() >= 12, "Language switch reset the loaded document.");
+    await englishPage.locator('[data-locale-switch="en"]').click();
+    assert((await englishPage.locator("#document-status").textContent()) === englishStatus, "Language switch did not preserve document status.");
+    await englishContext.close();
 
     progress("checking the default collapsed source bar and canvas space");
     assert(await page.locator(".studio-shell").evaluate((element) => element.classList.contains("is-code-collapsed")), "The source bar is not collapsed by default.");
@@ -348,7 +387,7 @@ async function run() {
       return host?.shadowRoot?.querySelector('[data-editor-id="title-001"]')?.textContent === expectedTitle;
     }, defaultHtmlTitle);
 
-    progress("checking HTML drag and resize");
+    progress("checking nested SVG drag and HTML container resize");
     await page.locator('[data-layer-id="hero-image-001"]').click();
     await page.waitForTimeout(100);
     const imageBox = await page.locator('#canvas-host [data-editor-id="hero-image-001"]').boundingBox();
@@ -364,6 +403,14 @@ async function run() {
     });
     assert(await sourceContains(page, "data-editor-translate-x"), "Drag did not synchronize to source code.");
 
+    await page.locator('[data-layer-id="hero-frame-001"]').click();
+    await page.waitForTimeout(100);
+    const frameInitialWidth = await page.evaluate(() => {
+      const host = document.querySelector("#canvas-host");
+      const frame = host?.shadowRoot?.querySelector('[data-editor-id="hero-frame-001"]');
+      return frame ? Number.parseFloat(getComputedStyle(frame).width) : Number.NaN;
+    });
+    assert(Number.isFinite(frameInitialWidth), "Hero frame has no computed width before resize.");
     const resizeHandle = page.locator(".moveable-control-box .moveable-se");
     await resizeHandle.waitFor({ state: "visible" });
     const handleBox = await resizeHandle.boundingBox();
@@ -376,10 +423,15 @@ async function run() {
     await page.waitForTimeout(250);
     const resizedWidth = await page.evaluate(() => {
       const host = document.querySelector("#canvas-host");
-      return host?.shadowRoot?.querySelector('[data-editor-id="hero-image-001"]')?.style.width ?? "";
+      return host?.shadowRoot?.querySelector('[data-editor-id="hero-frame-001"]')?.style.width ?? "";
     });
-    assert(Boolean(resizedWidth) && Math.abs(Number.parseFloat(resizedWidth) - 480) > 1, `Resize did not change inline width (received ${resizedWidth || "empty"}).`);
-    assert(await sourceContains(page, "width:"), "Resize did not synchronize to source code.");
+    assert(
+      Boolean(resizedWidth) && Math.abs(Number.parseFloat(resizedWidth) - frameInitialWidth) > 1,
+      `Resize did not change the hero frame inline width (received ${resizedWidth || "empty"}).`,
+    );
+    await page.locator("#locate-code").click();
+    const frameSource = await page.locator(".cm-line").filter({ hasText: 'data-editor-id="hero-frame-001"' }).innerText();
+    assert(frameSource.includes('style="width:'), "Resize did not synchronize to source code.");
 
     await page.locator('[data-layer-id="title-001"]').click();
     assert(await page.locator("#export-selection-action").isEnabled(), "Selection export did not enable after selecting an element.");
@@ -486,10 +538,15 @@ async function run() {
 
     progress("checking inspector parent and child navigation");
     await page.locator('[data-layer-id="accent-block-001"]').click();
+    const firstEditableChildId = await page.evaluate(() => {
+      const parent = document.querySelector("#canvas-host")?.shadowRoot?.querySelector('[data-editor-id="accent-block-001"]');
+      return Array.from(parent?.children ?? []).find((child) => child.hasAttribute("data-editor-id"))?.getAttribute("data-editor-id") ?? null;
+    });
+    assert(firstEditableChildId, "The accent block has no editable child for inspector navigation.");
     const selectChild = page.locator('[data-inspector-action="select-child"]');
     assert(!(await selectChild.isDisabled()), "The inspector disabled child navigation for an element with editable descendants.");
     await selectChild.click();
-    await page.waitForFunction(() => document.querySelector("#selection-status")?.textContent?.startsWith("takeaway-001"));
+    await page.waitForFunction((childId) => document.querySelector("#selection-status")?.textContent?.startsWith(childId), firstEditableChildId);
     assert(await page.locator('[data-inspector-action="select-child"]').isDisabled(), "A leaf text element incorrectly exposes an editable child.");
     await page.locator('[data-inspector-action="select-parent"]').click();
     await page.waitForFunction(() => document.querySelector("#selection-status")?.textContent?.startsWith("accent-block-001"));
@@ -1061,7 +1118,7 @@ async function run() {
 
     progress("checking Phase 4 presentation workflow");
     await loadExample(page, "deck");
-    await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("page 1/3"));
+    await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("1/3"));
     assert((await page.locator("[data-activity-view]").count()) === 3, "The activity rail did not expose exactly Layers, Pages, and Fragments.");
     await page.locator('[data-activity-view="pages"]').click();
     assert(await page.locator("#pages-context").isVisible() && await page.locator("#layers-context").isHidden(), "Pages did not become the exclusive left-panel context.");
@@ -1160,13 +1217,13 @@ async function run() {
     assert(Math.abs(await page.locator("#layers-panel").evaluate((element) => element.clientWidth) - persistedLayout.layersWidth) <= 2, "Reload did not restore the layer panel width.");
     assert(Math.abs(await page.locator("#inspector-panel").evaluate((element) => element.clientWidth) - persistedLayout.inspectorWidth) <= 2, "Reload did not restore the inspector width.");
     await loadExample(page, "deck");
-    await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("page 1/3"));
+    await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("1/3"));
     await page.locator('[data-activity-view="pages"]').click();
     assert(Math.abs(await page.locator(".page-thumbnail").first().evaluate((element) => element.clientHeight) - persistedLayout.pagesHeight) <= 2, "Reload did not restore the page thumbnail density.");
     assert(Math.abs(await page.locator("#build-panel").evaluate((element) => element.clientHeight) - persistedLayout.buildHeight) <= 2, "Reload did not restore the Build panel height.");
 
     progress("checking Phase A Build state editing and Phase B orchestration");
-    assert((await page.locator("#build-status").textContent()) === "Initial / 2", "The first demo page did not initialize at Build Initial / 2.");
+    await waitForBuildControls(page, true, false);
     assert((await page.locator(".build-group[data-build-group]").count()) === 2, "The Build panel did not group the first page into two Builds.");
     assert((await page.locator(".page-thumbnail-builds").count()) === 3, "Build-aware thumbnail badges are missing.");
     const initialBuildState = await page.evaluate(() => {
@@ -1180,14 +1237,14 @@ async function run() {
     });
     assert(initialBuildState.title === "hidden" && initialBuildState.copy === "hidden", "Initial state exposed future Build elements.");
     await page.locator("#next-build").click();
-    await page.waitForFunction(() => document.querySelector("#build-status")?.textContent === "Build 1 / 2");
+    await waitForBuildControls(page, false, false);
     const buildOneState = await page.evaluate(() => {
       const root = document.querySelector("#canvas-host")?.shadowRoot;
       return ["demo-title-1", "demo-copy-1"].map((id) => root?.querySelector(`[data-editor-id="${id}"]`)?.getAttribute("data-editor-build-visibility"));
     });
     assert(JSON.stringify(buildOneState) === JSON.stringify(["shown", "hidden"]), `Build 1 visibility is wrong: ${JSON.stringify(buildOneState)}`);
     await page.locator("#next-build").click();
-    await page.waitForFunction(() => document.querySelector("#build-status")?.textContent === "Build 2 / 2");
+    await waitForBuildControls(page, false, true);
 
     await page.locator('[data-build-element-id="demo-copy-1"]').click();
     await page.locator("#selected-build-target").selectOption("1");
@@ -1230,7 +1287,7 @@ async function run() {
     await page.locator("#previous-build").click();
     await page.locator("#previous-build").click();
     await page.locator("#undo").click();
-    await page.waitForFunction(() => document.querySelector("#build-status")?.textContent === "Build 2 / 2");
+    await waitForBuildControls(page, false, true);
     assert((await shadowText(page, "demo-copy-1"))?.includes("Edit real HTML"), "Undo did not restore Build content and observation context.");
     await page.locator("#redo").click();
     assert(await sourceContains(page, "Build 2 edited copy"), "Redo did not restore the Build-state text edit in source.");
@@ -1311,11 +1368,11 @@ async function run() {
     const exportedHtmlPath = "/tmp/last-mile-studio-smoke-export.html";
     await copyFile(slidesDownloadPath, exportedHtmlPath);
     await page.locator("#file-input").setInputFiles(exportedHtmlPath);
-    await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("page 1/4"));
+    await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("1/4"));
     assert((await page.locator(".page-thumbnail").count()) === 4, "Re-importing exported HTML did not restore all four editable pages.");
     assert(await page.locator("#canvas-host").evaluate((host) => !host.shadowRoot?.querySelector("#lms-stage")), "Re-importing exported HTML exposed the player shell instead of the canonical document.");
     await page.locator("#duplicate-page").click();
-    await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("page 2/5"));
+    await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("2/5"));
     const secondRoundDownloadPromise = page.waitForEvent("download", { timeout: 20_000 });
     await exportDocument(page);
     const secondRoundDownload = await secondRoundDownloadPromise;
@@ -1324,7 +1381,7 @@ async function run() {
     const secondRoundHtml = await readFile(secondRoundPath, "utf8");
     assert(!secondRoundHtml.includes('id="lms-stage"'), "A second export nested the presentation player into canonical source.");
     await page.locator("#file-input").setInputFiles(secondRoundPath);
-    await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("page 1/5"));
+    await page.waitForFunction(() => document.querySelector("#document-status")?.textContent?.includes("1/5"));
     assert((await page.locator(".page-thumbnail").count()) === 5, "The second import did not preserve an edit made after the first round trip.");
 
     progress("checking document-root to group multiselection controls");
@@ -1346,23 +1403,33 @@ async function run() {
     const groupControlBoxCounts = [await page.locator(".moveable-control-box:visible").count()];
     for (let attempt = 0; attempt < 2; attempt += 1) {
       await page.locator('[data-layer-id="div-001"]').click({ modifiers: ["Control"] });
-      await page.waitForFunction(() => document.querySelector("#selection-status")?.textContent?.startsWith("document-root"));
+      await page.waitForFunction(() =>
+        document.querySelector('[data-layer-id="document-root"]')?.classList.contains("is-selected") &&
+        !document.querySelector('[data-layer-id="div-001"]')?.classList.contains("is-selected"),
+      );
       await page.waitForTimeout(100);
       singleControlBoxCounts.push(await page.locator(".moveable-control-box:visible").count());
       await page.locator('[data-layer-id="div-001"]').click({ modifiers: ["Control"] });
-      await page.waitForFunction(() => document.querySelector("#selection-status")?.textContent === "2 elements selected");
+      await page.waitForFunction(() => ["document-root", "div-001"].every((id) =>
+        document.querySelector(`[data-layer-id="${id}"]`)?.classList.contains("is-selected"),
+      ));
       await page.waitForTimeout(100);
       groupControlBoxCounts.push(await page.locator(".moveable-control-box:visible").count());
     }
     const multiselectErrors = errors.slice(multiselectErrorStart);
-    const selectedStatus = await page.locator("#selection-status").textContent();
+    const selectedLayerIds = await page.evaluate(() =>
+      Array.from(document.querySelectorAll("[data-layer-id].is-selected"))
+        .map((row) => row.getAttribute("data-layer-id")),
+    );
     const groupDragAreaBox = await page.locator(".moveable-area:visible").boundingBox();
     assert(
-      multiselectErrors.length === 0 && selectedStatus === "2 elements selected" &&
+      multiselectErrors.length === 0 &&
+        selectedLayerIds.includes("document-root") &&
+        selectedLayerIds.includes("div-001") &&
         groupControlBoxCounts[0] > 0 && groupControlBoxCounts.every((count) => count === groupControlBoxCounts[0]) &&
         singleControlBoxCounts[0] > 0 && singleControlBoxCounts.every((count) => count === singleControlBoxCounts[0]) &&
         Boolean(groupDragAreaBox?.width && groupDragAreaBox.height),
-      `Document-root multiselection did not produce stable group controls (status=${selectedStatus}, single control boxes=${singleControlBoxCounts.join(" -> ")}, group control boxes=${groupControlBoxCounts.join(" -> ")}, drag area=${groupDragAreaBox ? `${groupDragAreaBox.width}x${groupDragAreaBox.height}` : "missing"}, errors=${multiselectErrors.join(" | ") || "none"}).`,
+      `Document-root multiselection did not produce stable group controls (selected=${selectedLayerIds.join(", ")}, single control boxes=${singleControlBoxCounts.join(" -> ")}, group control boxes=${groupControlBoxCounts.join(" -> ")}, drag area=${groupDragAreaBox ? `${groupDragAreaBox.width}x${groupDragAreaBox.height}` : "missing"}, errors=${multiselectErrors.join(" | ") || "none"}).`,
     );
 
     progress("checking actual sibling group drag and undo");

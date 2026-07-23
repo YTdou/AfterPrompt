@@ -10,6 +10,7 @@ export interface RendererCallbacks {
   onSelect: (elementId: string, options: { additive: boolean; parent: boolean }) => void;
   onInlineTextCommit: (elementId: string, text: string) => void;
   onWarning?: (message: string) => void;
+  localize?: (message: string) => string;
 }
 
 export interface RenderOptions {
@@ -324,6 +325,10 @@ export class CanvasRenderer {
   private inlineFinish: ((commit: boolean) => void) | null = null;
   private interactive = true;
 
+  private t(value: string): string {
+    return this.callbacks.localize?.(value) ?? value;
+  }
+
   constructor(readonly host: HTMLElement, callbacks: RendererCallbacks) {
     this.callbacks = callbacks;
     this.shadow = host.shadowRoot ?? host.attachShadow({ mode: "open" });
@@ -334,6 +339,24 @@ export class CanvasRenderer {
 
   setCallbacks(callbacks: RendererCallbacks): void {
     this.callbacks = callbacks;
+  }
+
+  refreshLocale(): void {
+    const editor = this.shadow.querySelector<HTMLElement>(".editor-inline-editor");
+    const id = editor?.dataset.editorId;
+    if (!editor || !id) return;
+    editor.setAttribute("aria-label", `${this.t("编辑文字：")}${id}`);
+    const textarea = editor.querySelector<HTMLTextAreaElement>(".editor-inline-textarea");
+    if (textarea) {
+      textarea.setAttribute("aria-label", `${this.t("文字内容：")}${id}`);
+      textarea.title = this.t("Enter 应用，Shift + Enter 换行，Esc 取消");
+    }
+    const hint = editor.querySelector<HTMLElement>(".editor-inline-actions span");
+    if (hint) hint.textContent = this.t("Enter 应用 · Shift+Enter 换行");
+    const cancel = editor.querySelector<HTMLButtonElement>('button[type="button"]');
+    if (cancel) cancel.textContent = this.t("取消");
+    const apply = editor.querySelector<HTMLButtonElement>('button[type="submit"]');
+    if (apply) apply.textContent = this.t("应用");
   }
 
   render(model: SourceDocument, assets: ProjectAssets, sourcePath: string, activePageId?: string, options: RenderOptions = {}): void {
@@ -534,7 +557,8 @@ export class CanvasRenderer {
     const computed = getComputedStyle(element);
     const editor = document.createElement("form");
     editor.className = "editor-inline-editor";
-    editor.setAttribute("aria-label", `编辑文字：${id}`);
+    editor.dataset.editorId = id;
+    editor.setAttribute("aria-label", `${this.t("编辑文字：")}${id}`);
     const textHeight = Math.max(30, bounds.height);
     const editorWidth = Math.max(160, bounds.width);
     const editorHeight = textHeight + 30;
@@ -548,8 +572,8 @@ export class CanvasRenderer {
     const textarea = document.createElement("textarea");
     textarea.className = "editor-inline-textarea";
     textarea.value = original;
-    textarea.setAttribute("aria-label", `文字内容：${id}`);
-    textarea.title = "Enter 应用，Shift + Enter 换行，Esc 取消";
+    textarea.setAttribute("aria-label", `${this.t("文字内容：")}${id}`);
+    textarea.title = this.t("Enter 应用，Shift + Enter 换行，Esc 取消");
     textarea.spellcheck = false;
     textarea.style.fontFamily = computed.fontFamily;
     textarea.style.fontSize = computed.fontSize;
@@ -563,13 +587,13 @@ export class CanvasRenderer {
     const actions = document.createElement("div");
     actions.className = "editor-inline-actions";
     const hint = document.createElement("span");
-    hint.textContent = "Enter 应用 · Shift+Enter 换行";
+    hint.textContent = this.t("Enter 应用 · Shift+Enter 换行");
     const cancel = document.createElement("button");
     cancel.type = "button";
-    cancel.textContent = "取消";
+    cancel.textContent = this.t("取消");
     const apply = document.createElement("button");
     apply.type = "submit";
-    apply.textContent = "应用";
+    apply.textContent = this.t("应用");
     actions.append(hint, cancel, apply);
     editor.append(textarea, actions);
     element.setAttribute("data-editor-inline-editing", "true");
@@ -583,6 +607,8 @@ export class CanvasRenderer {
       editor.removeEventListener("submit", onSubmit);
       editor.removeEventListener("focusout", onFocusOut);
       cancel.removeEventListener("click", onCancel);
+      cancel.removeEventListener("pointerup", onCancelPointerUp);
+      apply.removeEventListener("pointerup", onApplyPointerUp);
       textarea.removeEventListener("keydown", onKeyDown);
       element.removeAttribute("data-editor-inline-editing");
       const next = textarea.value;
@@ -598,6 +624,18 @@ export class CanvasRenderer {
       mouseEvent.preventDefault();
       mouseEvent.stopPropagation();
       finish(false);
+    };
+    const onCancelPointerUp = (pointerEvent: PointerEvent): void => {
+      if (pointerEvent.button !== 0 || !pointerEvent.isPrimary) return;
+      pointerEvent.preventDefault();
+      pointerEvent.stopPropagation();
+      finish(false);
+    };
+    const onApplyPointerUp = (pointerEvent: PointerEvent): void => {
+      if (pointerEvent.button !== 0 || !pointerEvent.isPrimary) return;
+      pointerEvent.preventDefault();
+      pointerEvent.stopPropagation();
+      finish(true);
     };
     const onFocusOut = (focusEvent: FocusEvent): void => {
       const next = focusEvent.relatedTarget;
@@ -621,6 +659,8 @@ export class CanvasRenderer {
     editor.addEventListener("submit", onSubmit);
     editor.addEventListener("focusout", onFocusOut);
     cancel.addEventListener("click", onCancel);
+    cancel.addEventListener("pointerup", onCancelPointerUp);
+    apply.addEventListener("pointerup", onApplyPointerUp);
     textarea.addEventListener("keydown", onKeyDown);
     requestAnimationFrame(() => {
       textarea.focus();

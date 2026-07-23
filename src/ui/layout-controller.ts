@@ -12,6 +12,7 @@ interface LayoutState {
 
 interface LayoutControllerOptions {
   onLayoutChange?: (canvasGeometryChanged: boolean) => void;
+  localize?: (message: string) => string;
 }
 
 const STORAGE_KEY = "last-mile-studio:layout:v1";
@@ -55,6 +56,12 @@ export class EditorLayoutController {
     this.bindResizers();
     this.bindToggles();
     this.apply();
+  }
+
+  refreshLocale(): void {
+    this.updateToggle("layers", this.state.layersCollapsed, this.state.layersCollapsed ? "right" : "left");
+    this.updateToggle("inspector", this.state.inspectorCollapsed, this.state.inspectorCollapsed ? "left" : "right");
+    this.updateToggle("pages", this.state.pagesCollapsed, this.state.pagesCollapsed ? "down" : "up");
   }
 
   private get<T extends HTMLElement = HTMLElement>(selector: string): T {
@@ -241,7 +248,7 @@ export class EditorLayoutController {
     button.innerHTML = CHEVRON_ICON;
     button.dataset.chevronDirection = direction;
     button.setAttribute("aria-expanded", String(!collapsed));
-    button.title = collapsed ? "展开面板" : "折叠面板";
+    button.title = this.options.localize?.(collapsed ? "展开面板" : "折叠面板") ?? (collapsed ? "展开面板" : "折叠面板");
   }
 
   private updateSeparator(region: LayoutRegion, value: number, min: number, max: number): void {
